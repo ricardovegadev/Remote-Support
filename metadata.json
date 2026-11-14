@@ -1,0 +1,8 @@
+{
+  "name": "Remote Support 365 Plus",
+  "description": "Plataforma SaaS de soporte técnico IT remoto bajo demanda: diagnóstico guiado, generación de tickets y sala de conexión segura.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
