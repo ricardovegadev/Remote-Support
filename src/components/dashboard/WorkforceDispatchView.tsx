@@ -61,10 +61,12 @@ interface WorkforceDispatchViewProps {
 }
 
 const ALL_SPECIALTIES: TechnicianSpecialty[] = [
-  'Windows',
-  'Microsoft 365',
+  'Windows & BSOD',
+  'Microsoft 365 & Outlook',
   'Impresoras',
-  'Redes',
+  'Redes & VPN',
+  'Seguridad & Malware',
+  'Recuperación de Datos',
 ];
 
 const AVAILABILITY_OPTIONS: TechnicianAvailability[] = [
@@ -170,7 +172,7 @@ export function WorkforceDispatchView({
       email: inviteEmail,
       member_type: 'freelancer',
       agreed_ticket_rate_usd: rate,
-      specialties: ['Windows', 'Redes'],
+      specialties: ['Windows & BSOD', 'Redes & VPN'],
     });
     setInviteName('');
     setInviteEmail('');
@@ -180,13 +182,13 @@ export function WorkforceDispatchView({
   const getAvailabilityPillClass = (status: TechnicianAvailability) => {
     switch (status) {
       case 'available':
-        return 'bg-[#D1FAE5] text-[#059669]';
+        return 'bg-[#D1FAE5] text-emerald-800';
       case 'busy':
-        return 'bg-[#FEF3C7] text-[#D97706]';
+        return 'bg-[#FEF3C7] text-amber-800';
       case 'paused':
-        return 'bg-[#E0F2FE] text-[#0284C7]';
+        return 'bg-[#E0F2FE] text-sky-800';
       case 'offline':
-        return 'bg-slate-100 text-[#64748B]';
+        return 'bg-slate-100 text-[#475569]';
     }
   };
 
@@ -272,7 +274,7 @@ export function WorkforceDispatchView({
                       className={`px-3.5 py-1.5 text-xs font-semibold rounded-full border transition-colors ${
                         active
                           ? status === 'available'
-                            ? 'bg-[#D1FAE5] text-[#059669] border-[#6EE7B7]'
+                            ? 'bg-[#D1FAE5] text-emerald-800 border-[#6EE7B7]'
                             : 'bg-[#2563EB] text-white border-[#2563EB]'
                           : 'bg-white text-[#475569] border-[#E5E9F2] hover:bg-[#F8FAFC]'
                       }`}
@@ -329,7 +331,7 @@ export function WorkforceDispatchView({
                 bloquea el ticket sin colisiones entre técnicos.
               </p>
             </div>
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold bg-[#D1FAE5] text-[#059669] self-start sm:self-auto shrink-0">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold bg-[#D1FAE5] text-emerald-800 self-start sm:self-auto shrink-0">
               <Lock className="w-3.5 h-3.5" aria-hidden="true" />
               <span>Bloqueo transaccional</span>
             </span>

@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { Menu, ShieldCheck, X } from 'lucide-react';
-import type { AppView } from '../types/support';
+import { Menu, ShieldCheck, UserCircle2, X } from 'lucide-react';
+import type { AppView, UserAccountProfile } from '../types/support';
 
 interface HeaderProps {
   activeView: AppView;
+  currentUser: UserAccountProfile | null;
   onNavigateSection: (sectionId: string) => void;
   onOpenTechPortal: () => void;
+  onOpenAuthModal: () => void;
   onReturnHome: () => void;
 }
 
@@ -18,8 +20,10 @@ const NAV_ITEMS = [
 
 export function Header({
   activeView,
+  currentUser,
   onNavigateSection,
   onOpenTechPortal,
+  onOpenAuthModal,
   onReturnHome,
 }: HeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -29,9 +33,13 @@ export function Header({
     onNavigateSection(sectionId);
   };
 
+  const userShortLabel = currentUser
+    ? String(currentUser.full_name ?? '').trim().split(/\s+/)[0] || 'Mi Cuenta'
+    : 'Acceder';
+
   return (
-    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-sm border-b border-slate-200">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-8">
+    <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-slate-200/80 shadow-[0_1px_12px_rgba(11,21,40,0.04)]">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-6">
         {/* Zone 1: Single-line Brand Wordmark */}
         <a
           href="#inicio"
@@ -40,21 +48,21 @@ export function Header({
             setMobileMenuOpen(false);
             onReturnHome();
           }}
-          className="inline-flex items-center gap-2.5 text-lg font-bold tracking-tight text-[#0B192C] whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] rounded-md py-1"
+          className="inline-flex items-center gap-2.5 text-lg font-bold tracking-tight text-[#0B1528] whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] rounded-md py-1 group"
         >
           <span
             aria-hidden="true"
-            className="w-8 h-8 rounded-lg bg-[#0B192C] text-[#10B981] flex items-center justify-center shrink-0"
+            className="w-8 h-8 rounded-lg bg-[#0B1528] text-[#10B981] flex items-center justify-center shrink-0 shadow-sm transition-transform duration-200 ease-out-expo group-hover:scale-105"
           >
             <ShieldCheck className="w-4 h-4" strokeWidth={2.2} />
           </span>
           <span>Remote Support 365</span>
         </a>
 
-        {/* Zone 2: Clean single-line navigation links */}
+        {/* Zone 2: Clean single-line navigation links with animated underline */}
         <nav
           aria-label="Navegación principal"
-          className="hidden md:flex items-center gap-7 text-sm font-medium text-slate-600"
+          className="hidden lg:flex items-center gap-5 xl:gap-7 text-sm font-medium text-slate-700"
         >
           {NAV_ITEMS.map((item) => (
             <a
@@ -64,25 +72,38 @@ export function Header({
                 e.preventDefault();
                 handleNavClick(item.id);
               }}
-              className="hover:text-[#0B192C] underline-offset-4 hover:underline transition-colors duration-150 whitespace-nowrap shrink-0 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] rounded"
+              className="relative py-1 whitespace-nowrap shrink-0 text-slate-700 hover:text-[#0B1528] transition-colors duration-200 ease-out-expo after:content-[''] after:absolute after:left-0 after:bottom-0 after:h-[2px] after:w-full after:origin-left after:scale-x-0 hover:after:scale-x-100 after:bg-[#2563EB] after:rounded-full after:transition-transform after:duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] rounded"
             >
               {item.label}
             </a>
           ))}
         </nav>
 
-        {/* Zone 3: Single primary header action + mobile menu button */}
-        <div className="flex items-center gap-3 shrink-0">
+        {/* Zone 3: Account access + Tech Portal CTA + Mobile Menu Button */}
+        <div className="flex items-center gap-2.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              setMobileMenuOpen(false);
+              onOpenAuthModal();
+            }}
+            data-testid="header-auth-button"
+            className="hidden sm:inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#0B1528] bg-white hover:bg-slate-50 border border-slate-300/90 hover:border-slate-400 rounded-lg shadow-xs active:scale-[0.98] transition-all duration-150 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+          >
+            <UserCircle2 className="w-3.5 h-3.5 text-[#2563EB]" aria-hidden="true" />
+            <span>{userShortLabel}</span>
+          </button>
+
           <button
             type="button"
             onClick={() => {
               setMobileMenuOpen(false);
               onOpenTechPortal();
             }}
-            className={`hidden sm:inline-flex items-center justify-center px-4 py-2 text-xs font-semibold rounded-lg transition-colors duration-150 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-2 ${
+            className={`hidden sm:inline-flex items-center justify-center px-4 py-2 text-xs font-semibold rounded-lg shadow-xs active:scale-[0.98] transition-all duration-150 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-2 ${
               activeView === 'tech_portal'
-                ? 'bg-[#10B981] text-white'
-                : 'bg-[#0B192C] text-white hover:bg-[#0F172A]'
+                ? 'bg-emerald-700 text-white hover:bg-emerald-800'
+                : 'bg-[#0B1528] text-white hover:bg-[#132544]'
             }`}
           >
             Centro de Operaciones
@@ -93,16 +114,16 @@ export function Header({
             aria-label={mobileMenuOpen ? 'Cerrar menú de navegación' : 'Abrir menú de navegación'}
             aria-expanded={mobileMenuOpen}
             onClick={() => setMobileMenuOpen((prev) => !prev)}
-            className="md:hidden inline-flex items-center justify-center w-11 h-11 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+            className="lg:hidden inline-flex items-center justify-center w-11 h-11 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
           >
             {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
         </div>
       </div>
 
-      {/* Mobile Navigation Drawer */}
+      {/* Mobile & Tablet Navigation Drawer */}
       {mobileMenuOpen && (
-        <div className="md:hidden border-t border-slate-200 bg-white px-4 py-4 space-y-3">
+        <div className="lg:hidden border-t border-slate-200 bg-white/95 backdrop-blur-md px-4 py-4 space-y-3 animate-fade-up">
           <nav aria-label="Navegación móvil" className="flex flex-col gap-1">
             {NAV_ITEMS.map((item) => (
               <a
@@ -112,20 +133,30 @@ export function Header({
                   e.preventDefault();
                   handleNavClick(item.id);
                 }}
-                className="px-3 py-2.5 text-sm font-medium text-slate-700 hover:text-[#0B192C] hover:bg-slate-50 rounded-lg transition-colors"
+                className="px-3 py-2.5 text-sm font-medium text-slate-700 hover:text-[#0B1528] hover:bg-slate-50 rounded-lg transition-colors"
               >
                 {item.label}
               </a>
             ))}
           </nav>
-          <div className="pt-2 border-t border-slate-100">
+          <div className="pt-2 border-t border-slate-100 space-y-2">
+            <button
+              type="button"
+              onClick={() => {
+                setMobileMenuOpen(false);
+                onOpenAuthModal();
+              }}
+              className="w-full px-4 py-2.5 text-sm font-semibold text-[#0B1528] bg-white hover:bg-slate-50 border border-slate-300 rounded-lg transition-colors"
+            >
+              {currentUser ? `Cuenta (${userShortLabel})` : 'Acceder / Registrarse (+18)'}
+            </button>
             <button
               type="button"
               onClick={() => {
                 setMobileMenuOpen(false);
                 onOpenTechPortal();
               }}
-              className="w-full px-4 py-2.5 text-sm font-semibold text-white bg-[#0B192C] hover:bg-[#0F172A] rounded-lg transition-colors"
+              className="w-full px-4 py-2.5 text-sm font-semibold text-white bg-[#0B1528] hover:bg-[#132544] rounded-lg transition-colors"
             >
               Centro de Operaciones
             </button>

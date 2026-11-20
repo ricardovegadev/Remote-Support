@@ -8,6 +8,7 @@ import type {
 import {
   buildTechnicalResolutionSummary,
   deriveInitialDiagnosisSummary,
+  getSuggestedTierForCategory,
 } from '../utils/ticketLogic';
 
 export async function runAiReceptionistTriage(input: {
@@ -34,12 +35,18 @@ export async function runAiReceptionistTriage(input: {
         '¿Realizaste algún cambio o actualización reciente en el equipo?',
         '¿Tienes permisos de administrador local en la sesión actual?',
       ],
+      selfServiceSteps: [
+        'Reinicia el equipo para descartar un bloqueo temporal de memoria o servicios.',
+        'Verifica si el fallo se repite con otras aplicaciones o solo en un programa puntual.',
+      ],
+      needsRemoteSpecialist: true,
       preDiagnosis: deriveInitialDiagnosisSummary(
         input.category,
         input.osType,
         input.description
       ),
-      suggestedTier: 'Express $25' as ServiceTier,
+      suggestedCategory: input.category,
+      suggestedTier: getSuggestedTierForCategory(input.category) as ServiceTier,
       estimatedMinutes: 25,
       confidenceNote:
         'Pre-diagnóstico preparado automáticamente para el técnico asignado.',

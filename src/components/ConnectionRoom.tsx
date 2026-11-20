@@ -1,19 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
   Building2,
   Check,
   CheckCircle2,
-  Copy,
   CreditCard,
   Download,
   ExternalLink,
   HardDriveDownload,
   KeyRound,
+  Loader2,
   Lock,
   MonitorCheck,
-  Server,
+  RotateCcw,
+  Share2,
   ShieldCheck,
+  Trash2,
   UserCheck,
 } from 'lucide-react';
 import type {
@@ -24,14 +26,23 @@ import type {
 import {
   formatRustDeskId,
   getAgentDownloadMeta,
+  getDiscountPercent,
   getPaymentStatusLabel,
   getRustDeskInstallerUrl,
   getServiceTierPriceUsd,
+  getServiceTierRegularPriceUsd,
   getTicketStatusLabel,
   normalizeRustDeskId,
   validateRustDeskId,
 } from '../utils/ticketLogic';
 import { TicketChatPanel } from './TicketChatPanel';
+import type { LegalDocTab } from './LegalDocsModal';
+import {
+  CardNetworkBadges,
+  GooglePayLogo,
+  PayPalLogo,
+  StripeLogo,
+} from './PaymentBrandLogos';
 
 interface ConnectionRoomProps {
   ticket: SupportTicket;
@@ -48,12 +59,25 @@ interface ConnectionRoomProps {
   onConfirmPayment: (ticketId: string) => Promise<void>;
   onSendClientMessage: (ticketId: string, messageText: string) => Promise<void>;
   onResetToNewTicket: () => void;
+  onOpenLegalDoc?: (tab: LegalDocTab) => void;
+  onExportClientData?: (ticketId: string) => void;
+  onAnonymizeClientData?: (ticketId: string) => Promise<void>;
+  onCancelTicketSubscription?: (ticketId: string) => Promise<void>;
+}
+
+function isEmbeddedInIframe(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
 }
 
 export function ConnectionRoom({
   ticket,
   messages,
-  relayDomain = 'relay.remotesupport365.com',
+  relayDomain: _relayDomain = 'relay.remotesupport365.com',
   persistenceError,
   onDismissError,
   onMarkAgentDownloaded,
@@ -61,6 +85,10 @@ export function ConnectionRoom({
   onConfirmPayment,
   onSendClientMessage,
   onResetToNewTicket,
+  onOpenLegalDoc,
+  onExportClientData,
+  onAnonymizeClientData,
+  onCancelTicketSubscription,
 }: ConnectionRoomProps) {
   const [rustdeskInput, setRustdeskInput] = useState(
     ticket.rustdesk_id ? formatRustDeskId(ticket.rustdesk_id) : ''
@@ -70,7 +98,6 @@ export function ConnectionRoom({
   );
   const [idError, setIdError] = useState<string | null>(null);
   const [idSavedNotice, setIdSavedNotice] = useState(false);
-  const [copiedRelay, setCopiedRelay] = useState(false);
 
   useEffect(() => {
     if (ticket.rustdesk_id) {
@@ -96,12 +123,401 @@ export function ConnectionRoom({
     installerEnv
   );
   const tierPrice = getServiceTierPriceUsd(ticket.service_tier);
+  const tierRegularPrice = getServiceTierRegularPriceUsd(ticket.service_tier);
+  const tierSavingsUsd = Math.max(0, tierRegularPrice - tierPrice);
+  const tierDiscountPct = getDiscountPercent(tierPrice, tierRegularPrice);
 
-  const handleCopyRelay = () => {
-    if (typeof navigator !== 'undefined' && navigator.clipboard) {
-      void navigator.clipboard.writeText(relayDomain);
-      setCopiedRelay(true);
-      window.setTimeout(() => setCopiedRelay(false), 1800);
+  const [addonPerformance, setAddonPerformance] = useState(false);
+  const [addonBackup, setAddonBackup] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [paymentSuccessNotice, setPaymentSuccessNotice] = useState<string | null>(null);
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [processingMethod, setProcessingMethod] = useState<
+    'google_pay' | 'paypal' | 'stripe' | 'card' | null
+  >(null);
+  const [pendingExternalCheckout, setPendingExternalCheckout] = useState<{
+    gateway: 'stripe' | 'paypal';
+    sessionId?: string;
+    orderId?: string;
+    url: string;
+    methodLabel: string;
+  } | null>(null);
+  const [isVerifyingExternal, setIsVerifyingExternal] = useState(false);
+  const processedReturnKeyRef = useRef<string | null>(null);
+  const [referralCopied, setReferralCopied] = useState(false);
+  const [confirmAnonymizeOpen, setConfirmAnonymizeOpen] = useState(false);
+  const [privacyActionNotice, setPrivacyActionNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const paymentParam = params.get('payment');
+    const gatewayParam = params.get('gateway');
+    const sessionId = params.get('session_id');
+    const paypalToken = params.get('token') ?? params.get('orderId');
+
+    if (!paymentParam) return;
+
+    const cleanUrl = () => {
+      window.history.replaceState({}, '', window.location.pathname);
+    };
+
+    if (ticket.payment_status === 'paid') {
+      cleanUrl();
+      return;
+    }
+
+    const returnKey = `${ticket.id}:${paymentParam}:${gatewayParam ?? ''}:${sessionId ?? paypalToken ?? ''}`;
+    if (processedReturnKeyRef.current === returnKey) return;
+    processedReturnKeyRef.current = returnKey;
+
+    if (paymentParam === 'canceled') {
+      setPaymentError(
+        'El pago fue cancelado antes de completarse. Puedes intentarlo nuevamente cuando estés listo.'
+      );
+      cleanUrl();
+      return;
+    }
+
+    if (paymentParam === 'success') {
+      if ((gatewayParam === 'stripe' || !gatewayParam) && sessionId) {
+        setIsProcessingPayment(true);
+        setProcessingMethod('stripe');
+        setPaymentError(null);
+        void fetch(
+          `/api/payments/stripe/verify-session?session_id=${encodeURIComponent(sessionId)}`
+        )
+          .then(async (res) => {
+            const data = (await res.json()) as {
+              verified?: boolean;
+              error?: string;
+            };
+            if (!res.ok || !data.verified) {
+              setPaymentError(
+                data.error ??
+                  'Stripe no confirmó el pago todavía. Inténtalo nuevamente.'
+              );
+              return;
+            }
+            await onConfirmPayment(ticket.id);
+            setPendingExternalCheckout(null);
+            setPaymentSuccessNotice(
+              'Pago confirmado y verificado con Stripe. Tu Sala de Conexión ya está habilitada.'
+            );
+          })
+          .catch(() => {
+            setPaymentError(
+              'No se pudo verificar la sesión de pago con Stripe.'
+            );
+          })
+          .finally(() => {
+            cleanUrl();
+            setIsProcessingPayment(false);
+            setProcessingMethod(null);
+          });
+      } else if (gatewayParam === 'paypal' && paypalToken) {
+        setIsProcessingPayment(true);
+        setProcessingMethod('paypal');
+        setPaymentError(null);
+        void fetch('/api/payments/paypal/capture-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderId: paypalToken }),
+        })
+          .then(async (res) => {
+            const data = (await res.json()) as {
+              verified?: boolean;
+              status?: string;
+              error?: string;
+            };
+            if (!res.ok || !data.verified || data.status !== 'COMPLETED') {
+              setPaymentError(
+                data.error ??
+                  'PayPal no completó la captura del pago. Inténtalo nuevamente.'
+              );
+              return;
+            }
+            await onConfirmPayment(ticket.id);
+            setPendingExternalCheckout(null);
+            setPaymentSuccessNotice(
+              'Pago confirmado y capturado con PayPal. Tu Sala de Conexión ya está habilitada.'
+            );
+          })
+          .catch(() => {
+            setPaymentError('No se pudo capturar la orden de PayPal.');
+          })
+          .finally(() => {
+            cleanUrl();
+            setIsProcessingPayment(false);
+            setProcessingMethod(null);
+          });
+      } else {
+        cleanUrl();
+      }
+    }
+  }, [ticket.id, ticket.payment_status, onConfirmPayment]);
+
+  const handleShareReferral = async () => {
+    const shareUrl =
+      typeof window !== 'undefined'
+        ? `${window.location.origin}/portal?ref=${encodeURIComponent(ticket.ticket_code)}`
+        : `https://remotesupport365.com/portal?ref=${encodeURIComponent(ticket.ticket_code)}`;
+
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try {
+        await navigator.share({
+          title: 'Remote Support 365 — $5 USD de descuento adicional',
+          text: 'Repara tu equipo en minutos por acceso remoto seguro desde $15 USD (antes $25).',
+          url: shareUrl,
+        });
+        setReferralCopied(true);
+        window.setTimeout(() => setReferralCopied(false), 3000);
+        return;
+      } catch {
+        // Fallback to clipboard copy
+      }
+    }
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(shareUrl);
+    }
+    setReferralCopied(true);
+    window.setTimeout(() => setReferralCopied(false), 3000);
+  };
+
+  const handleVerifyPendingCheckout = async () => {
+    if (!pendingExternalCheckout || isVerifyingExternal) return;
+    setIsVerifyingExternal(true);
+    setPaymentError(null);
+    try {
+      if (pendingExternalCheckout.gateway === 'stripe') {
+        if (!pendingExternalCheckout.sessionId) {
+          setPaymentError(
+            'No hay identificador de sesión de Stripe para verificar. Inicia el pago nuevamente.'
+          );
+          return;
+        }
+        const res = await fetch(
+          `/api/payments/stripe/verify-session?session_id=${encodeURIComponent(
+            pendingExternalCheckout.sessionId
+          )}`
+        );
+        const data = (await res.json()) as {
+          verified?: boolean;
+          payment_status?: string;
+          error?: string;
+        };
+        if (!res.ok || !data.verified) {
+          setPaymentError(
+            data.error ??
+              'El pago aún figura pendiente en Stripe. Complétalo en la pestaña abierta y vuelve a pulsar "Ya completé el pago · Verificar ahora".'
+          );
+          return;
+        }
+        setPendingExternalCheckout(null);
+        await onConfirmPayment(ticket.id);
+        setPaymentSuccessNotice(
+          `Pago verificado con ${pendingExternalCheckout.methodLabel}. Tu Sala de Conexión ya está habilitada.`
+        );
+      } else if (pendingExternalCheckout.gateway === 'paypal') {
+        if (!pendingExternalCheckout.orderId) {
+          setPaymentError(
+            'No hay identificador de orden de PayPal para verificar.'
+          );
+          return;
+        }
+        const res = await fetch('/api/payments/paypal/capture-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderId: pendingExternalCheckout.orderId }),
+        });
+        const data = (await res.json()) as {
+          verified?: boolean;
+          status?: string;
+          error?: string;
+        };
+        if (!res.ok || !data.verified || data.status !== 'COMPLETED') {
+          setPaymentError(
+            data.error ??
+              'PayPal aún no reporta la orden aprobada. Completa la aprobación en la pestaña abierta e inténtalo de nuevo.'
+          );
+          return;
+        }
+        setPendingExternalCheckout(null);
+        await onConfirmPayment(ticket.id);
+        setPaymentSuccessNotice(
+          'Pago verificado con PayPal. Tu Sala de Conexión ya está habilitada.'
+        );
+      }
+    } catch {
+      setPaymentError(
+        'Error de red al verificar el pago externo. Inténtalo nuevamente.'
+      );
+    } finally {
+      setIsVerifyingExternal(false);
+    }
+  };
+
+  const handleExecutePayment = async (
+    method: 'google_pay' | 'paypal' | 'stripe',
+    isDirectCard = false
+  ) => {
+    setIsProcessingPayment(true);
+    setProcessingMethod(isDirectCard ? 'card' : method);
+    setPaymentError(null);
+    try {
+      const totalAmount =
+        tierPrice + (addonPerformance ? 12 : 0) + (addonBackup ? 9 : 0);
+
+      if (method === 'stripe' || method === 'google_pay') {
+        const res = await fetch('/api/payments/stripe/create-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amountUsd: totalAmount,
+            ticketCode: ticket.ticket_code,
+            customerEmail: ticket.client_email,
+            serviceLabel: `${ticket.service_tier} (${ticket.category})`,
+          }),
+        });
+        const data = (await res.json()) as {
+          success?: boolean;
+          mode?: 'sandbox' | 'live';
+          verified?: boolean;
+          sessionId?: string;
+          url?: string | null;
+          error?: string;
+        };
+
+        if (!res.ok || !data.success) {
+          setPaymentError(
+            data.error ?? 'No se pudo iniciar la sesión segura de pago.'
+          );
+          return;
+        }
+
+        if (data.mode === 'live') {
+          if (!data.url) {
+            setPaymentError(
+              'Stripe no devolvió una URL de Checkout válida. Inténtalo nuevamente.'
+            );
+            return;
+          }
+
+          if (isEmbeddedInIframe()) {
+            const methodLabel =
+              method === 'google_pay'
+                ? 'Google Pay'
+                : isDirectCard
+                ? 'Tarjeta (Stripe Checkout)'
+                : 'Stripe Checkout';
+            window.open(data.url, '_blank', 'noopener,noreferrer');
+            setPendingExternalCheckout({
+              gateway: 'stripe',
+              sessionId: data.sessionId,
+              url: data.url,
+              methodLabel,
+            });
+            return;
+          }
+
+          window.location.assign(data.url);
+          return;
+        }
+
+        if (data.verified === true) {
+          await onConfirmPayment(ticket.id);
+          setPaymentSuccessNotice(
+            `Pago confirmado en modo sandbox (${
+              method === 'google_pay' ? 'Google Pay' : 'Stripe'
+            }). Tu Sala de Conexión ya está habilitada.`
+          );
+          return;
+        }
+
+        setPaymentError('El pago no pudo ser verificado.');
+      } else if (method === 'paypal') {
+        const orderRes = await fetch('/api/payments/paypal/create-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amountUsd: totalAmount,
+            ticketCode: ticket.ticket_code,
+            serviceLabel: `${ticket.service_tier} (${ticket.category})`,
+          }),
+        });
+        const orderData = (await orderRes.json()) as {
+          success?: boolean;
+          mode?: 'sandbox' | 'live';
+          orderId?: string;
+          approvalUrl?: string | null;
+          error?: string;
+        };
+
+        if (!orderRes.ok || !orderData.success || !orderData.orderId) {
+          setPaymentError(
+            orderData.error ?? 'No se pudo iniciar la orden de PayPal.'
+          );
+          return;
+        }
+
+        if (orderData.mode === 'live') {
+          if (!orderData.approvalUrl) {
+            setPaymentError(
+              'PayPal no devolvió enlace de aprobación. Inténtalo nuevamente.'
+            );
+            return;
+          }
+
+          if (isEmbeddedInIframe()) {
+            window.open(orderData.approvalUrl, '_blank', 'noopener,noreferrer');
+            setPendingExternalCheckout({
+              gateway: 'paypal',
+              orderId: orderData.orderId,
+              url: orderData.approvalUrl,
+              methodLabel: 'PayPal',
+            });
+            return;
+          }
+
+          window.location.assign(orderData.approvalUrl);
+          return;
+        }
+
+        const captureRes = await fetch('/api/payments/paypal/capture-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderId: orderData.orderId }),
+        });
+        const captureData = (await captureRes.json()) as {
+          success?: boolean;
+          verified?: boolean;
+          status?: string;
+          error?: string;
+        };
+
+        if (
+          !captureRes.ok ||
+          !captureData.success ||
+          !captureData.verified ||
+          captureData.status !== 'COMPLETED'
+        ) {
+          setPaymentError(
+            captureData.error ??
+              'No se pudo confirmar la captura del pago en PayPal.'
+          );
+          return;
+        }
+
+        await onConfirmPayment(ticket.id);
+        setPaymentSuccessNotice(
+          'Pago confirmado en modo sandbox (PayPal). Tu Sala de Conexión ya está habilitada.'
+        );
+      }
+    } catch {
+      setPaymentError('Error de red al procesar el pago. Inténtalo nuevamente.');
+    } finally {
+      setIsProcessingPayment(false);
+      setProcessingMethod(null);
     }
   };
 
@@ -223,22 +639,19 @@ export function ConnectionRoom({
 
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 shrink-0">
               <div className="bg-[#0F172A] border border-slate-700 rounded-lg px-5 py-3">
-                <p className="text-xs text-slate-400">Tarifa del servicio</p>
-                <p className="font-mono tabular-nums text-xl font-bold text-[#10B981] mt-0.5">
-                  ${tierPrice} USD
+                <p className="text-xs text-slate-400">
+                  Tarifa del servicio{' '}
+                  <span className="font-mono text-[#10B981]">(-{tierDiscountPct}%)</span>
                 </p>
+                <div className="flex items-baseline gap-2 mt-0.5">
+                  <p className="font-mono tabular-nums text-xl font-bold text-[#10B981]">
+                    ${tierPrice} USD
+                  </p>
+                  <span className="font-mono tabular-nums text-xs text-slate-400 line-through">
+                    ${tierRegularPrice}
+                  </span>
+                </div>
               </div>
-
-              {ticket.payment_status === 'pending' && ticket.status !== 'resolved' && (
-                <button
-                  type="button"
-                  onClick={() => onConfirmPayment(ticket.id)}
-                  className="inline-flex items-center justify-center gap-2 px-4 py-3 text-xs font-semibold text-white bg-[#2563EB] hover:bg-blue-500 rounded-lg transition-colors whitespace-nowrap"
-                >
-                  <CreditCard className="w-4 h-4" aria-hidden="true" />
-                  <span>Confirmar Pago (${tierPrice} USD)</span>
-                </button>
-              )}
             </div>
           </div>
 
@@ -283,15 +696,366 @@ export function ConnectionRoom({
           </div>
         </div>
 
+        {/* Professional Multi-Method Checkout Block when Payment is Pending */}
+        {ticket.payment_status === 'pending' && ticket.status !== 'resolved' && (
+          <div
+            data-testid="professional-checkout-module"
+            className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 shadow-sm space-y-6"
+          >
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-slate-200">
+              <div>
+                <p className="text-xs font-semibold text-[#2563EB]">
+                  Pasarela Segura · Confirmación de Pago
+                </p>
+                <h2 className="text-xl font-bold text-[#0B192C] mt-1">
+                  Completa tu pago para habilitar la conexión en vivo
+                </h2>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Ticket <span className="font-mono font-semibold">{ticket.ticket_code}</span> · {ticket.service_tier}
+                </p>
+              </div>
+              <div className="text-left md:text-right bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 shrink-0">
+                <p className="text-[11px] text-slate-600 font-medium">Total a pagar</p>
+                <p className="font-mono tabular-nums text-2xl font-bold text-emerald-700">
+                  USD ${(tierPrice + (addonPerformance ? 12 : 0) + (addonBackup ? 9 : 0)).toFixed(2)}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+              {/* Left Column: Summary & Upsell Addons */}
+              <div className="lg:col-span-6 space-y-5">
+                <div className="bg-[#F8FAFC] border border-slate-200 rounded-xl p-5 space-y-4">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-[#0B192C]">
+                    Resumen del Servicio
+                  </h3>
+                  <div className="space-y-2 text-xs text-slate-700">
+                    <div className="flex justify-between items-center py-1.5 border-b border-slate-200/70">
+                      <span>{ticket.service_tier} ({ticket.category})</span>
+                      <div className="flex items-baseline gap-2 font-mono tabular-nums">
+                        <span className="text-[11px] text-slate-400 line-through">
+                          ${tierRegularPrice}.00
+                        </span>
+                        <span className="font-semibold text-[#0B192C]">
+                          ${tierPrice}.00 USD
+                        </span>
+                      </div>
+                    </div>
+                    {tierSavingsUsd > 0 && (
+                      <div className="flex justify-between items-center py-1 text-emerald-700">
+                        <span>Descuento de lanzamiento (-{tierDiscountPct}%)</span>
+                        <span className="font-mono tabular-nums font-semibold">
+                          -${tierSavingsUsd}.00 USD
+                        </span>
+                      </div>
+                    )}
+                    {tierPrice === 15 && (
+                      <div className="flex items-start gap-2.5 pt-2">
+                        <input
+                          type="checkbox"
+                          id="addon-performance"
+                          checked={addonPerformance}
+                          onChange={(e) => setAddonPerformance(e.target.checked)}
+                          className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB]"
+                        />
+                        <label htmlFor="addon-performance" className="cursor-pointer text-xs text-slate-700 leading-snug">
+                          <strong>+ Optimización profunda de rendimiento</strong> (+ $12.00 USD)
+                          <span className="block text-[11px] text-slate-500">Eliminación de archivos basura, optimización de inicio y servicios.</span>
+                        </label>
+                      </div>
+                    )}
+                    <div className="flex items-start gap-2.5 pt-2">
+                      <input
+                        type="checkbox"
+                        id="addon-backup"
+                        checked={addonBackup}
+                        onChange={(e) => setAddonBackup(e.target.checked)}
+                        className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB]"
+                      />
+                      <label htmlFor="addon-backup" className="cursor-pointer text-xs text-slate-700 leading-snug">
+                        <strong>+ Respaldo preventivo en la nube</strong> (+ $9.00 USD)
+                        <span className="block text-[11px] text-slate-500">Copia cifrada de documentos críticos antes de la intervención.</span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-950 space-y-1.5">
+                  <p className="font-semibold">Garantía de Satisfacción 100%</p>
+                  <p className="text-emerald-900 leading-relaxed">
+                    Si el técnico no logra resolver tu incidencia en la sesión remota, se emite un reembolso total inmediato a tu método de pago.
+                  </p>
+                </div>
+
+                {ticket.billing_mode === 'pyme_monthly' && (
+                  <div className="p-4 rounded-xl bg-blue-50 border border-blue-200 text-xs text-blue-950 space-y-1">
+                    <p className="font-semibold">
+                      Aviso de Renovación Automática Mensual
+                    </p>
+                    <p className="leading-relaxed">
+                      Al confirmar este plan Pyme autorizas la renovación mensual automática.
+                      Puedes cancelarla en <strong>1 clic sin penalizaciones</strong> desde esta
+                      misma sala antes del siguiente ciclo.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+                {/* Right Column: Payment Methods or External Checkout Waiting Panel */}
+              <div className="lg:col-span-6 space-y-5">
+                {pendingExternalCheckout ? (
+                  <div
+                    data-testid="external-checkout-waiting-panel"
+                    className="rounded-xl border border-blue-200 bg-blue-50/70 p-5 space-y-4"
+                  >
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold text-[#1D4ED8]">
+                        Pasarela Segura Abierta en Nueva Pestaña ({pendingExternalCheckout.methodLabel})
+                      </p>
+                      <h3 className="text-base font-bold text-[#0B192C]">
+                        Completa el pago en la ventana externa y confirma aquí
+                      </h3>
+                      <p className="text-xs text-slate-700 leading-relaxed">
+                        Abrimos la pasarela cifrada fuera del marco de vista previa para
+                        evitar bloqueos del navegador. Al terminar el pago, pulsa el
+                        botón de verificación.
+                      </p>
+                    </div>
+
+                    {paymentError && (
+                      <p role="alert" className="text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                        {paymentError}
+                      </p>
+                    )}
+
+                    <div className="space-y-2.5">
+                      <button
+                        type="button"
+                        disabled={isVerifyingExternal}
+                        onClick={() => void handleVerifyPendingCheckout()}
+                        className="w-full h-11 inline-flex items-center justify-center gap-2 px-4 text-xs sm:text-sm font-semibold text-white bg-emerald-700 hover:bg-emerald-800 disabled:bg-emerald-700/70 rounded-lg transition-colors shadow-xs cursor-pointer"
+                      >
+                        {isVerifyingExternal ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                            <span>Verificando pago...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
+                            <span>Ya completé el pago · Verificar ahora</span>
+                          </>
+                        )}
+                      </button>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                        <a
+                          href={pendingExternalCheckout.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#2563EB] hover:underline"
+                        >
+                          <span>Reabrir pasarela en nueva pestaña</span>
+                          <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                        </a>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPendingExternalCheckout(null);
+                            setPaymentError(null);
+                          }}
+                          className="text-xs font-medium text-slate-600 hover:text-[#0B192C] underline"
+                        >
+                          Elegir otro método
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-2.5">
+                      <p className="text-xs font-semibold text-[#0B192C]">
+                        Pago Rápido Express
+                      </p>
+
+                      <div className="flex flex-col gap-2.5">
+                        {/* 1. Google Pay Button */}
+                        <button
+                          type="button"
+                          disabled={isProcessingPayment}
+                          onClick={() => void handleExecutePayment('google_pay')}
+                          aria-label="Pagar con Google Pay"
+                          className="w-full h-12 bg-black hover:bg-neutral-900 text-white font-medium rounded-lg flex items-center justify-center gap-2 transition-all shadow-xs disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+                        >
+                          {processingMethod === 'google_pay' ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                              <span className="text-xs font-semibold">Conectando con Google Pay...</span>
+                            </>
+                          ) : (
+                            <GooglePayLogo variant="dark" />
+                          )}
+                        </button>
+
+                        {/* 2. PayPal Button */}
+                        <button
+                          type="button"
+                          disabled={isProcessingPayment}
+                          onClick={() => void handleExecutePayment('paypal')}
+                          aria-label="Pagar con PayPal"
+                          className="w-full h-12 bg-[#FFC439] hover:bg-[#F5BA2E] text-[#003087] font-bold rounded-lg flex items-center justify-center gap-2 transition-all shadow-xs disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+                        >
+                          {processingMethod === 'paypal' ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin text-[#003087]" aria-hidden="true" />
+                              <span className="text-xs font-bold">Abriendo PayPal...</span>
+                            </>
+                          ) : (
+                            <PayPalLogo />
+                          )}
+                        </button>
+
+                        {/* 3. Stripe Express Button */}
+                        <button
+                          type="button"
+                          disabled={isProcessingPayment}
+                          onClick={() => void handleExecutePayment('stripe')}
+                          aria-label="Pagar con Stripe"
+                          className="w-full h-12 bg-[#635BFF] hover:bg-[#5249F5] text-white font-semibold rounded-lg flex items-center justify-center gap-2 transition-all shadow-xs disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+                        >
+                          {processingMethod === 'stripe' ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                              <span className="text-xs font-semibold">Conectando con Stripe...</span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="text-xs font-semibold tracking-tight">Pagar con</span>
+                              <StripeLogo variant="dark" />
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Subtle Divider */}
+                    <div className="relative flex py-1 items-center">
+                      <div className="flex-grow border-t border-slate-200" />
+                      <span className="flex-shrink mx-3.5 text-slate-600 text-[11px] font-medium">
+                        o paga con tarjeta débito / crédito
+                      </span>
+                      <div className="flex-grow border-t border-slate-200" />
+                    </div>
+
+                    {/* PCI-DSS Hosted Stripe Card Checkout */}
+                    <div className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-4 space-y-3.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0B192C]">
+                          <CreditCard className="w-4 h-4 text-[#2563EB]" aria-hidden="true" />
+                          <span>Tarjeta vía Stripe Checkout (PCI-DSS)</span>
+                        </span>
+                        <CardNetworkBadges />
+                      </div>
+
+                      <p className="text-[11px] text-slate-600 leading-relaxed">
+                        Para máxima seguridad PCI-DSS, ingresas los datos de tu tarjeta
+                        directamente en la pasarela cifrada de Stripe sin almacenarlos en
+                        este sitio.
+                      </p>
+
+                      {paymentError && (
+                        <p role="alert" className="text-xs font-medium text-red-700">
+                          {paymentError}
+                        </p>
+                      )}
+
+                      <button
+                        type="button"
+                        disabled={isProcessingPayment}
+                        onClick={() => void handleExecutePayment('stripe', true)}
+                        className="w-full h-12 inline-flex items-center justify-center gap-2 px-5 text-sm font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] disabled:bg-slate-400 rounded-lg transition-colors whitespace-nowrap shadow-sm cursor-pointer disabled:cursor-not-allowed"
+                      >
+                        {processingMethod === 'card' ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                            <span>Abriendo pasarela segura...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Lock className="w-4 h-4" aria-hidden="true" />
+                            <span>
+                              {`Pagar con tarjeta · $${(tierPrice + (addonPerformance ? 12 : 0) + (addonBackup ? 9 : 0)).toFixed(2)} USD`}
+                            </span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Payment Confirmed Green Banner */}
+        {ticket.payment_status === 'paid' && ticket.status !== 'resolved' && (
+          <div
+            data-testid="payment-confirmed-banner"
+            className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+          >
+            <div className="flex items-start gap-3">
+              <CheckCircle2
+                className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5"
+                aria-hidden="true"
+              />
+              <div>
+                <p className="text-sm font-semibold text-emerald-950">
+                  Pago confirmado y verificado · {ticket.service_tier}
+                </p>
+                <p className="text-xs text-emerald-800 mt-0.5">
+                  {paymentSuccessNotice ??
+                    'Tu ticket está habilitado para atención prioritaria. Descarga el agente RustDesk y comparte tu ID de 9 dígitos abajo.'}
+                </p>
+              </div>
+            </div>
+            <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-white border border-emerald-300 font-mono text-xs font-semibold text-emerald-800 shrink-0 self-start sm:self-center">
+              PAGADO · USD ${tierPrice}.00
+            </span>
+          </div>
+        )}
+
+        {/* AI Pre-Diagnosis Transparency Card */}
+        {ticket.ai_diagnosis_summary && (
+          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-bold text-[#0B192C]">
+                Pre-diagnóstico técnico adjunto al ticket
+              </p>
+              <span className="inline-flex items-center px-2 py-0.5 rounded bg-blue-50 border border-blue-200 text-[11px] font-semibold text-[#1D4ED8]">
+                ✦ Generado por IA · Revisado por especialista
+              </span>
+            </div>
+            <p className="text-xs text-slate-700 leading-relaxed">
+              {ticket.ai_diagnosis_summary}
+            </p>
+          </div>
+        )}
+
         {/* Resolution Banner when resolved */}
         {ticket.status === 'resolved' && (
           <div
             data-testid="client-resolved-banner"
             className="bg-emerald-50 border border-emerald-200 rounded-xl p-6 space-y-2"
           >
-            <div className="flex items-center gap-2 text-emerald-800 font-semibold text-sm">
-              <CheckCircle2 className="w-5 h-5 text-[#10B981]" aria-hidden="true" />
-              <span>Ticket Resuelto · Sesión Remota Finalizada</span>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-emerald-900 font-semibold text-sm">
+                <CheckCircle2 className="w-5 h-5 text-emerald-700" aria-hidden="true" />
+                <span>Ticket Resuelto · Sesión Remota Finalizada</span>
+              </div>
+              <span className="inline-flex items-center px-2 py-0.5 rounded bg-white border border-emerald-300 text-[11px] font-semibold text-emerald-800">
+                ✦ Generado por IA · Revisado por especialista
+              </span>
             </div>
             {ticket.resolution_notes && (
               <p className="text-xs text-emerald-950 whitespace-pre-line leading-relaxed pt-1">
@@ -336,14 +1100,14 @@ export function ConnectionRoom({
               {/* Primary: Temporary Quick Agent */}
               <div className="p-4 rounded-xl bg-[#F8FAFC] border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="space-y-1 min-w-0">
-                  <p className="text-xs font-semibold text-[#10B981]">
+                  <p className="text-xs font-semibold text-emerald-700">
                     Opción Principal · Ticket Puntual (Sin instalación)
                   </p>
                   <p className="font-mono text-sm font-semibold text-[#0B192C] break-words">
                     {tempAgentMeta.fileName}
                   </p>
                   <p className="text-xs text-slate-600">{tempAgentMeta.sizeLabel}</p>
-                  <p className="text-xs text-slate-500">{tempAgentMeta.shaHint}</p>
+                  <p className="text-xs text-slate-600">{tempAgentMeta.shaHint}</p>
                 </div>
 
                 <a
@@ -397,41 +1161,20 @@ export function ConnectionRoom({
                 </a>
               </div>
 
-              {/* Relay Server Configuration Box */}
+              {/* Public Network Ready-to-Connect Info Card */}
               <div
                 data-testid="rustdesk-relay-instructions"
-                className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5"
+                className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2"
               >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-[#0B192C]">
-                    <Server className="w-4 h-4 text-[#2563EB]" aria-hidden="true" />
-                    <span>Configuración del Servidor Relay RustDesk</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleCopyRelay}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-md bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 transition-colors"
-                  >
-                    {copiedRelay ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-600" aria-hidden="true" />
-                        <span>Copiado</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" aria-hidden="true" />
-                        <span>Copiar servidor</span>
-                      </>
-                    )}
-                  </button>
+                <div className="flex items-center gap-2 text-xs font-semibold text-[#0B192C]">
+                  <ShieldCheck className="w-4 h-4 text-[#10B981]" aria-hidden="true" />
+                  <span>Conexión Directa sin Configuración Adicional</span>
                 </div>
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  Al abrir RustDesk, ve a <strong>Ajustes → Red → Servidor ID / Relay</strong> y
-                  coloca:{' '}
-                  <code className="font-mono font-semibold text-[#0B192C] bg-white px-1.5 py-0.5 rounded border border-slate-200">
-                    {relayDomain}
-                  </code>{' '}
-                  para enrutar tu sesión de forma cifrada con {ticket.organization_name}.
+                  Al usar el instalador oficial de RustDesk,{' '}
+                  <strong>no necesitas configurar ningún servidor ni clave adicional</strong>:
+                  solo abre el programa descargado, copia tu ID de 9 dígitos y pégalo abajo en
+                  el Paso 2.
                 </p>
               </div>
             </div>
@@ -512,7 +1255,7 @@ export function ConnectionRoom({
 
                 <button
                   type="submit"
-                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-[#10B981] hover:bg-emerald-500 rounded-lg transition-colors whitespace-nowrap"
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg transition-colors whitespace-nowrap"
                 >
                   <ShieldCheck className="w-4 h-4" aria-hidden="true" />
                   <span>Vincular ID y Autorizar Acceso</span>
@@ -545,8 +1288,8 @@ export function ConnectionRoom({
             </div>
           </div>
 
-          {/* Right Column: Live Synchronized Chat */}
-          <div className="lg:col-span-5">
+          {/* Right Column: Live Synchronized Chat + Viral Referral */}
+          <div className="lg:col-span-5 space-y-5">
             <TicketChatPanel
               ticketCode={ticket.ticket_code}
               messages={messages}
@@ -554,6 +1297,162 @@ export function ConnectionRoom({
               disabled={ticket.status === 'resolved'}
               onSendMessage={(text) => onSendClientMessage(ticket.id, text)}
             />
+
+            <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold text-emerald-700">
+                  Comparte y regala $5 USD de descuento
+                </p>
+                <span className="font-mono text-[11px] text-slate-600">
+                  ?ref={ticket.ticket_code}
+                </span>
+              </div>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                ¿Tu equipo volvió a funcionar? Envía tu enlace de invitado a un colega o
+                familiar: recibe <strong>$5 USD adicionales</strong> sobre la tarifa de
+                lanzamiento y tú ganas crédito para tu próxima sesión.
+              </p>
+              <button
+                type="button"
+                onClick={() => void handleShareReferral()}
+                className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-[#0B192C] bg-[#F8FAFC] hover:bg-slate-100 border border-slate-300 rounded-lg transition-colors whitespace-nowrap"
+              >
+                {referralCopied ? (
+                  <>
+                    <Check className="w-4 h-4 text-emerald-700" aria-hidden="true" />
+                    <span>Enlace de invitación copiado</span>
+                  </>
+                ) : (
+                  <>
+                    <Share2 className="w-4 h-4 text-[#2563EB]" aria-hidden="true" />
+                    <span>Compartir enlace de $5 USD</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* GDPR / LOPDP Data Portability, Erasure & 1-Click Cancellation */}
+            <div
+              data-testid="room-privacy-controls"
+              className="bg-white border border-slate-200 rounded-xl p-5 space-y-3.5"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-bold text-[#0B192C]">
+                  Privacidad, Datos y Suscripción (GDPR / LOPDP)
+                </p>
+                <button
+                  type="button"
+                  onClick={() => onOpenLegalDoc?.('privacy')}
+                  className="text-[11px] font-semibold text-[#2563EB] hover:underline"
+                >
+                  Política de Privacidad
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Retención estándar: 12 meses para tickets y chats (24 meses auditoría). Tus
+                datos no se usan para entrenar IA pública.
+              </p>
+
+              <div className="space-y-2">
+                {onExportClientData && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onExportClientData(ticket.id);
+                      setPrivacyActionNotice(
+                        'Archivo JSON con tus datos exportado correctamente.'
+                      );
+                    }}
+                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold text-[#0B192C] bg-[#F8FAFC] hover:bg-slate-100 border border-slate-300 rounded-lg transition-colors"
+                  >
+                    <Download className="w-3.5 h-3.5 text-[#2563EB]" aria-hidden="true" />
+                    <span>Descargar mis datos (JSON)</span>
+                  </button>
+                )}
+
+                {ticket.subscription_status === 'active' &&
+                  onCancelTicketSubscription && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void onCancelTicketSubscription(ticket.id).then(() => {
+                          setPrivacyActionNotice(
+                            'Renovación automática cancelada en 1 clic sin penalizaciones.'
+                          );
+                        });
+                      }}
+                      className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-lg transition-colors"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Cancelar renovación automática</span>
+                    </button>
+                  )}
+
+                {ticket.subscription_status === 'canceled' && (
+                  <p className="text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                    Renovación automática cancelada. Conservas acceso hasta finalizar el
+                    periodo vigente.
+                  </p>
+                )}
+
+                {onAnonymizeClientData && !ticket.anonymized_at && (
+                  confirmAnonymizeOpen ? (
+                    <div className="p-3 rounded-lg bg-red-50 border border-red-200 space-y-2 text-xs">
+                      <p className="font-semibold text-red-900">
+                        ¿Confirmas anonimizar tu nombre, correo e ID RustDesk de este
+                        ticket?
+                      </p>
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setConfirmAnonymizeOpen(false)}
+                          className="px-3 py-1 font-medium text-slate-700 bg-white border border-slate-300 rounded-md"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void onAnonymizeClientData(ticket.id).then(() => {
+                              setConfirmAnonymizeOpen(false);
+                              setPrivacyActionNotice(
+                                'Tus datos personales fueron anonimizados y registrados en auditoría.'
+                              );
+                            });
+                          }}
+                          className="px-3 py-1 font-semibold text-white bg-red-700 hover:bg-red-800 rounded-md"
+                        >
+                          Confirmar eliminación
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmAnonymizeOpen(true)}
+                      className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold text-red-700 bg-white hover:bg-red-50 border border-red-200 rounded-lg transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Eliminar mis datos personales</span>
+                    </button>
+                  )
+                )}
+
+                {ticket.anonymized_at && (
+                  <p className="text-xs font-medium text-slate-700 bg-slate-100 border border-slate-200 rounded-lg px-3 py-2">
+                    Datos personales anonimizados el{' '}
+                    {new Date(ticket.anonymized_at).toLocaleDateString('es-ES')}.
+                  </p>
+                )}
+
+                {privacyActionNotice && (
+                  <p className="text-xs font-medium text-emerald-700">
+                    {privacyActionNotice}
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </div>

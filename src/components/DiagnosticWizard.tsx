@@ -1,19 +1,29 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
+  AlertCircle,
+  AppWindow,
   ArrowLeft,
   ArrowRight,
-  Bot,
+  ArrowUp,
+  ArrowUpRight,
   Check,
+  CheckCircle2,
+  Cloud,
   Cpu,
   Laptop,
   Loader2,
+  Lock,
   Mail,
-  Printer,
+  Monitor,
+  RotateCcw,
   ShieldCheck,
+  Smartphone,
   Sparkles,
+  Terminal,
   Wifi,
-  Wrench,
 } from 'lucide-react';
+import { AssistantOrbIcon } from './AssistantOrbIcon';
+import { ScrollReveal } from './ScrollReveal';
 import { runAiReceptionistTriage } from '../services/aiService';
 import type {
   AiAgentConfig,
@@ -23,824 +33,1269 @@ import type {
   WizardDraft,
 } from '../types/support';
 import {
-  CATEGORY_OPTIONS,
   deriveInitialDiagnosisSummary,
-  FIXED_SERVICE_PRICE_USD,
+  getDiscountPercent,
   getServiceTierPriceUsd,
+  getServiceTierRegularPriceUsd,
+  getSuggestedTierForCategory,
+  PYME_PLANS,
   SERVICE_TIER_OPTIONS,
-  validateStep1,
-  validateStep2,
   validateStep3,
 } from '../utils/ticketLogic';
+import type { LegalDocTab } from './LegalDocsModal';
+import heroWarmSpecialistImg from '../assets/images/hero_warm_specialist_1795208080027.jpg';
+
+export interface ExternalTriageTrigger {
+  id: number;
+  symptom: string;
+  category?: IssueCategory;
+  openComposer?: boolean;
+}
 
 interface DiagnosticWizardProps {
   draft: WizardDraft;
   errors: Record<string, string>;
+  persistenceError?: string | null;
   aiAgents?: AiAgentConfig[];
+  externalTrigger?: ExternalTriageTrigger | null;
   onChangeDraft: (patch: Partial<WizardDraft>) => void;
   onSetErrors: (errors: Record<string, string>) => void;
-  onSubmitTicket: () => void;
+  onSubmitTicket: () => Promise<void> | void;
+  onOpenLegalDoc?: (tab: LegalDocTab) => void;
 }
 
-const CATEGORY_ICON_MAP: Record<IssueCategory, typeof Printer> = {
-  Impresoras: Printer,
-  'Correo/Office': Mail,
-  'Sistema Operativo/Lentitud': Cpu,
-  'Redes/Wi-Fi': Wifi,
-  Otro: Wrench,
-};
+interface ChatTurn {
+  id: string;
+  sender: 'assistant' | 'user';
+  text: string;
+}
 
-const QUICK_ANSWERS = ['Sí, ocurre siempre', 'Solo a veces', 'No estoy seguro'];
+const TOPIC_CARDS: Array<{
+  id: string;
+  title: string;
+  subtitle: string;
+  category: IssueCategory;
+  starterPrompt: string;
+  icon: typeof Cpu;
+  iconStyle: string;
+}> = [
+  {
+    id: 'windows',
+    title: 'Windows',
+    subtitle: 'Rendimiento, errores y configuración básica',
+    category: 'Windows lento o bajo rendimiento',
+    starterPrompt:
+      'Mi equipo con Windows va muy lento, tarda en arrancar o muestra errores.',
+    icon: Cpu,
+    iconStyle: 'bg-blue-50 text-[#2563EB] border-blue-100',
+  },
+  {
+    id: 'outlook',
+    title: 'Outlook',
+    subtitle: 'Inicio, correo y sincronización',
+    category: 'Errores de Microsoft 365 y Outlook',
+    starterPrompt: 'Outlook no abre o no sincroniza mis correos correctamente.',
+    icon: Mail,
+    iconStyle: 'bg-sky-50 text-sky-700 border-sky-100',
+  },
+  {
+    id: 'm365',
+    title: 'Microsoft 365',
+    subtitle: 'Aplicaciones, cuenta y servicios',
+    category: 'Errores de Microsoft 365 y Outlook',
+    starterPrompt:
+      'Tengo problemas con aplicaciones, licencia o inicio de sesión en Microsoft 365.',
+    icon: Sparkles,
+    iconStyle: 'bg-orange-50 text-orange-600 border-orange-100',
+  },
+  {
+    id: 'onedrive',
+    title: 'OneDrive',
+    subtitle: 'Archivos y estado de sincronización',
+    category: 'Recuperación de archivos',
+    starterPrompt:
+      'OneDrive no sincroniza mis carpetas o necesito recuperar archivos importantes.',
+    icon: Cloud,
+    iconStyle: 'bg-cyan-50 text-cyan-700 border-cyan-100',
+  },
+  {
+    id: 'teams',
+    title: 'Teams',
+    subtitle: 'Reuniones, llamadas y colaboración',
+    category: 'Aplicaciones que no arrancan',
+    starterPrompt:
+      'Microsoft Teams u otra aplicación laboral no abre o falla durante llamadas.',
+    icon: AppWindow,
+    iconStyle: 'bg-indigo-50 text-indigo-600 border-indigo-100',
+  },
+  {
+    id: 'vpn-red',
+    title: 'VPN y conectividad',
+    subtitle: 'Acceso remoto, Wi-Fi e impresoras',
+    category: 'VPN y acceso remoto',
+    starterPrompt:
+      'Mi conexión Wi-Fi, impresora en red o acceso VPN se desconecta y no puedo trabajar.',
+    icon: Wifi,
+    iconStyle: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+  },
+];
+
+const QUICK_STARTER_OPTIONS: Array<{
+  label: string;
+  symptom: string;
+  category: IssueCategory;
+  badgeStyle: string;
+  icon: typeof Mail;
+}> = [
+  {
+    label: 'Outlook no abre',
+    symptom: 'Outlook no abre o se queda cargando el perfil en mi equipo.',
+    category: 'Errores de Microsoft 365 y Outlook',
+    badgeStyle: 'bg-sky-50 text-sky-700 border-sky-100',
+    icon: Mail,
+  },
+  {
+    label: 'Problemas con Microsoft 365',
+    symptom: 'Microsoft 365 muestra error de cuenta, activación o cierre inesperado.',
+    category: 'Errores de Microsoft 365 y Outlook',
+    badgeStyle: 'bg-orange-50 text-orange-600 border-orange-100',
+    icon: Sparkles,
+  },
+  {
+    label: 'OneDrive no sincroniza',
+    symptom: 'OneDrive se quedó detenido sincronizando o no muestra mis archivos recientes.',
+    category: 'Recuperación de archivos',
+    badgeStyle: 'bg-cyan-50 text-cyan-700 border-cyan-100',
+    icon: Cloud,
+  },
+];
+
+const OS_SELECTOR_OPTIONS: Array<{
+  value: OperatingSystem;
+  label: string;
+  subtitle: string;
+  icon: typeof Monitor;
+}> = [
+  { value: 'Windows', label: 'Windows', subtitle: '10 / 11', icon: Monitor },
+  { value: 'Mac', label: 'Mac', subtitle: 'macOS', icon: Laptop },
+  { value: 'Linux', label: 'Linux', subtitle: 'Ubuntu / Deb', icon: Terminal },
+  { value: 'Mobile', label: 'Mobile', subtitle: 'Android / iOS', icon: Smartphone },
+];
 
 export function DiagnosticWizard({
   draft,
   errors,
+  persistenceError,
   aiAgents = [],
+  externalTrigger,
   onChangeDraft,
   onSetErrors,
   onSubmitTicket,
+  onOpenLegalDoc,
 }: DiagnosticWizardProps) {
+  const [chatOpen, setChatOpen] = useState(false);
+  const [composerText, setComposerText] = useState('');
+  const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
+  const [chatTurns, setChatTurns] = useState<ChatTurn[]>([]);
+  const [aiQuestionAnswers, setAiQuestionAnswers] = useState<Record<number, string>>({});
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [selfSolved, setSelfSolved] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showTierSwitcher, setShowTierSwitcher] = useState(false);
 
-  const receptionistAgent = aiAgents.find(
-    (a) => a.agent_key === 'ai_receptionist'
-  );
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const chatCardRef = useRef<HTMLDivElement | null>(null);
+  const lastTriggerIdRef = useRef<number | null>(null);
+
+  const receptionistAgent = aiAgents.find((a) => a.agent_key === 'ai_receptionist');
   const receptionistEnabled = receptionistAgent ? receptionistAgent.is_enabled : true;
-  const escalateCriticalServers =
-    receptionistAgent?.governance_rules.find((r) => r.id === 'r-rec-2')
-      ?.enabled ?? true;
 
-  const isCriticalServerCase =
-    escalateCriticalServers &&
-    /\b(servidor|server|active directory|dominio|base de datos|sql)\b/i.test(
-      draft.description
-    );
+  const isStage2 = draft.step === 3;
+  const activeTier = draft.serviceTier;
+  const activePrice = getServiceTierPriceUsd(activeTier);
+  const activeRegularPrice = getServiceTierRegularPriceUsd(activeTier);
+  const activeDiscount = getDiscountPercent(activePrice, activeRegularPrice);
+  const isPymeMonthly = draft.billingMode === 'pyme_monthly';
+  const currentOs: OperatingSystem = draft.operatingSystem ?? 'Windows';
 
-  const handleSelectCategory = (category: IssueCategory) => {
-    onChangeDraft({ category, aiTriage: null });
-    if (errors.category) {
-      onSetErrors({});
-    }
+  const scrollToChatCard = () => {
+    window.setTimeout(() => {
+      chatCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 60);
   };
 
-  const handleNextFromStep1 = () => {
-    const result = validateStep1(draft);
-    if (!result.valid) {
-      onSetErrors(result.errors);
-      return;
-    }
-    onSetErrors({});
-    onChangeDraft({ step: 2 });
-  };
+  const executeAiTriage = async (
+    symptomText: string,
+    overrideCategory?: IssueCategory
+  ) => {
+    const cleanText = symptomText.trim();
+    if (!cleanText) return;
 
-  const handleRunAiReceptionist = async () => {
-    if (!receptionistEnabled) return;
-    const result = validateStep2(draft);
-    if (!result.valid || !draft.category || !draft.operatingSystem) {
-      onSetErrors(result.errors);
+    setChatOpen(true);
+    setSelfSolved(false);
+    setAiError(null);
+    onSetErrors({});
+
+    const nextCategory = overrideCategory ?? draft.category ?? 'Otro';
+    const nextDescription =
+      draft.description.trim().length > 0 &&
+      !draft.description.includes(cleanText) &&
+      chatTurns.length > 0
+        ? `${draft.description.trim()}\nDetalle adicional: ${cleanText}`
+        : cleanText;
+
+    setChatTurns((prev) => [
+      ...prev,
+      {
+        id: `u-${Date.now()}`,
+        sender: 'user',
+        text: cleanText,
+      },
+    ]);
+
+    onChangeDraft({
+      step: 1,
+      category: nextCategory,
+      operatingSystem: currentOs,
+      description: nextDescription,
+    });
+
+    if (!receptionistEnabled) {
+      setChatTurns((prev) => [
+        ...prev,
+        {
+          id: `a-${Date.now() + 1}`,
+          sender: 'assistant',
+          text: 'Gracias por compartir el detalle. Puedes pasar directamente al siguiente paso para revisar la tarifa fija y conectar con un especialista certificado.',
+        },
+      ]);
       return;
     }
-    onSetErrors({});
+
     setAiLoading(true);
     try {
-      const existingAnswers = draft.aiTriage?.selectedAnswers
-        ? Object.entries(draft.aiTriage.selectedAnswers).map(([idx, answer]) => ({
-            question:
-              draft.aiTriage?.followUpQuestions[Number(idx)] ?? `Pregunta ${idx}`,
-            answer,
-          }))
-        : [];
       const triage = await runAiReceptionistTriage({
-        category: draft.category,
-        osType: draft.operatingSystem,
-        description: draft.description,
-        followUpAnswers: existingAnswers,
+        category: nextCategory,
+        osType: currentOs,
+        description: nextDescription,
       });
-      const resolvedTier: ServiceTier = isCriticalServerCase
-        ? 'Avanzado $55'
-        : draft.serviceTier !== 'Express $25'
+
+      const resolvedCategory = triage.suggestedCategory || nextCategory;
+      const shouldKeepPyme = draft.billingMode === 'pyme_monthly';
+      const suggestedTier = shouldKeepPyme
         ? draft.serviceTier
-        : triage.suggestedTier;
+        : triage.suggestedTier || getSuggestedTierForCategory(resolvedCategory);
+
       onChangeDraft({
-        aiTriage: {
-          ...triage,
-          suggestedTier: resolvedTier,
-          confidenceNote: isCriticalServerCase
-            ? 'Caso crítico de servidor detectado: escalamiento prioritario a especialista humano activado.'
-            : triage.confidenceNote,
-          selectedAnswers: draft.aiTriage?.selectedAnswers ?? {},
-        },
-        serviceTier: resolvedTier,
+        step: 1,
+        category: resolvedCategory,
+        operatingSystem: currentOs,
+        description: nextDescription,
+        serviceTier: suggestedTier,
+        aiTriage: triage,
       });
+      setAiQuestionAnswers({});
+
+      setChatTurns((prev) => [
+        ...prev,
+        {
+          id: `a-${Date.now() + 1}`,
+          sender: 'assistant',
+          text: triage.preDiagnosis,
+        },
+      ]);
+    } catch {
+      setAiError(
+        'No fue posible completar el triaje IA en este instante. Puedes continuar con un especialista ahora mismo.'
+      );
     } finally {
       setAiLoading(false);
     }
   };
 
-  const handleNextFromStep2 = async () => {
-    const result = validateStep2(draft);
-    if (!result.valid || !draft.category || !draft.operatingSystem) {
-      onSetErrors(result.errors);
-      return;
-    }
-    onSetErrors({});
+  useEffect(() => {
+    if (!externalTrigger || externalTrigger.id === lastTriggerIdRef.current) return;
+    lastTriggerIdRef.current = externalTrigger.id;
 
-    if (!receptionistEnabled) {
-      const manualSummary = deriveInitialDiagnosisSummary(
-        draft.category,
-        draft.operatingSystem,
-        draft.description
-      );
-      onChangeDraft({
-        step: 3,
-        aiTriage: draft.aiTriage ?? {
-          followUpQuestions: [],
-          preDiagnosis: manualSummary,
-          suggestedTier: draft.serviceTier,
-          estimatedMinutes: 30,
-          confidenceNote:
-            'AI Receptionist pausado por gobernanza: triaje manual directo enviado al técnico.',
-          source: 'fallback',
-          selectedAnswers: {},
-        },
-      });
+    setChatOpen(true);
+    if (externalTrigger.openComposer && !externalTrigger.symptom.trim()) {
+      onChangeDraft({ step: 1 });
+      scrollToChatCard();
+      window.setTimeout(() => composerRef.current?.focus(), 220);
       return;
     }
 
-    if (!draft.aiTriage) {
-      setAiLoading(true);
-      try {
-        const triage = await runAiReceptionistTriage({
-          category: draft.category,
-          osType: draft.operatingSystem,
-          description: draft.description,
-        });
-        const resolvedTier: ServiceTier = isCriticalServerCase
-          ? 'Avanzado $55'
-          : draft.serviceTier !== 'Express $25'
-          ? draft.serviceTier
-          : triage.suggestedTier;
-        onChangeDraft({
-          step: 3,
-          aiTriage: {
-            ...triage,
-            suggestedTier: resolvedTier,
-            confidenceNote: isCriticalServerCase
-              ? 'Caso crítico de servidor detectado: escalamiento prioritario a especialista humano activado.'
-              : triage.confidenceNote,
-            selectedAnswers: {},
-          },
-          serviceTier: resolvedTier,
-        });
-        return;
-      } finally {
-        setAiLoading(false);
-      }
+    if (externalTrigger.symptom.trim()) {
+      setComposerText('');
+      scrollToChatCard();
+      void executeAiTriage(externalTrigger.symptom, externalTrigger.category);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalTrigger]);
 
-    onChangeDraft({ step: 3 });
+  const handleSelectTopicCard = (topic: (typeof TOPIC_CARDS)[number]) => {
+    setSelectedTopicId(topic.id);
+    setSelfSolved(false);
+    setChatOpen(true);
+    setComposerText('');
+    scrollToChatCard();
+    void executeAiTriage(topic.starterPrompt, topic.category);
   };
 
-  const handleSelectFollowUpAnswer = (questionIndex: number, answer: string) => {
-    if (!draft.aiTriage) return;
+  const handleOpenFreeChat = () => {
+    setChatOpen(true);
+    onChangeDraft({ step: 1 });
+    scrollToChatCard();
+    window.setTimeout(() => composerRef.current?.focus(), 220);
+  };
+
+  const handleResetConversation = () => {
+    setChatTurns([]);
+    setAiQuestionAnswers({});
+    setComposerText('');
+    setSelectedTopicId(null);
+    setSelfSolved(false);
+    setAiError(null);
+    onSetErrors({});
     onChangeDraft({
-      aiTriage: {
-        ...draft.aiTriage,
-        selectedAnswers: {
-          ...(draft.aiTriage.selectedAnswers ?? {}),
-          [questionIndex]: answer,
-        },
-      },
+      step: 1,
+      description: '',
+      aiTriage: null,
+    });
+    window.setTimeout(() => composerRef.current?.focus(), 80);
+  };
+
+  const handleComposerSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!composerText.trim() || aiLoading) return;
+    const text = composerText.trim();
+    setComposerText('');
+    void executeAiTriage(text, draft.category ?? 'Otro');
+  };
+
+  const handleRefineWithAnswers = () => {
+    const qaSummary = Object.entries(aiQuestionAnswers)
+      .filter(([, ans]) => ans.trim().length > 0)
+      .map(([idx, ans]) => {
+        const q = draft.aiTriage?.followUpQuestions[Number(idx)] ?? 'Detalle';
+        return `${q} → ${ans.trim()}`;
+      })
+      .join(' | ');
+
+    if (!qaSummary) return;
+    void executeAiTriage(`Respuestas rápidas: ${qaSummary}`, draft.category ?? 'Otro');
+  };
+
+  const handleEscalateToSpecialist = () => {
+    const resolvedCategory = draft.category ?? 'Otro';
+    const fallbackDesc =
+      draft.description.trim().length >= 8
+        ? draft.description.trim()
+        : `Solicitud de atención directa con especialista remoto en ${currentOs} (${resolvedCategory}).`;
+
+    const resolvedTier =
+      draft.billingMode === 'pyme_monthly'
+        ? draft.serviceTier
+        : draft.aiTriage?.suggestedTier ?? getSuggestedTierForCategory(resolvedCategory);
+
+    setChatOpen(true);
+    onSetErrors({});
+    onChangeDraft({
+      step: 3,
+      category: resolvedCategory,
+      operatingSystem: currentOs,
+      description: fallbackDesc,
+      serviceTier: resolvedTier,
+    });
+    scrollToChatCard();
+  };
+
+  const handleSelectOneTimeTier = (tier: ServiceTier) => {
+    onChangeDraft({
+      serviceTier: tier,
+      billingMode: 'one_time',
     });
   };
 
-  const handleSubmitStep3 = (e: React.FormEvent) => {
+  const handleSelectPymeTier = (tier: ServiceTier) => {
+    onChangeDraft({
+      serviceTier: tier,
+      billingMode: 'pyme_monthly',
+    });
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const result = validateStep3(draft);
-    if (!result.valid) {
-      onSetErrors(result.errors);
+    const validation = validateStep3(draft);
+    if (!validation.valid) {
+      onSetErrors(validation.errors);
       return;
     }
     onSetErrors({});
-    onSubmitTicket();
+    setIsSubmitting(true);
+    try {
+      await onSubmitTicket();
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const selectedTierPrice = getServiceTierPriceUsd(draft.serviceTier);
-
-  const stepsMeta = [
-    { num: 1 as const, title: 'Categoría' },
-    { num: 2 as const, title: 'AI Receptionist' },
-    { num: 3 as const, title: 'Tarifa y Ticket' },
-  ];
+  const activeErrorList = Object.values(errors).filter(Boolean);
+  const hasAnsweredFollowUps = Object.values(aiQuestionAnswers).some(
+    (v) => v.trim().length > 0
+  );
 
   return (
     <section
       id="diagnostico"
       aria-labelledby="wizard-heading"
-      className="scroll-mt-20 py-14 sm:py-16 bg-[#F8FAFC] border-b border-slate-200"
+      className="scroll-mt-20 py-14 sm:py-20 bg-[#F8FAFC] border-b border-slate-200/80"
     >
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-8">
-          <div>
-            <p className="text-xs font-semibold text-[#2563EB] tracking-wide">
-              Triaje Inteligente en 3 Pasos · AI Receptionist
-            </p>
-            <h2
-              id="wizard-heading"
-              className="text-2xl sm:text-3xl font-bold tracking-tight text-[#0B192C] mt-1"
-            >
-              Diagnóstico guiado y emisión inmediata de ticket
-            </h2>
-          </div>
-
-          <ol
-            aria-label="Progreso del diagnóstico"
-            className="flex items-center gap-4 sm:gap-6 text-xs sm:text-sm"
-          >
-            {stepsMeta.map((stepItem) => {
-              const isActive = draft.step === stepItem.num;
-              const isCompleted = draft.step > stepItem.num;
-              return (
-                <li
-                  key={stepItem.num}
-                  aria-current={isActive ? 'step' : undefined}
-                  className="flex items-center gap-2 whitespace-nowrap"
-                >
-                  <span
-                    className={`w-6 h-6 rounded-md font-mono tabular-nums text-xs font-semibold flex items-center justify-center transition-colors ${
-                      isCompleted
-                        ? 'bg-[#10B981] text-white'
-                        : isActive
-                        ? 'bg-[#2563EB] text-white'
-                        : 'bg-slate-200 text-slate-600'
-                    }`}
-                  >
-                    {isCompleted ? (
-                      <Check className="w-3.5 h-3.5" aria-hidden="true" />
-                    ) : (
-                      stepItem.num
-                    )}
-                  </span>
-                  <span
-                    className={
-                      isActive
-                        ? 'font-semibold text-[#0B192C]'
-                        : isCompleted
-                        ? 'font-medium text-emerald-700'
-                        : 'text-slate-500'
-                    }
-                  >
-                    {stepItem.title}
-                  </span>
-                </li>
-              );
-            })}
-          </ol>
-        </div>
-
-        <div className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8">
-          {draft.step === 1 && (
-            <div data-testid="wizard-step-1">
-              <div className="mb-6">
-                <h3 className="text-lg font-semibold text-[#0B192C]">
-                  Paso 1 · Selecciona la categoría y sistema operativo
-                </h3>
-                <p className="text-sm text-slate-600 mt-1">
-                  Elige el área afectada para activar el protocolo técnico y pre-asignar al
-                  especialista adecuado.
-                </p>
-              </div>
-
-              <div
-                role="radiogroup"
-                aria-label="Categoría del problema técnico"
-                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+        {/* Top Luminous Topic Header */}
+        <ScrollReveal>
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
+            <div className="max-w-xl">
+              <p className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-[#2563EB]">
+                <Sparkles className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                <span>Empieza por lo que te pasa</span>
+              </p>
+              <h2
+                id="wizard-heading"
+                className="text-3xl sm:text-4xl font-bold tracking-tight text-[#0B192C] mt-1.5"
               >
-                {CATEGORY_OPTIONS.map((option) => {
-                  const Icon = CATEGORY_ICON_MAP[option.id];
-                  const selected = draft.category === option.id;
-                  return (
-                    <button
-                      key={option.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      onClick={() => handleSelectCategory(option.id)}
-                      className={`text-left p-4 rounded-lg border transition-colors duration-150 flex flex-col justify-between gap-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] ${
-                        selected
-                          ? 'border-[#2563EB] bg-blue-50/40 ring-1 ring-[#2563EB]'
-                          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/60'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <span
-                          className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
-                            selected
-                              ? 'bg-[#2563EB] text-white'
-                              : 'bg-slate-100 text-[#0B192C]'
-                          }`}
-                        >
-                          <Icon className="w-4 h-4" aria-hidden="true" />
-                        </span>
-                        <span className="text-xs font-mono tabular-nums text-slate-500">
-                          {option.typicalResolutionTime}
-                        </span>
-                      </div>
+                ¿Con qué necesitas ayuda?
+              </h2>
+            </div>
+            <p className="text-sm text-slate-600 max-w-sm leading-relaxed">
+              Elige un tema para iniciar. La IA hará unas preguntas y te propondrá el
+              siguiente paso.
+            </p>
+          </div>
+        </ScrollReveal>
 
-                      <div>
-                        <p className="text-sm font-semibold text-[#0B192C]">
-                          {option.label}
-                        </p>
-                        <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                          {option.summary}
-                        </p>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {errors.category && (
-                <p role="alert" className="mt-4 text-sm font-medium text-red-700">
-                  {errors.category}
-                </p>
-              )}
-
-              <div className="mt-8 pt-6 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <p className="text-xs text-slate-500">
-                  {draft.category
-                    ? `Categoría seleccionada: ${draft.category} · Asistencia puntual desde $${FIXED_SERVICE_PRICE_USD} USD`
-                    : `Asistencia puntual desde $${FIXED_SERVICE_PRICE_USD} USD por incidente resuelto`}
-                </p>
+        {/* 6 Clean Pastel-Icon Topic Cards */}
+        <div
+          role="group"
+          aria-label="Temas frecuentes de soporte técnico"
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
+        >
+          {TOPIC_CARDS.map((topic, index) => {
+            const TopicIcon = topic.icon;
+            const isSelected = selectedTopicId === topic.id && chatOpen;
+            return (
+              <ScrollReveal key={topic.id} delayMs={index * 65}>
                 <button
                   type="button"
-                  onClick={handleNextFromStep1}
-                  className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-[#0B192C] hover:bg-[#0F172A] rounded-lg transition-colors duration-150 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+                  data-testid={`topic-card-${topic.id}`}
+                  onClick={() => handleSelectTopicCard(topic)}
+                  className={`w-full group rounded-2xl border p-5 bg-white text-left flex items-center justify-between gap-4 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] ${
+                    isSelected
+                      ? 'border-[#2563EB] ring-2 ring-blue-100 shadow-md shadow-blue-900/5'
+                      : 'border-slate-200/90 hover:border-blue-300 hover:shadow-md hover:-translate-y-0.5'
+                  }`}
                 >
-                  <span>Continuar a AI Receptionist</span>
-                  <ArrowRight className="w-4 h-4" aria-hidden="true" />
+                  <div className="flex items-center gap-3.5 min-w-0">
+                    <span
+                      className={`w-11 h-11 rounded-xl border flex items-center justify-center shrink-0 transition-transform duration-200 group-hover:scale-105 ${topic.iconStyle}`}
+                    >
+                      <TopicIcon className="w-5 h-5" aria-hidden="true" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-[#0B192C] group-hover:text-[#2563EB] transition-colors truncate">
+                        {topic.title}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">
+                        {topic.subtitle}
+                      </p>
+                    </div>
+                  </div>
+                  <ArrowUpRight
+                    className="w-4 h-4 text-slate-400 group-hover:text-[#2563EB] group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all shrink-0"
+                    aria-hidden="true"
+                  />
+                </button>
+              </ScrollReveal>
+            );
+          })}
+        </div>
+
+        {/* Centered Link to Open Free Conversational Chat */}
+        <ScrollReveal delayMs={180}>
+          <div className="mt-6 text-center">
+            <p className="text-xs sm:text-sm text-slate-500">
+              ¿No ves tu problema?{' '}
+              <button
+                type="button"
+                data-testid="open-free-chat-link"
+                onClick={handleOpenFreeChat}
+                className="font-semibold text-[#2563EB] hover:text-[#1D4ED8] inline-flex items-center gap-1 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] rounded"
+              >
+                <span>Descríbelo con tus propias palabras</span>
+                <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
+              </button>
+            </p>
+          </div>
+        </ScrollReveal>
+
+        {/* Wide White Rounded-3xl Conversational Assistant & Escalation Card */}
+        {(chatOpen || isStage2) && (
+          <div
+            ref={chatCardRef}
+            data-testid="diagnostic-assistant-card"
+            className="mt-8 bg-white rounded-3xl shadow-xl shadow-slate-200/60 border border-slate-200/80 overflow-hidden animate-fade-up"
+          >
+            {/* Clean Light Header */}
+            <div className="px-5 sm:px-8 py-5 border-b border-slate-100 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3.5 min-w-0">
+                <AssistantOrbIcon
+                  size="lg"
+                  state={aiLoading ? 'thinking' : draft.aiTriage ? 'ready' : 'idle'}
+                  showOnlineBadge
+                />
+                <div className="min-w-0">
+                  <p className="text-base font-bold text-[#0B192C] leading-tight">
+                    Asistente Remote 365
+                  </p>
+                  <p className="text-xs font-medium text-emerald-700 mt-0.5">
+                    {aiLoading
+                      ? 'Analizando tu caso en tiempo real...'
+                      : 'Aquí para ayudarte · Sin acceso remoto hasta que tú lo autorices'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                {!isStage2 && (
+                  <button
+                    type="button"
+                    data-testid="direct-escalate-button"
+                    onClick={handleEscalateToSpecialist}
+                    className="inline-flex items-center gap-2 pl-1.5 pr-3.5 py-1.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-xs font-semibold text-[#0B192C] shadow-xs transition-colors whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+                  >
+                    <img
+                      src={heroWarmSpecialistImg}
+                      alt=""
+                      aria-hidden="true"
+                      referrerPolicy="no-referrer"
+                      className="w-6 h-6 rounded-full object-cover border border-slate-200"
+                    />
+                    <span>Hablar con especialista</span>
+                  </button>
+                )}
+
+                {isStage2 && (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 text-[#1D4ED8] text-xs font-semibold">
+                    <span>Paso 2 de 2 · Tarifa fija y sala segura</span>
+                  </span>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleResetConversation}
+                  aria-label="Reiniciar conversación"
+                  title="Reiniciar conversación"
+                  className="p-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-500 hover:text-[#0B192C] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+                >
+                  <RotateCcw className="w-4 h-4" aria-hidden="true" />
                 </button>
               </div>
             </div>
-          )}
 
-          {draft.step === 2 && (
-            <div data-testid="wizard-step-2">
-              <div className="mb-6">
-                <p className="text-xs text-slate-500 mb-1">
-                  Categoría: {draft.category}
-                </p>
-                <h3 className="text-lg font-semibold text-[#0B192C]">
-                  Paso 2 · Sistema operativo, descripción y triaje con AI Receptionist
-                </h3>
-              </div>
-
-              <div className="space-y-6">
-                <div>
-                  <span
-                    id="os-label"
-                    className="block text-sm font-semibold text-[#0B192C] mb-2.5"
-                  >
-                    Sistema Operativo del equipo a reparar
+            {/* STAGE 1: Conversational AI Receptionist */}
+            {!isStage2 && (
+              <div data-testid="wizard-step-1" className="p-5 sm:p-8 space-y-6">
+                {/* Compact OS Selector Strip */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
+                  <span className="text-xs font-semibold text-slate-600">
+                    Tu sistema operativo:
                   </span>
                   <div
                     role="radiogroup"
-                    aria-labelledby="os-label"
-                    className="grid grid-cols-1 sm:grid-cols-2 gap-4"
+                    aria-label="Sistema operativo de tu equipo"
+                    className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2"
                   >
-                    {(['Windows', 'Mac'] as OperatingSystem[]).map((os) => {
-                      const selected = draft.operatingSystem === os;
+                    {OS_SELECTOR_OPTIONS.map((os) => {
+                      const OsIcon = os.icon;
+                      const isActive = currentOs === os.value;
                       return (
                         <button
-                          key={os}
+                          key={os.value}
                           type="button"
                           role="radio"
-                          aria-checked={selected}
-                          onClick={() => {
-                            onChangeDraft({ operatingSystem: os });
-                            if (errors.operatingSystem) {
-                              const nextErrors = { ...errors };
-                              delete nextErrors.operatingSystem;
-                              onSetErrors(nextErrors);
-                            }
-                          }}
-                          className={`flex items-center justify-between p-4 rounded-lg border text-left transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] ${
-                            selected
-                              ? 'border-[#2563EB] bg-blue-50/40 ring-1 ring-[#2563EB]'
-                              : 'border-slate-200 hover:border-slate-300 bg-white'
+                          aria-checked={isActive}
+                          onClick={() => onChangeDraft({ operatingSystem: os.value })}
+                          className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] ${
+                            isActive
+                              ? 'border-[#2563EB] bg-blue-50/70 text-[#1D4ED8]'
+                              : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
                           }`}
                         >
-                          <div className="flex items-center gap-3">
-                            <Laptop
-                              className={`w-5 h-5 ${
-                                selected ? 'text-[#2563EB]' : 'text-slate-600'
-                              }`}
-                              aria-hidden="true"
-                            />
-                            <div>
-                              <p className="text-sm font-semibold text-[#0B192C]">
-                                {os === 'Windows' ? 'Windows (10 / 11)' : 'Mac (macOS)'}
-                              </p>
-                              <p className="text-xs text-slate-500">
-                                {os === 'Windows'
-                                  ? 'Agente temporal RemoteSupport365-Quick.exe'
-                                  : 'Agente temporal RemoteSupport365-Quick.dmg'}
-                              </p>
-                            </div>
-                          </div>
-                          {selected && (
-                            <Check
-                              className="w-4 h-4 text-[#2563EB] shrink-0"
-                              aria-hidden="true"
-                            />
-                          )}
+                          <OsIcon className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                          <span>{os.label}</span>
                         </button>
                       );
                     })}
                   </div>
-                  {errors.operatingSystem && (
-                    <p role="alert" className="mt-2 text-sm font-medium text-red-700">
-                      {errors.operatingSystem}
-                    </p>
-                  )}
                 </div>
 
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label
-                      htmlFor="problem-description"
-                      className="block text-sm font-semibold text-[#0B192C]"
-                    >
-                      Describe el síntoma principal
-                    </label>
-                    <span className="text-xs font-mono tabular-nums text-slate-500">
-                      {draft.description.trim().length} caracteres
-                    </span>
-                  </div>
-                  <textarea
-                    id="problem-description"
-                    rows={3}
-                    value={draft.description}
-                    onChange={(e) => {
-                      onChangeDraft({ description: e.target.value });
-                      if (errors.description && e.target.value.trim().length >= 10) {
-                        const nextErrors = { ...errors };
-                        delete nextErrors.description;
-                        onSetErrors(nextErrors);
-                      }
-                    }}
-                    placeholder="Ejemplo: Desde ayer Outlook no sincroniza correos entrantes y pide contraseña en bucle..."
-                    className="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/15"
-                  />
-                  {errors.description && (
-                    <p role="alert" className="mt-2 text-sm font-medium text-red-700">
-                      {errors.description}
-                    </p>
-                  )}
-                </div>
-
-                {/* AI Receptionist Interactive Panel */}
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-5 space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5">
-                      <span className="w-8 h-8 rounded-lg bg-[#0B192C] text-[#10B981] flex items-center justify-center shrink-0">
-                        <Bot className="w-4 h-4" aria-hidden="true" />
-                      </span>
+                {/* Chat Conversation Area */}
+                <div className="space-y-4">
+                  {chatTurns.length === 0 ? (
+                    <div className="space-y-4 py-2">
                       <div>
-                        <p className="text-sm font-semibold text-[#0B192C]">
-                          AI Receptionist · Pre-Diagnóstico Técnico
-                        </p>
-                        <p className="text-xs text-slate-500">
-                          Analiza tu falla y genera preguntas clave antes de conectar al
-                          técnico.
-                        </p>
+                        <p className="text-xs font-medium text-slate-500">Bienvenido</p>
+                        <h3 className="text-lg sm:text-xl font-bold text-[#0B192C] mt-0.5">
+                          Vamos a resolverlo juntos. ¿Qué problema tienes?
+                        </h3>
+                      </div>
+
+                      <div className="space-y-2.5 max-w-lg">
+                        {QUICK_STARTER_OPTIONS.map((opt) => {
+                          const OptIcon = opt.icon;
+                          return (
+                            <button
+                              key={opt.label}
+                              type="button"
+                              onClick={() => void executeAiTriage(opt.symptom, opt.category)}
+                              className="w-full rounded-2xl border border-slate-200/90 hover:border-blue-300 bg-white hover:bg-blue-50/30 px-4 py-3 flex items-center justify-between gap-3 text-left transition-all duration-150 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+                            >
+                              <span className="flex items-center gap-3 min-w-0">
+                                <span
+                                  className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 ${opt.badgeStyle}`}
+                                >
+                                  <OptIcon className="w-4 h-4" aria-hidden="true" />
+                                </span>
+                                <span className="text-sm font-medium text-[#0B192C] group-hover:text-[#1D4ED8] truncate">
+                                  {opt.label}
+                                </span>
+                              </span>
+                              <ArrowUpRight
+                                className="w-4 h-4 text-slate-400 group-hover:text-[#2563EB] shrink-0"
+                                aria-hidden="true"
+                              />
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
+                  ) : (
+                    <div className="rounded-2xl bg-[#F8FAFC] border border-slate-200/80 p-4 sm:p-5 space-y-4">
+                      {chatTurns.map((turn) => (
+                        <div
+                          key={turn.id}
+                          className={`flex items-start gap-3 animate-chat-pop ${
+                            turn.sender === 'user' ? 'justify-end' : 'justify-start'
+                          }`}
+                        >
+                          {turn.sender === 'assistant' && (
+                            <AssistantOrbIcon size="sm" state="ready" className="mt-0.5" />
+                          )}
+                          <div
+                            className={`rounded-2xl px-4 py-3 text-sm leading-relaxed max-w-2xl ${
+                              turn.sender === 'user'
+                                ? 'bg-[#2563EB] text-white rounded-tr-sm shadow-xs'
+                                : 'bg-white border border-slate-200/90 text-slate-800 rounded-tl-sm shadow-xs'
+                            }`}
+                          >
+                            {turn.text}
+                          </div>
+                        </div>
+                      ))}
 
+                      {aiLoading && (
+                        <div className="flex items-start gap-3 animate-chat-pop">
+                          <AssistantOrbIcon size="sm" state="thinking" className="mt-0.5" />
+                          <div className="rounded-2xl rounded-tl-sm bg-white border border-blue-200 px-4 py-3 text-xs font-medium text-[#1D4ED8] flex items-center gap-2">
+                            <span>Analizando tu caso y preparando pasos seguros de comprobación</span>
+                            <span className="inline-flex items-center gap-1" aria-hidden="true">
+                              <span
+                                className="w-1.5 h-1.5 rounded-full bg-[#2563EB] animate-typing-dot"
+                                style={{ animationDelay: '0ms' }}
+                              />
+                              <span
+                                className="w-1.5 h-1.5 rounded-full bg-[#2563EB] animate-typing-dot"
+                                style={{ animationDelay: '150ms' }}
+                              />
+                              <span
+                                className="w-1.5 h-1.5 rounded-full bg-[#2563EB] animate-typing-dot"
+                                style={{ animationDelay: '300ms' }}
+                              />
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      {aiError && (
+                        <div
+                          role="alert"
+                          className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900 flex items-center justify-between gap-3"
+                        >
+                          <span>{aiError}</span>
+                          <button
+                            type="button"
+                            onClick={handleEscalateToSpecialist}
+                            className="font-semibold underline shrink-0"
+                          >
+                            Ir con especialista
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Structured AI Response: Safe Self-Service Steps + Brief Follow-Up Questions */}
+                      {draft.aiTriage && !aiLoading && (
+                        <div
+                          data-testid="ai-receptionist-result"
+                          className="rounded-2xl bg-white border border-slate-200/90 p-5 space-y-5 shadow-xs"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100">
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                              <span className="font-semibold text-[#0B192C]">
+                                {draft.aiTriage.suggestedCategory}
+                              </span>
+                              <span aria-hidden="true">·</span>
+                              <span className="inline-flex items-center gap-1 text-[#2563EB] font-medium">
+                                <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+                                Generado por IA · Revisado por especialista
+                              </span>
+                            </div>
+                            <span className="font-mono tabular-nums text-xs font-semibold text-emerald-700">
+                              ~{draft.aiTriage.estimatedMinutes} min estimados
+                            </span>
+                          </div>
+
+                          {/* Safe Self-Service Steps */}
+                          {draft.aiTriage.selfServiceSteps &&
+                            draft.aiTriage.selfServiceSteps.length > 0 && (
+                              <div className="rounded-xl bg-[#F2FBF7] border border-emerald-200/70 p-4 space-y-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <p className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
+                                    <ShieldCheck
+                                      className="w-4 h-4 text-[#10B981]"
+                                      aria-hidden="true"
+                                    />
+                                    <span>Pasos seguros que puedes probar ahora mismo</span>
+                                  </p>
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelfSolved(true)}
+                                    className="text-xs font-semibold text-emerald-800 hover:text-emerald-950 underline underline-offset-2"
+                                  >
+                                    ¡Me funcionó! Ya quedó resuelto
+                                  </button>
+                                </div>
+
+                                <ol className="space-y-2 text-xs sm:text-[13px] text-slate-700">
+                                  {draft.aiTriage.selfServiceSteps.map((stepText, idx) => (
+                                    <li key={idx} className="flex items-start gap-2.5">
+                                      <span className="w-5 h-5 rounded-full bg-white border border-emerald-300 text-emerald-800 font-mono tabular-nums text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">
+                                        {idx + 1}
+                                      </span>
+                                      <span className="leading-relaxed">{stepText}</span>
+                                    </li>
+                                  ))}
+                                </ol>
+                              </div>
+                            )}
+
+                          {selfSolved && (
+                            <div
+                              role="status"
+                              className="rounded-xl bg-emerald-600 text-white px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs"
+                            >
+                              <span className="inline-flex items-center gap-2 font-medium">
+                                <CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" />
+                                ¡Excelente! Me alegra haberte ayudado sin costo. Si vuelve a ocurrir, aquí seguimos disponibles.
+                              </span>
+                              <button
+                                type="button"
+                                onClick={handleResetConversation}
+                                className="font-semibold underline whitespace-nowrap"
+                              >
+                                Nueva consulta
+                              </button>
+                            </div>
+                          )}
+
+                          {/* 2–3 Brief Follow-Up Questions */}
+                          {draft.aiTriage.followUpQuestions.length > 0 && !selfSolved && (
+                            <div className="space-y-3">
+                              <p className="text-xs font-semibold text-[#0B192C]">
+                                Preguntas rápidas para afinar tu diagnóstico (opcional):
+                              </p>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                {draft.aiTriage.followUpQuestions.slice(0, 3).map((q, idx) => (
+                                  <div key={idx} className="space-y-1">
+                                    <label
+                                      htmlFor={`ai-q-${idx}`}
+                                      className="block text-xs font-medium text-slate-700 leading-snug"
+                                    >
+                                      {idx + 1}. {q}
+                                    </label>
+                                    <input
+                                      id={`ai-q-${idx}`}
+                                      type="text"
+                                      maxLength={180}
+                                      value={aiQuestionAnswers[idx] ?? ''}
+                                      onChange={(e) =>
+                                        setAiQuestionAnswers((prev) => ({
+                                          ...prev,
+                                          [idx]: e.target.value,
+                                        }))
+                                      }
+                                      placeholder="Tu respuesta breve..."
+                                      className="w-full rounded-xl border border-slate-200 bg-slate-50/70 focus:bg-white px-3 py-2 text-xs text-[#0B192C] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-blue-100"
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+
+                              {hasAnsweredFollowUps && (
+                                <button
+                                  type="button"
+                                  onClick={handleRefineWithAnswers}
+                                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#2563EB] hover:text-[#1D4ED8]"
+                                >
+                                  <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+                                  <span>Enviar respuestas para afinar guía</span>
+                                </button>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Escalation Action Strip */}
+                          {!selfSolved && (
+                            <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                              <div className="space-y-0.5">
+                                <p className="text-xs font-semibold text-[#0B192C]">
+                                  ¿Sigue igual o prefieres que un especialista lo resuelva por ti?
+                                </p>
+                                <p className="text-xs text-slate-600">
+                                  Tarifa fija sugerida:{' '}
+                                  <strong className="font-mono tabular-nums text-[#0B192C]">
+                                    ${activePrice} USD
+                                  </strong>{' '}
+                                  <span className="text-emerald-700 font-medium">
+                                    · Si no lo resolvemos, no pagas
+                                  </span>
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                data-testid="escalate-to-step3-button"
+                                onClick={handleEscalateToSpecialist}
+                                className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs sm:text-sm font-semibold shadow-md shadow-blue-600/20 active:scale-[0.99] transition-all whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2563EB]"
+                              >
+                                <span>Ver tarifa fija y solicitar especialista</span>
+                                <ArrowRight className="w-4 h-4" aria-hidden="true" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Free-Text Conversational Composer */}
+                <form onSubmit={handleComposerSubmit} className="space-y-2.5">
+                  <div className="rounded-2xl border border-slate-200 bg-white focus-within:border-[#2563EB] focus-within:ring-2 focus-within:ring-blue-100 transition-all">
+                    <label htmlFor="chat-symptom-input" className="sr-only">
+                      Escribe aquí qué está pasando con tu equipo
+                    </label>
+                    <textarea
+                      ref={composerRef}
+                      id="chat-symptom-input"
+                      data-testid="chat-symptom-input"
+                      rows={2}
+                      maxLength={500}
+                      value={composerText}
+                      onChange={(e) => setComposerText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          if (composerText.trim() && !aiLoading) {
+                            const text = composerText.trim();
+                            setComposerText('');
+                            void executeAiTriage(text, draft.category ?? 'Otro');
+                          }
+                        }
+                      }}
+                      placeholder="Escribe aquí qué está pasando..."
+                      className="w-full bg-transparent px-4 pt-3.5 pb-2 text-sm text-[#0B192C] placeholder:text-slate-400 focus:outline-none resize-none"
+                    />
+                    <div className="px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100">
+                      <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-500">
+                        <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" aria-hidden="true" />
+                        <span>No incluyas contraseñas ni códigos de acceso</span>
+                      </span>
+
+                      <div className="flex items-center gap-3 ml-auto">
+                        <span className="font-mono tabular-nums text-[11px] text-slate-400">
+                          {composerText.length}/500
+                        </span>
+                        <button
+                          type="submit"
+                          aria-label="Enviar mensaje al asistente IA"
+                          disabled={aiLoading || composerText.trim().length === 0}
+                          className="w-9 h-9 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] disabled:bg-slate-200 disabled:text-slate-400 text-white flex items-center justify-center shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+                        >
+                          {aiLoading ? (
+                            <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                          ) : (
+                            <ArrowUp className="w-4 h-4" aria-hidden="true" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <p className="text-center text-[11px] text-slate-500">
+                    La IA puede equivocarse. Tú decides qué pasos seguir. Si escalas,
+                    verás el precio antes de aceptar.
+                  </p>
+                </form>
+              </div>
+            )}
+
+            {/* STAGE 2: Transparent Fixed-Rate Proposal, +18 Verification & Ticket Creation */}
+            {isStage2 && (
+              <form
+                onSubmit={handleSubmit}
+                data-testid="wizard-step-3"
+                className="p-5 sm:p-8 space-y-6"
+                noValidate
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-xl font-bold text-[#0B192C]">
+                      Revisa tu resumen y tarifa fija antes de abrir tu sala
+                    </h3>
+                    <p className="text-xs sm:text-sm text-slate-600 mt-0.5">
+                      Sin cobros sorpresa. El especialista recibe tu caso listo para resolverlo más rápido.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onChangeDraft({ step: 1 })}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-[#0B192C]"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Volver al chat IA</span>
+                  </button>
+                </div>
+
+                {/* Technician-Ready Case Summary + Fixed Rate Card */}
+                <div className="rounded-2xl border border-slate-200 bg-[#F8FAFC] p-5 space-y-4">
+                  <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+                    <div className="space-y-1.5 min-w-0">
+                      <p className="text-xs font-semibold text-[#2563EB] flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                        <span>Resumen listo para tu especialista</span>
+                      </p>
+                      <p className="text-sm font-bold text-[#0B192C]">
+                        {draft.category ?? 'Soporte técnico remoto'} · {currentOs}
+                      </p>
+                      <p className="text-xs text-slate-600 leading-relaxed">
+                        {draft.aiTriage?.preDiagnosis ??
+                          deriveInitialDiagnosisSummary(
+                            draft.category ?? 'Otro',
+                            currentOs,
+                            draft.description
+                          )}
+                      </p>
+                    </div>
+
+                    <div className="md:text-right shrink-0 rounded-xl bg-white border border-slate-200 px-4 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        {isPymeMonthly ? 'Plan mensual Pyme' : activeTier}
+                      </p>
+                      <div className="flex items-baseline md:justify-end gap-2 mt-0.5">
+                        <span className="font-mono tabular-nums text-xs text-slate-400 line-through">
+                          ${activeRegularPrice}
+                        </span>
+                        <span className="font-mono tabular-nums text-2xl font-bold text-[#0B192C]">
+                          ${activePrice}
+                          <span className="text-xs font-semibold text-slate-600">
+                            {isPymeMonthly ? ' USD/mes' : ' USD'}
+                          </span>
+                        </span>
+                      </div>
+                      <p className="text-[11px] font-semibold text-emerald-700 mt-0.5">
+                        {activeDiscount}% OFF · Si no lo resolvemos, no pagas
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Toggle to change Fixed Rate or Switch to Pyme Monthly */}
+                  <div className="pt-3 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs text-slate-600">
+                      {isPymeMonthly
+                        ? 'Renovación mensual con cancelación en 1 clic sin penalizaciones.'
+                        : 'Tarifa única por incidente resuelto. Pago seguro con Stripe, PayPal o G Pay.'}
+                    </span>
                     <button
                       type="button"
-                      disabled={aiLoading || !receptionistEnabled}
-                      onClick={() => void handleRunAiReceptionist()}
-                      className="inline-flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-[#2563EB] hover:bg-blue-500 disabled:bg-slate-400 rounded-lg transition-colors whitespace-nowrap shrink-0"
+                      onClick={() => setShowTierSwitcher((prev) => !prev)}
+                      className="text-xs font-semibold text-[#2563EB] hover:text-[#1D4ED8] underline underline-offset-2"
                     >
-                      {aiLoading ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
-                      ) : (
-                        <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
-                      )}
-                      <span>
-                        {!receptionistEnabled
-                          ? 'AI Receptionist pausado'
-                          : aiLoading
-                          ? 'Analizando falla...'
-                          : draft.aiTriage
-                          ? 'Recalcular Diagnóstico IA'
-                          : 'Analizar con AI Receptionist'}
-                      </span>
+                      {showTierSwitcher
+                        ? 'Ocultar niveles y planes Pyme'
+                        : 'Cambiar nivel o ver planes Pyme ($39 / $79)'}
                     </button>
                   </div>
 
-                  {!receptionistEnabled && (
-                    <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                      Gobernanza activa: AI Receptionist está pausado por el administrador. Puedes continuar normalmente con triaje directo al técnico.
-                    </p>
-                  )}
-
-                  {isCriticalServerCase && receptionistEnabled && (
-                    <p className="text-xs text-blue-900 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
-                      Regla de escalamiento activa: Caso crítico de servidor detectado; se prioriza atención por especialista humano (Avanzado $55).
-                    </p>
-                  )}
-
-                  {draft.aiTriage && (
-                    <div
-                      data-testid="ai-receptionist-result"
-                      className="space-y-4 pt-3 border-t border-slate-200"
-                    >
-                      <div className="bg-white border border-slate-200 rounded-lg p-4 space-y-1.5">
-                        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                          <span className="font-semibold text-[#0B192C]">
-                            Pre-diagnóstico generado
-                          </span>
-                          <span className="font-mono tabular-nums text-emerald-700 font-medium">
-                            Sugerido: {draft.aiTriage.suggestedTier} · ~
-                            {draft.aiTriage.estimatedMinutes} min
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-700 leading-relaxed">
-                          {draft.aiTriage.preDiagnosis}
-                        </p>
+                  {showTierSwitcher && (
+                    <div className="pt-2 space-y-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        {SERVICE_TIER_OPTIONS.map((tierOpt) => {
+                          const selected =
+                            !isPymeMonthly && draft.serviceTier === tierOpt.id;
+                          return (
+                            <button
+                              key={tierOpt.id}
+                              type="button"
+                              onClick={() => handleSelectOneTimeTier(tierOpt.id)}
+                              className={`rounded-xl border p-3 text-left transition-all ${
+                                selected
+                                  ? 'border-[#2563EB] bg-blue-50/70 ring-1 ring-[#2563EB]'
+                                  : 'border-slate-200 bg-white hover:border-blue-300'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-bold text-[#0B192C]">
+                                  {tierOpt.id}
+                                </span>
+                                <span className="font-mono tabular-nums text-sm font-bold text-[#2563EB]">
+                                  ${tierOpt.priceUsd}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-600 mt-1 leading-snug">
+                                {tierOpt.summary}
+                              </p>
+                            </button>
+                          );
+                        })}
                       </div>
 
-                      <div className="space-y-2.5">
-                        <p className="text-xs font-semibold text-[#0B192C]">
-                          Preguntas rápidas para afinar la intervención (opcional):
-                        </p>
-                        {draft.aiTriage.followUpQuestions.map((question, idx) => {
-                          const currentAnswer =
-                            draft.aiTriage?.selectedAnswers?.[idx] ?? '';
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {PYME_PLANS.map((pyme) => {
+                          const selected =
+                            isPymeMonthly && draft.serviceTier === pyme.serviceTier;
                           return (
-                            <div
-                              key={idx}
-                              className="bg-white border border-slate-200 rounded-lg p-3 space-y-2"
+                            <button
+                              key={pyme.id}
+                              type="button"
+                              onClick={() => handleSelectPymeTier(pyme.serviceTier)}
+                              className={`rounded-xl border p-3 text-left transition-all ${
+                                selected
+                                  ? 'border-[#0B192C] bg-[#0B192C] text-white'
+                                  : 'border-slate-200 bg-white hover:border-slate-400 text-[#0B192C]'
+                              }`}
                             >
-                              <p className="text-xs font-medium text-slate-800">
-                                {idx + 1}. {question}
-                              </p>
-                              <div className="flex flex-wrap gap-2">
-                                {QUICK_ANSWERS.map((ans) => {
-                                  const active = currentAnswer === ans;
-                                  return (
-                                    <button
-                                      key={ans}
-                                      type="button"
-                                      onClick={() =>
-                                        handleSelectFollowUpAnswer(idx, ans)
-                                      }
-                                      className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${
-                                        active
-                                          ? 'bg-[#0B192C] text-white border-[#0B192C]'
-                                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                                      }`}
-                                    >
-                                      {ans}
-                                    </button>
-                                  );
-                                })}
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-bold">{pyme.name}</span>
+                                <span className="font-mono tabular-nums text-sm font-bold">
+                                  ${pyme.priceUsd}/mes
+                                </span>
                               </div>
-                            </div>
+                              <p
+                                className={`text-[11px] mt-1 ${
+                                  selected ? 'text-slate-300' : 'text-slate-600'
+                                }`}
+                              >
+                                {pyme.devicesLimit} · {pyme.summary}
+                              </p>
+                            </button>
                           );
                         })}
                       </div>
                     </div>
                   )}
                 </div>
-              </div>
 
-              <div className="mt-8 pt-6 border-t border-slate-100 flex items-center justify-between gap-4">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onSetErrors({});
-                    onChangeDraft({ step: 1 });
-                  }}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-slate-700 hover:text-[#0B192C] border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors whitespace-nowrap shrink-0"
-                >
-                  <ArrowLeft className="w-4 h-4" aria-hidden="true" />
-                  <span>Volver</span>
-                </button>
-
-                <button
-                  type="button"
-                  disabled={aiLoading}
-                  onClick={() => void handleNextFromStep2()}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-[#0B192C] hover:bg-[#0F172A] disabled:bg-slate-400 rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
-                >
-                  <span>
-                    {aiLoading ? 'Preparando Pre-Diagnóstico...' : 'Confirmar Tarifa y Datos'}
-                  </span>
-                  <ArrowRight className="w-4 h-4" aria-hidden="true" />
-                </button>
-              </div>
-            </div>
-          )}
-
-          {draft.step === 3 && (
-            <form onSubmit={handleSubmitStep3} noValidate data-testid="wizard-step-3">
-              <div className="mb-6">
-                <p className="text-xs text-slate-500 mb-1">
-                  {draft.category} · {draft.operatingSystem}
-                </p>
-                <h3 className="text-lg font-semibold text-[#0B192C]">
-                  Paso 3 · Confirmación de tarifa y emisión de Ticket
-                </h3>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-                <div className="lg:col-span-7 space-y-5">
-                  <div>
-                    <span
-                      id="service-tier-label"
-                      className="block text-sm font-semibold text-[#0B192C] mb-2"
-                    >
-                      Nivel de asistencia
-                    </span>
-                    <div
-                      role="radiogroup"
-                      aria-labelledby="service-tier-label"
-                      className="grid grid-cols-1 sm:grid-cols-3 gap-2.5"
-                    >
-                      {SERVICE_TIER_OPTIONS.map((tier) => {
-                        const selected = draft.serviceTier === tier.id;
-                        return (
-                          <button
-                            key={tier.id}
-                            type="button"
-                            role="radio"
-                            aria-checked={selected}
-                            onClick={() =>
-                              onChangeDraft({ serviceTier: tier.id as ServiceTier })
-                            }
-                            className={`p-3 rounded-lg border text-left transition-colors ${
-                              selected
-                                ? 'border-[#2563EB] bg-blue-50/40 ring-1 ring-[#2563EB]'
-                                : 'border-slate-200 hover:border-slate-300 bg-white'
-                            }`}
-                          >
-                            <p className="text-xs font-semibold text-[#0B192C]">
-                              {tier.id}
-                            </p>
-                            <p className="text-[11px] text-slate-500 mt-1 leading-snug">
-                              {tier.summary}
-                            </p>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
+                {/* Editable Client Details + Mandatory +18 Birth Date */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
                     <label
                       htmlFor="client-name"
-                      className="block text-sm font-semibold text-[#0B192C] mb-1.5"
+                      className="block text-xs font-semibold text-[#0B192C] mb-1.5"
                     >
-                      Nombre completo
+                      Nombre completo *
                     </label>
                     <input
                       id="client-name"
                       type="text"
-                      required
                       value={draft.clientName}
-                      onChange={(e) => {
-                        onChangeDraft({ clientName: e.target.value });
-                        if (errors.clientName) {
-                          const nextErrors = { ...errors };
-                          delete nextErrors.clientName;
-                          onSetErrors(nextErrors);
-                        }
-                      }}
-                      placeholder="Ej. Andrea Morales"
-                      className="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/15"
+                      onChange={(e) => onChangeDraft({ clientName: e.target.value })}
+                      placeholder="Ej. María Fernanda Torres"
+                      className={`w-full rounded-xl border px-3.5 py-2.5 text-sm text-[#0B192C] bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 ${
+                        errors.clientName
+                          ? 'border-red-400 focus:border-red-500'
+                          : 'border-slate-300 focus:border-[#2563EB]'
+                      }`}
                     />
                     {errors.clientName && (
-                      <p role="alert" className="mt-1.5 text-sm font-medium text-red-700">
-                        {errors.clientName}
-                      </p>
+                      <p className="text-xs text-red-600 mt-1">{errors.clientName}</p>
                     )}
                   </div>
 
                   <div>
                     <label
                       htmlFor="client-email"
-                      className="block text-sm font-semibold text-[#0B192C] mb-1.5"
+                      className="block text-xs font-semibold text-[#0B192C] mb-1.5"
                     >
-                      Correo electrónico
+                      Correo electrónico *
                     </label>
                     <input
                       id="client-email"
                       type="email"
-                      required
                       value={draft.clientEmail}
-                      onChange={(e) => {
-                        onChangeDraft({ clientEmail: e.target.value });
-                        if (errors.clientEmail) {
-                          const nextErrors = { ...errors };
-                          delete nextErrors.clientEmail;
-                          onSetErrors(nextErrors);
-                        }
-                      }}
-                      placeholder="andrea@empresa.com"
-                      className="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/15"
+                      onChange={(e) => onChangeDraft({ clientEmail: e.target.value })}
+                      placeholder="tu@correo.com"
+                      className={`w-full rounded-xl border px-3.5 py-2.5 text-sm text-[#0B192C] bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 ${
+                        errors.clientEmail
+                          ? 'border-red-400 focus:border-red-500'
+                          : 'border-slate-300 focus:border-[#2563EB]'
+                      }`}
                     />
                     {errors.clientEmail && (
-                      <p role="alert" className="mt-1.5 text-sm font-medium text-red-700">
-                        {errors.clientEmail}
-                      </p>
+                      <p className="text-xs text-red-600 mt-1">{errors.clientEmail}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="client-birth-date"
+                      className="block text-xs font-semibold text-[#0B192C] mb-1.5"
+                    >
+                      Fecha de nacimiento (+18 años) *
+                    </label>
+                    <input
+                      id="client-birth-date"
+                      type="date"
+                      value={draft.birthDate ?? ''}
+                      onChange={(e) => onChangeDraft({ birthDate: e.target.value })}
+                      className={`w-full rounded-xl border px-3.5 py-2.5 text-sm text-[#0B192C] bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 ${
+                        errors.birthDate
+                          ? 'border-red-400 focus:border-red-500'
+                          : 'border-slate-300 focus:border-[#2563EB]'
+                      }`}
+                    />
+                    {errors.birthDate && (
+                      <p className="text-xs text-red-600 mt-1">{errors.birthDate}</p>
                     )}
                   </div>
                 </div>
 
-                <div className="lg:col-span-5 bg-slate-50 border border-slate-200 rounded-lg p-5 space-y-4">
-                  <div className="flex items-baseline justify-between border-b border-slate-200 pb-4">
-                    <div>
-                      <p className="text-xs font-medium text-slate-500">
-                        Tarifa única transparente
-                      </p>
-                      <p className="text-sm font-semibold text-[#0B192C] mt-0.5">
-                        {draft.serviceTier}
-                      </p>
-                    </div>
-                    <p className="font-mono tabular-nums text-2xl font-bold text-[#0B192C]">
-                      ${selectedTierPrice} USD
-                    </p>
-                  </div>
-
-                  <dl className="space-y-2 text-xs text-slate-600">
-                    <div className="flex justify-between gap-4">
-                      <dt className="text-slate-500">Categoría</dt>
-                      <dd className="font-medium text-slate-900 text-right">
-                        {draft.category}
-                      </dd>
-                    </div>
-                    <div className="flex justify-between gap-4">
-                      <dt className="text-slate-500">Sistema</dt>
-                      <dd className="font-medium text-slate-900 text-right">
-                        {draft.operatingSystem}
-                      </dd>
-                    </div>
-                    <div className="flex justify-between gap-4">
-                      <dt className="text-slate-500">Pre-diagnóstico IA</dt>
-                      <dd className="font-medium text-emerald-700 text-right">
-                        {draft.aiTriage ? 'Adjunto al ticket' : 'Automático'}
-                      </dd>
-                    </div>
-                  </dl>
-
-                  {draft.aiTriage && (
-                    <div className="p-3 rounded-lg bg-white border border-slate-200 text-[11px] text-slate-600 leading-relaxed">
-                      <strong className="text-[#0B192C]">Resumen AI Receptionist:</strong>{' '}
-                      {draft.aiTriage.preDiagnosis}
-                    </div>
+                {/* Mandatory Unchecked-by-Default Legal & Marketing Checkboxes (ADR-05) */}
+                <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(draft.termsAccepted)}
+                      onChange={(e) =>
+                        onChangeDraft({ termsAccepted: e.target.checked })
+                      }
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB]"
+                    />
+                    <span className="text-xs text-slate-700 leading-relaxed">
+                      Declaro ser mayor de 18 años y acepto los{' '}
+                      <button
+                        type="button"
+                        onClick={() => onOpenLegalDoc?.('terms')}
+                        className="font-semibold text-[#2563EB] underline underline-offset-2"
+                      >
+                        Términos de Servicio
+                      </button>
+                      , la{' '}
+                      <button
+                        type="button"
+                        onClick={() => onOpenLegalDoc?.('privacy')}
+                        className="font-semibold text-[#2563EB] underline underline-offset-2"
+                      >
+                        Política de Privacidad
+                      </button>{' '}
+                      y la{' '}
+                      <button
+                        type="button"
+                        onClick={() => onOpenLegalDoc?.('refunds')}
+                        className="font-semibold text-[#2563EB] underline underline-offset-2"
+                      >
+                        Política de Reembolsos y Garantía
+                      </button>
+                      . *
+                    </span>
+                  </label>
+                  {errors.termsAccepted && (
+                    <p className="text-xs text-red-600 pl-7">{errors.termsAccepted}</p>
                   )}
 
-                  <div className="pt-3 border-t border-slate-200 flex items-start gap-2 text-xs text-slate-600">
-                    <ShieldCheck
-                      className="w-4 h-4 text-[#10B981] shrink-0 mt-0.5"
-                      aria-hidden="true"
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(draft.marketingOptIn)}
+                      onChange={(e) =>
+                        onChangeDraft({ marketingOptIn: e.target.checked })
+                      }
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB]"
                     />
-                    <span>
-                      Al confirmar pasarás directo a tu Sala de Conexión{' '}
-                      <span className="font-mono">/sesion/RS-XXXX</span> con trazabilidad
-                      de técnico y descarga del agente.
+                    <span className="text-xs text-slate-600 leading-relaxed">
+                      Deseo recibir consejos preventivos de seguridad y promociones de
+                      Remote Support 365 por correo (opcional).
                     </span>
-                  </div>
+                  </label>
                 </div>
-              </div>
 
-              <div className="mt-8 pt-6 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onSetErrors({});
-                    onChangeDraft({ step: 2 });
-                  }}
-                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-slate-700 hover:text-[#0B192C] border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors whitespace-nowrap shrink-0"
-                >
-                  <ArrowLeft className="w-4 h-4" aria-hidden="true" />
-                  <span>Volver</span>
-                </button>
+                {/* Error Summary Above Submit CTA */}
+                {(activeErrorList.length > 0 || persistenceError) && (
+                  <div
+                    role="alert"
+                    className="rounded-xl bg-red-50 border border-red-200 p-3.5 text-xs text-red-800 space-y-1"
+                  >
+                    <p className="font-semibold flex items-center gap-1.5">
+                      <AlertCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
+                      <span>Revisa los siguientes puntos antes de continuar:</span>
+                    </p>
+                    <ul className="list-disc pl-5 space-y-0.5">
+                      {activeErrorList.map((msg, i) => (
+                        <li key={i}>{msg}</li>
+                      ))}
+                      {persistenceError && <li>{persistenceError}</li>}
+                    </ul>
+                  </div>
+                )}
 
-                <button
-                  type="submit"
-                  className="inline-flex items-center justify-center gap-2 px-6 py-3 text-sm font-semibold text-white bg-[#10B981] hover:bg-emerald-500 rounded-lg transition-colors duration-150 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2"
-                >
-                  <span>Generar Ticket y Sala de Conexión</span>
-                  <ArrowRight className="w-4 h-4" aria-hidden="true" />
-                </button>
-              </div>
-            </form>
-          )}
-        </div>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-2">
+                  <p className="text-xs text-slate-600 flex items-center gap-1.5">
+                    <Check className="w-4 h-4 text-[#10B981] shrink-0" aria-hidden="true" />
+                    <span>
+                      Acceso remoto RustDesk bajo demanda y revocable en 1 clic.
+                    </span>
+                  </p>
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-60 text-white text-sm font-semibold shadow-lg shadow-blue-600/20 active:scale-[0.99] transition-all whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2563EB]"
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                        <span>Generando sala segura...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Generar Ticket y Abrir Sala Segura</span>
+                        <ArrowRight className="w-4 h-4" aria-hidden="true" />
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        )}
       </div>
     </section>
   );

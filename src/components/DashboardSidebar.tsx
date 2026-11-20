@@ -251,7 +251,7 @@ export function DashboardSidebar({
         {/* Navigation Groups */}
         <nav
           aria-label="Navegación del Centro de Operaciones"
-          className="flex-1 px-3 py-3 space-y-5 overflow-y-auto"
+          className="flex-1 px-3 py-3 space-y-5 overflow-y-auto scrollbar-transparent"
         >
           {navGroups.map((group) => (
             <div key={group.groupLabel} className="space-y-1">

@@ -23,6 +23,8 @@ create table if not exists public.organizations (
     check (payment_gateway in ('stripe', 'paypal', 'stripe_paypal')),
   ai_credits_monthly integer not null default 5000,
   ai_credits_used integer not null default 0,
+  subscription_auto_renew boolean not null default true,
+  subscription_canceled_at timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -39,6 +41,11 @@ create table if not exists public.profiles (
   rating numeric(3, 2) not null default 5.00
     check (rating >= 0 and rating <= 5),
   is_verified boolean not null default false,
+  birth_date date,
+  is_adult_verified boolean not null default false,
+  terms_accepted_at timestamptz,
+  terms_version text,
+  marketing_opt_in boolean not null default false,
   created_at timestamptz not null default now()
 );
 
@@ -77,7 +84,7 @@ create table if not exists public.technician_profiles (
   email text not null unique,
   availability_status text not null default 'available'
     check (availability_status in ('available', 'busy', 'paused', 'offline')),
-  specialties text[] not null default array['Windows', 'Redes'],
+  specialties text[] not null default array['Windows & BSOD', 'Redes & VPN'],
   accepting_requests boolean not null default true,
   rating numeric(3, 2) not null default 5.00
     check (rating >= 0 and rating <= 5),
@@ -97,19 +104,46 @@ create table if not exists public.tickets (
   id uuid primary key default gen_random_uuid(),
   ticket_code text not null unique, -- Ej: RS-1027
   organization_id uuid references public.organizations(id) on delete set null,
+  organization_name text,
   client_name text not null,
   client_email text not null,
   category text not null default 'Otro'
-    check (category in ('Impresoras', 'Correo/Office', 'Sistema Operativo/Lentitud', 'Redes/Wi-Fi', 'Otro')),
+    check (category in (
+      'Windows lento o bajo rendimiento',
+      'Aplicaciones que no arrancan',
+      'Pantallazos azules (BSOD)',
+      'Problemas de Wi-Fi o red',
+      'Errores de Microsoft 365 y Outlook',
+      'Configuración de impresoras',
+      'Eliminación de malware y virus',
+      'Recuperación de archivos',
+      'Actualizaciones de Windows',
+      'VPN y acceso remoto',
+      'Impresoras',
+      'Correo/Office',
+      'Sistema Operativo/Lentitud',
+      'Redes/Wi-Fi',
+      'Otro'
+    )),
   os_type text not null
-    check (os_type in ('Windows', 'Mac')),
-  service_tier text not null default 'Express $25'
-    check (service_tier in ('Express $25', 'Optimización $40', 'Avanzado $55')),
+    check (os_type in ('Windows', 'Mac', 'Linux', 'Mobile')),
+  service_tier text not null default 'Express $15'
+    check (service_tier in ('Express $15', 'Optimización $29', 'Avanzado $39', 'Pyme Esencial $39/mes', 'Pyme Corporativo $79/mes')),
+  billing_mode text not null default 'one_time'
+    check (billing_mode in ('one_time', 'pyme_monthly')),
   priority text not null default 'medium'
     check (priority in ('high', 'medium', 'low')),
   problem_description text not null,
   ai_diagnosis jsonb not null default '{}'::jsonb,
   ai_diagnosis_summary text,
+  client_birth_date date,
+  is_adult_verified boolean not null default false,
+  terms_accepted_at timestamptz,
+  terms_version text,
+  marketing_opt_in boolean not null default false,
+  subscription_status text not null default 'none'
+    check (subscription_status in ('none', 'active', 'canceled')),
+  anonymized_at timestamptz,
   rustdesk_id text
     check (rustdesk_id is null or rustdesk_id ~ '^[0-9]{9}$'),
   agent_type text not null default 'temporary'
@@ -168,14 +202,93 @@ create table if not exists public.client_devices (
   client_name text not null,
   client_email text not null,
   device_name text not null,
-  os_type text not null check (os_type in ('Windows', 'Mac')),
+  os_type text not null check (os_type in ('Windows', 'Mac', 'Linux', 'Mobile')),
   rustdesk_id text not null check (rustdesk_id ~ '^[0-9]{9}$'),
   agent_type text not null default 'installed' check (agent_type in ('temporary', 'installed')),
-  plan_name text not null default 'Plan Pyme $149/mes',
+  service_tier text not null default 'Pyme Corporativo $79/mes'
+    check (service_tier in ('Express $15', 'Optimización $29', 'Avanzado $39', 'Pyme Esencial $39/mes', 'Pyme Corporativo $79/mes')),
+  plan_name text not null default 'Pyme Corporativo $79/mes',
   is_online boolean not null default true,
   last_seen_at timestamptz not null default now(),
   created_at timestamptz not null default now()
 );
+
+-- Migración idempotente para bases ya provisionadas (actualiza constraints y columnas nuevas)
+do $$
+begin
+  alter table public.tickets add column if not exists organization_name text;
+  alter table public.tickets add column if not exists billing_mode text not null default 'one_time';
+  alter table public.tickets add column if not exists subscription_status text not null default 'none';
+  alter table public.tickets add column if not exists ai_diagnosis jsonb not null default '{}'::jsonb;
+  alter table public.tickets add column if not exists ai_diagnosis_summary text;
+  alter table public.tickets add column if not exists client_birth_date date;
+  alter table public.tickets add column if not exists is_adult_verified boolean not null default false;
+  alter table public.tickets add column if not exists terms_accepted_at timestamptz;
+  alter table public.tickets add column if not exists terms_version text;
+  alter table public.tickets add column if not exists marketing_opt_in boolean not null default false;
+  alter table public.tickets add column if not exists anonymized_at timestamptz;
+  alter table public.tickets add column if not exists consent_accepted_at timestamptz;
+  alter table public.tickets add column if not exists assigned_technician_id uuid references auth.users(id) on delete set null;
+  alter table public.tickets add column if not exists assigned_technician_name text;
+  alter table public.tickets add column if not exists assigned_technician_specialty text;
+  alter table public.tickets add column if not exists claimed_at timestamptz;
+  alter table public.tickets add column if not exists resolved_at timestamptz;
+
+  alter table public.tickets alter column service_tier set default 'Express $15';
+  alter table public.tickets drop constraint if exists tickets_category_check;
+  alter table public.tickets
+    add constraint tickets_category_check
+    check (category in (
+      'Windows lento o bajo rendimiento',
+      'Aplicaciones que no arrancan',
+      'Pantallazos azules (BSOD)',
+      'Problemas de Wi-Fi o red',
+      'Errores de Microsoft 365 y Outlook',
+      'Configuración de impresoras',
+      'Eliminación de malware y virus',
+      'Recuperación de archivos',
+      'Actualizaciones de Windows',
+      'VPN y acceso remoto',
+      'Impresoras',
+      'Correo/Office',
+      'Sistema Operativo/Lentitud',
+      'Redes/Wi-Fi',
+      'Otro'
+    ));
+
+  alter table public.tickets drop constraint if exists tickets_os_type_check;
+  alter table public.tickets
+    add constraint tickets_os_type_check
+    check (os_type in ('Windows', 'Mac', 'Linux', 'Mobile'));
+
+  alter table public.tickets drop constraint if exists tickets_service_tier_check;
+  alter table public.tickets
+    add constraint tickets_service_tier_check
+    check (service_tier in ('Express $15', 'Optimización $29', 'Avanzado $39', 'Pyme Esencial $39/mes', 'Pyme Corporativo $79/mes'));
+
+  alter table public.tickets drop constraint if exists tickets_billing_mode_check;
+  alter table public.tickets
+    add constraint tickets_billing_mode_check
+    check (billing_mode in ('one_time', 'pyme_monthly'));
+
+  alter table public.tickets drop constraint if exists tickets_subscription_status_check;
+  alter table public.tickets
+    add constraint tickets_subscription_status_check
+    check (subscription_status in ('none', 'active', 'canceled'));
+
+  alter table public.client_devices
+    add column if not exists service_tier text not null default 'Pyme Corporativo $79/mes';
+  alter table public.client_devices alter column plan_name set default 'Pyme Corporativo $79/mes';
+  alter table public.client_devices drop constraint if exists client_devices_os_type_check;
+  alter table public.client_devices
+    add constraint client_devices_os_type_check
+    check (os_type in ('Windows', 'Mac', 'Linux', 'Mobile'));
+
+  alter table public.client_devices drop constraint if exists client_devices_service_tier_check;
+  alter table public.client_devices
+    add constraint client_devices_service_tier_check
+    check (service_tier in ('Express $15', 'Optimización $29', 'Avanzado $39', 'Pyme Esencial $39/mes', 'Pyme Corporativo $79/mes'));
+end $$;
 
 -- ----------------------------------------------------------------------------
 -- 8. Tabla: remote_sessions
@@ -309,12 +422,27 @@ security definer
 set search_path = public
 as $$
 begin
-  insert into public.profiles (id, full_name, email, role)
+  insert into public.profiles (
+    id,
+    full_name,
+    email,
+    role,
+    birth_date,
+    is_adult_verified,
+    terms_accepted_at,
+    terms_version,
+    marketing_opt_in
+  )
   values (
     new.id,
     coalesce(new.raw_user_meta_data ->> 'full_name', split_part(new.email, '@', 1)),
     new.email,
-    coalesce(new.raw_user_meta_data ->> 'role', 'client')
+    coalesce(new.raw_user_meta_data ->> 'role', 'client'),
+    nullif(new.raw_user_meta_data ->> 'birth_date', '')::date,
+    coalesce((new.raw_user_meta_data ->> 'is_adult_verified')::boolean, false),
+    nullif(new.raw_user_meta_data ->> 'terms_accepted_at', '')::timestamptz,
+    nullif(new.raw_user_meta_data ->> 'terms_version', ''),
+    coalesce((new.raw_user_meta_data ->> 'marketing_opt_in')::boolean, false)
   )
   on conflict (id) do nothing;
   return new;
@@ -395,6 +523,16 @@ alter table public.audit_logs enable row level security;
 drop policy if exists "orgs_select_members" on public.organizations;
 create policy "orgs_select_members" on public.organizations
   for select using (public.is_org_member(id));
+
+drop policy if exists "orgs_update_members" on public.organizations;
+create policy "orgs_update_members" on public.organizations
+  for update using (public.is_org_member(id))
+  with check (public.is_org_member(id));
+
+drop policy if exists "profiles_self_select_update" on public.profiles;
+create policy "profiles_self_select_update" on public.profiles
+  for all using (id = auth.uid())
+  with check (id = auth.uid());
 
 drop policy if exists "org_members_org_scoped" on public.organization_members;
 create policy "org_members_org_scoped" on public.organization_members
@@ -530,3 +668,6 @@ begin
     alter publication supabase_realtime add table public.ai_agents_config;
   end if;
 end $$;
+
+-- Refresca automáticamente la caché de esquema de PostgREST tras ejecutar la migración
+notify pgrst, 'reload schema';

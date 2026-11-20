@@ -45,10 +45,10 @@ interface DashboardOverviewProps {
 }
 
 const AVATAR_STYLES = [
-  'bg-[#EFF6FF] text-[#2563EB]',
-  'bg-[#F3E8FF] text-[#7C3AED]',
-  'bg-[#FFEDD5] text-[#EA580C]',
-  'bg-[#ECFDF5] text-[#059669]',
+  'bg-[#EFF6FF] text-[#1D4ED8]',
+  'bg-[#F3E8FF] text-[#6D28D9]',
+  'bg-[#FFEDD5] text-[#C2410C]',
+  'bg-[#ECFDF5] text-emerald-800',
 ];
 
 function padTwoDigits(n: number): string {
@@ -68,12 +68,12 @@ function getOverviewPriorityStyle(priority: TicketPriority): {
     case 'medium':
       return {
         label: 'Media',
-        className: 'bg-[#FEF3C7] text-[#D97706]',
+        className: 'bg-[#FEF3C7] text-amber-800',
       };
     case 'low':
       return {
         label: 'Baja',
-        className: 'bg-[#D1FAE5] text-[#059669]',
+        className: 'bg-[#D1FAE5] text-emerald-800',
       };
   }
 }
@@ -86,22 +86,27 @@ function getOverviewStatusStyle(status: TicketStatus): {
     case 'waiting_payment':
       return {
         label: getTicketStatusLabel(status),
-        className: 'bg-[#FEF3C7] text-[#D97706]',
+        className: 'bg-[#FEF3C7] text-amber-800',
       };
     case 'in_progress':
       return {
         label: getTicketStatusLabel(status),
-        className: 'bg-[#DBEAFE] text-[#2563EB]',
+        className: 'bg-[#DBEAFE] text-[#1D4ED8]',
       };
     case 'ready_to_connect':
       return {
         label: getTicketStatusLabel(status),
-        className: 'bg-[#D1FAE5] text-[#059669]',
+        className: 'bg-[#D1FAE5] text-emerald-800',
       };
     case 'resolved':
       return {
         label: getTicketStatusLabel(status),
-        className: 'bg-[#ECFDF5] text-[#059669]',
+        className: 'bg-[#ECFDF5] text-emerald-800',
+      };
+    default:
+      return {
+        label: getTicketStatusLabel(status),
+        className: 'bg-slate-100 text-slate-700',
       };
   }
 }
@@ -130,10 +135,10 @@ export function DashboardOverview({
   const filteredTickets = tickets.filter((ticket) => {
     if (!normalizedQuery) return true;
     return (
-      ticket.ticket_code.toLowerCase().includes(normalizedQuery) ||
-      ticket.client_name.toLowerCase().includes(normalizedQuery) ||
-      ticket.category.toLowerCase().includes(normalizedQuery) ||
-      ticket.problem_description.toLowerCase().includes(normalizedQuery)
+      String(ticket.ticket_code ?? '').toLowerCase().includes(normalizedQuery) ||
+      String(ticket.client_name ?? '').toLowerCase().includes(normalizedQuery) ||
+      String(ticket.category ?? '').toLowerCase().includes(normalizedQuery) ||
+      String(ticket.problem_description ?? '').toLowerCase().includes(normalizedQuery)
     );
   });
 
@@ -247,58 +252,58 @@ export function DashboardOverview({
             <Ticket className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />
           </span>
           <div>
-            <p className="text-[13px] font-normal text-[#64748B] leading-snug">
+            <p className="text-[13px] font-normal text-[#475569] leading-snug">
               Solicitudes abiertas
             </p>
             <p className="font-display tabular-nums text-[26px] sm:text-[28px] font-bold text-[#0F172A] leading-tight mt-1">
               {padTwoDigits(openTickets.length)}
             </p>
-            <p className="text-[12px] text-[#94A3B8] mt-1">
+            <p className="text-[12px] text-slate-600 mt-1">
               Requieren seguimiento
             </p>
           </div>
         </div>
 
         <div className="bg-white border border-[#E5E9F2] rounded-2xl p-4 sm:p-5 shadow-[0_1px_3px_rgba(15,23,42,0.03)] space-y-3.5">
-          <span className="w-10 h-10 rounded-xl bg-[#ECFDF5] text-[#10B981] flex items-center justify-center">
+          <span className="w-10 h-10 rounded-xl bg-[#ECFDF5] text-[#047857] flex items-center justify-center">
             <Users className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />
           </span>
           <div>
-            <p className="text-[13px] font-normal text-[#64748B] leading-snug">
+            <p className="text-[13px] font-normal text-[#475569] leading-snug">
               Técnicos disponibles
             </p>
             <p className="font-display tabular-nums text-[26px] sm:text-[28px] font-bold text-[#0F172A] leading-tight mt-1">
               {padTwoDigits(availableTechs.length)}
             </p>
-            <p className="text-[12px] text-[#94A3B8] mt-1">
+            <p className="text-[12px] text-slate-600 mt-1">
               Listos para atender
             </p>
           </div>
         </div>
 
         <div className="bg-white border border-[#E5E9F2] rounded-2xl p-4 sm:p-5 shadow-[0_1px_3px_rgba(15,23,42,0.03)] space-y-3.5">
-          <span className="w-10 h-10 rounded-xl bg-[#F3E8FF] text-[#8B5CF6] flex items-center justify-center">
+          <span className="w-10 h-10 rounded-xl bg-[#F3E8FF] text-[#7C3AED] flex items-center justify-center">
             <Monitor className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />
           </span>
           <div>
-            <p className="text-[13px] font-normal text-[#64748B] leading-snug">
+            <p className="text-[13px] font-normal text-[#475569] leading-snug">
               Sesiones activas
             </p>
             <p className="font-display tabular-nums text-[26px] sm:text-[28px] font-bold text-[#0F172A] leading-tight mt-1">
               {padTwoDigits(activeSessions.length)}
             </p>
-            <p className="text-[12px] text-[#94A3B8] mt-1">
+            <p className="text-[12px] text-slate-600 mt-1">
               Conexiones en curso
             </p>
           </div>
         </div>
 
         <div className="bg-white border border-[#E5E9F2] rounded-2xl p-4 sm:p-5 shadow-[0_1px_3px_rgba(15,23,42,0.03)] space-y-3.5">
-          <span className="w-10 h-10 rounded-xl bg-[#FEF3C7] text-[#D97706] flex items-center justify-center">
+          <span className="w-10 h-10 rounded-xl bg-[#FEF3C7] text-amber-800 flex items-center justify-center">
             <Clock className="w-5 h-5" strokeWidth={1.8} aria-hidden="true" />
           </span>
           <div>
-            <p className="text-[13px] font-normal text-[#64748B] leading-snug">
+            <p className="text-[13px] font-normal text-[#475569] leading-snug">
               Tiempo de respuesta
             </p>
             <p
@@ -307,7 +312,7 @@ export function DashboardOverview({
             >
               {responseTimeMetric.formatted}
             </p>
-            <p className="text-[12px] text-[#94A3B8] mt-1">
+            <p className="text-[12px] text-slate-600 mt-1">
               Promedio real de despacho
             </p>
           </div>
@@ -396,7 +401,7 @@ export function DashboardOverview({
           </div>
 
           <div className="pt-3 mt-1 border-t border-[#F1F5F9]">
-            <p className="text-[12px] text-[#94A3B8]">
+            <p className="text-[12px] text-slate-600">
               {supabaseConfigured
                 ? 'Sincronizado en tiempo real con Supabase.'
                 : 'Datos sincronizados · Selecciona cualquier solicitud para atenderla.'}
@@ -416,7 +421,7 @@ export function DashboardOverview({
               </p>
             </div>
             <Activity
-              className="w-5 h-5 text-[#94A3B8] shrink-0 mt-0.5"
+              className="w-5 h-5 text-slate-500 shrink-0 mt-0.5"
               strokeWidth={1.8}
               aria-hidden="true"
             />
@@ -442,7 +447,7 @@ export function DashboardOverview({
                 </div>
               </div>
               <ArrowUpRight
-                className="w-4 h-4 text-[#94A3B8] shrink-0"
+                className="w-4 h-4 text-slate-500 shrink-0"
                 aria-hidden="true"
               />
             </button>
@@ -533,7 +538,7 @@ export function DashboardOverview({
                 </span>
               </span>
               <ArrowUpRight
-                className="w-4 h-4 text-[#94A3B8] shrink-0"
+                className="w-4 h-4 text-slate-500 shrink-0"
                 aria-hidden="true"
               />
             </button>
@@ -545,7 +550,7 @@ export function DashboardOverview({
             >
               <span className="flex items-center gap-3 min-w-0">
                 <Users
-                  className="w-[18px] h-[18px] text-[#059669] shrink-0"
+                  className="w-[18px] h-[18px] text-emerald-700 shrink-0"
                   strokeWidth={1.8}
                   aria-hidden="true"
                 />
@@ -554,7 +559,7 @@ export function DashboardOverview({
                 </span>
               </span>
               <ArrowUpRight
-                className="w-4 h-4 text-[#94A3B8] shrink-0"
+                className="w-4 h-4 text-slate-500 shrink-0"
                 aria-hidden="true"
               />
             </button>
@@ -575,7 +580,7 @@ export function DashboardOverview({
                 </span>
               </span>
               <ArrowUpRight
-                className="w-4 h-4 text-[#94A3B8] shrink-0"
+                className="w-4 h-4 text-slate-500 shrink-0"
                 aria-hidden="true"
               />
             </button>
@@ -620,14 +625,14 @@ export function DashboardOverview({
             </div>
           </div>
 
-          <p className="text-[12px] text-[#94A3B8]">
+          <p className="text-[12px] text-slate-600">
             Relay: {organization.rustdesk_relay_domain}
           </p>
         </div>
       </div>
 
       {/* Quiet Dashboard Footer */}
-      <footer className="pt-4 border-t border-[#E5E9F2]/70 flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[12px] text-[#94A3B8]">
+      <footer className="pt-4 border-t border-[#E5E9F2]/70 flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[12px] text-slate-600">
         <p>© 2026 Remote Support 365</p>
         <p>Espacio operativo · {organization.name}</p>
       </footer>

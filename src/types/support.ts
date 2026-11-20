@@ -18,25 +18,46 @@ export type MemberTierType = 'internal' | 'freelancer' | 'network';
 export type TechnicianAvailability = 'available' | 'busy' | 'paused' | 'offline';
 
 export type TechnicianSpecialty =
-  | 'Windows'
-  | 'Microsoft 365'
+  | 'Windows & BSOD'
+  | 'Microsoft 365 & Outlook'
   | 'Impresoras'
-  | 'Redes';
+  | 'Redes & VPN'
+  | 'Seguridad & Malware'
+  | 'Recuperación de Datos';
 
 export type AgentInstallType = 'temporary' | 'installed';
 
 export type TicketPriority = 'high' | 'medium' | 'low';
 
-export type IssueCategory =
+export type LaunchIssueCategory =
+  | 'Windows lento o bajo rendimiento'
+  | 'Aplicaciones que no arrancan'
+  | 'Pantallazos azules (BSOD)'
+  | 'Problemas de Wi-Fi o red'
+  | 'Errores de Microsoft 365 y Outlook'
+  | 'Configuración de impresoras'
+  | 'Eliminación de malware y virus'
+  | 'Recuperación de archivos'
+  | 'Actualizaciones de Windows'
+  | 'VPN y acceso remoto';
+
+export type LegacyIssueCategory =
   | 'Impresoras'
   | 'Correo/Office'
   | 'Sistema Operativo/Lentitud'
   | 'Redes/Wi-Fi'
   | 'Otro';
 
-export type OperatingSystem = 'Windows' | 'Mac';
+export type IssueCategory = LaunchIssueCategory | LegacyIssueCategory;
 
-export type ServiceTier = 'Express $25' | 'Optimización $40' | 'Avanzado $55';
+export type OperatingSystem = 'Windows' | 'Mac' | 'Linux' | 'Mobile';
+
+export type ServiceTier =
+  | 'Express $15'
+  | 'Optimización $29'
+  | 'Avanzado $39'
+  | 'Pyme Esencial $39/mes'
+  | 'Pyme Corporativo $79/mes';
 
 export type PaymentStatus = 'pending' | 'paid' | 'refunded';
 
@@ -79,6 +100,8 @@ export interface Organization {
   payment_gateway: 'stripe' | 'paypal' | 'stripe_paypal';
   ai_credits_monthly: number;
   ai_credits_used: number;
+  subscription_auto_renew?: boolean;
+  subscription_canceled_at?: string | null;
   created_at: string;
 }
 
@@ -101,8 +124,11 @@ export interface OrganizationMember {
 
 export interface AiReceptionistTriage {
   followUpQuestions: string[];
+  selfServiceSteps?: string[];
+  needsRemoteSpecialist?: boolean;
   selectedAnswers?: Record<number, string>;
   preDiagnosis: string;
+  suggestedCategory?: IssueCategory;
   suggestedTier: ServiceTier;
   estimatedMinutes: number;
   confidenceNote: string;
@@ -110,10 +136,11 @@ export interface AiReceptionistTriage {
 }
 
 export interface CategoryOption {
-  id: IssueCategory;
+  id: LaunchIssueCategory;
   label: string;
   summary: string;
   typicalResolutionTime: string;
+  suggestedTier: ServiceTier;
   examples: string[];
 }
 
@@ -122,9 +149,13 @@ export interface WizardDraft {
   category: IssueCategory | null;
   operatingSystem: OperatingSystem | null;
   serviceTier: ServiceTier;
+  billingMode?: 'one_time' | 'pyme_monthly';
   description: string;
   clientName: string;
   clientEmail: string;
+  birthDate?: string;
+  termsAccepted?: boolean;
+  marketingOptIn?: boolean;
   aiTriage?: AiReceptionistTriage | null;
 }
 
@@ -136,12 +167,20 @@ export interface SupportTicket {
   category: IssueCategory;
   os_type: OperatingSystem;
   service_tier: ServiceTier;
+  billing_mode?: 'one_time' | 'pyme_monthly';
   priority: TicketPriority;
   problem_description: string;
   ai_diagnosis_summary: string;
   ai_diagnosis?: AiReceptionistTriage | null;
   client_name: string;
   client_email: string;
+  client_birth_date?: string | null;
+  is_adult_verified?: boolean;
+  terms_accepted_at?: string | null;
+  terms_version?: string | null;
+  marketing_opt_in?: boolean;
+  subscription_status?: 'none' | 'active' | 'canceled';
+  anonymized_at?: string | null;
   /** 9-digit RustDesk ID entered by the client inside `/sesion/[ticket_code]` */
   rustdesk_id: string | null;
   agent_type: AgentInstallType;
@@ -159,6 +198,29 @@ export interface SupportTicket {
   claimed_at?: string | null;
   resolved_at?: string | null;
   created_at: string;
+}
+
+export interface UserAccountProfile {
+  id: string;
+  full_name: string;
+  email: string;
+  role: UserRole;
+  birth_date: string;
+  is_adult_verified: boolean;
+  terms_accepted_at: string;
+  terms_version: string;
+  marketing_opt_in: boolean;
+  subscription_plan?: string | null;
+  subscription_status?: 'none' | 'active' | 'canceled';
+  created_at: string;
+}
+
+export interface CookieConsentPreferences {
+  essential: true;
+  analytics: boolean;
+  marketing: boolean;
+  updatedAt: string;
+  version: string;
 }
 
 export interface TicketMessage {
@@ -249,4 +311,5 @@ export interface AdapterResult<T> {
   ok: boolean;
   data: T;
   error?: string;
+  warning?: string;
 }

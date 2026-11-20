@@ -35,10 +35,14 @@ import type {
   WizardDraft,
 } from '../types/support';
 import {
+  ADULT_RESTRICTION_ERROR,
+  calculateAgeFromBirthDate,
   CATEGORY_OPTIONS,
   isValidEmail,
+  LEGAL_TERMS_VERSION,
   SERVICE_TIER_OPTIONS,
 } from '../utils/ticketLogic';
+import type { LegalDocTab } from './LegalDocsModal';
 import { DashboardSidebar } from './DashboardSidebar';
 import { AiWorkforceView } from './dashboard/AiWorkforceView';
 import {
@@ -107,6 +111,10 @@ interface TechPortalViewProps {
   ) => void;
   onCreateQuickTicket: (draft: WizardDraft) => Promise<SupportTicket | null>;
   onOpenPublicPortal: () => void;
+  onOpenLegalDoc?: (tab: LegalDocTab) => void;
+  onCancelOrgAutoRenew?: () => void;
+  onExportOrgData?: () => void;
+  onDeletePersonalData?: () => void;
 }
 
 const LOCAL_DEMO_AUTH_KEY = 'rs365_local_demo_operator_v1';
@@ -152,6 +160,10 @@ export function TechPortalView({
   onSaveOrgSettings,
   onCreateQuickTicket,
   onOpenPublicPortal,
+  onOpenLegalDoc,
+  onCancelOrgAutoRenew,
+  onExportOrgData,
+  onDeletePersonalData,
 }: TechPortalViewProps) {
   const supabaseConfigured = isSupabaseConfigured();
 
@@ -160,23 +172,36 @@ export function TechPortalView({
   >(() => {
     if (supabaseConfigured) return 'checking';
     if (typeof window !== 'undefined') {
-      const signedOut =
-        window.sessionStorage.getItem(LOCAL_DEMO_SIGNED_OUT_KEY) === '1';
-      return signedOut ? 'unauthenticated' : 'authenticated';
+      try {
+        const signedOut =
+          window.sessionStorage.getItem(LOCAL_DEMO_SIGNED_OUT_KEY) === '1';
+        return signedOut ? 'unauthenticated' : 'authenticated';
+      } catch {
+        return 'authenticated';
+      }
     }
     return 'authenticated';
   });
 
   const [operatorEmail, setOperatorEmail] = useState<string>(() => {
     if (typeof window !== 'undefined') {
-      return (
-        window.sessionStorage.getItem(LOCAL_DEMO_AUTH_KEY) ??
-        'cmendoza@remotesupport365.com'
-      );
+      try {
+        return (
+          window.sessionStorage.getItem(LOCAL_DEMO_AUTH_KEY) ??
+          'cmendoza@remotesupport365.com'
+        );
+      } catch {
+        return 'cmendoza@remotesupport365.com';
+      }
     }
     return 'cmendoza@remotesupport365.com';
   });
 
+  const [authTab, setAuthTab] = useState<'login' | 'signup'>('login');
+  const [signupFullName, setSignupFullName] = useState('');
+  const [signupBirthDate, setSignupBirthDate] = useState('');
+  const [signupTermsAccepted, setSignupTermsAccepted] = useState(false);
+  const [signupMarketingOptIn, setSignupMarketingOptIn] = useState(false);
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
@@ -209,9 +234,9 @@ export function TechPortalView({
   const [newTicketModalOpen, setNewTicketModalOpen] = useState(false);
   const [qtClientName, setQtClientName] = useState('');
   const [qtClientEmail, setQtClientEmail] = useState('');
-  const [qtCategory, setQtCategory] = useState<IssueCategory>('Impresoras');
+  const [qtCategory, setQtCategory] = useState<IssueCategory>('Configuración de impresoras');
   const [qtOs, setQtOs] = useState<OperatingSystem>('Windows');
-  const [qtTier, setQtTier] = useState<ServiceTier>('Express $25');
+  const [qtTier, setQtTier] = useState<ServiceTier>('Express $15');
   const [qtDescription, setQtDescription] = useState('');
   const [qtError, setQtError] = useState<string | null>(null);
   const [qtSubmitting, setQtSubmitting] = useState(false);
@@ -224,10 +249,14 @@ export function TechPortalView({
         e.preventDefault();
         searchInputRef.current?.focus();
       }
+      if (e.key === 'Escape') {
+        if (newTicketModalOpen) setNewTicketModalOpen(false);
+        if (sqlModalOpen) setSqlModalOpen(false);
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [newTicketModalOpen, sqlModalOpen]);
 
   useEffect(() => {
     if (!supabaseConfigured) return;
@@ -353,8 +382,95 @@ export function TechPortalView({
 
     const cleanEmail = loginEmail.trim().toLowerCase();
     if (typeof window !== 'undefined') {
-      window.sessionStorage.removeItem(LOCAL_DEMO_SIGNED_OUT_KEY);
-      window.sessionStorage.setItem(LOCAL_DEMO_AUTH_KEY, cleanEmail);
+      try {
+        window.sessionStorage.removeItem(LOCAL_DEMO_SIGNED_OUT_KEY);
+        window.sessionStorage.setItem(LOCAL_DEMO_AUTH_KEY, cleanEmail);
+      } catch {
+        // Ignore restricted sessionStorage
+      }
+    }
+    setOperatorEmail(cleanEmail);
+    setAuthStatus('authenticated');
+  };
+
+  const handleSupabaseSignUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (signupFullName.trim().length < 2) {
+      setAuthError('Ingresa tu nombre completo.');
+      return;
+    }
+    if (!isValidEmail(loginEmail) || loginPassword.trim().length < 6) {
+      setAuthError(
+        'Ingresa un correo válido y una contraseña de al menos 6 caracteres.'
+      );
+      return;
+    }
+    const age = calculateAgeFromBirthDate(signupBirthDate);
+    if (age === null) {
+      setAuthError(
+        'Ingresa tu fecha de nacimiento válida para verificar la mayoría de edad (+18 años).'
+      );
+      return;
+    }
+    if (age < 18) {
+      setAuthError(ADULT_RESTRICTION_ERROR);
+      return;
+    }
+    if (!signupTermsAccepted) {
+      setAuthError(
+        'Debes aceptar los Términos y Condiciones, la Política de Privacidad y la Política de Reembolsos.'
+      );
+      return;
+    }
+
+    setAuthError(null);
+    const cleanEmail = loginEmail.trim().toLowerCase();
+    const nowIso = new Date().toISOString();
+
+    if (supabaseConfigured) {
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        setAuthError('No se pudo inicializar el cliente de Supabase.');
+        return;
+      }
+      setAuthLoading(true);
+      try {
+        const { error } = await supabase.auth.signUp({
+          email: cleanEmail,
+          password: loginPassword,
+          options: {
+            data: {
+              full_name: signupFullName.trim(),
+              role: 'technician',
+              birth_date: signupBirthDate,
+              is_adult_verified: true,
+              terms_accepted_at: nowIso,
+              terms_version: LEGAL_TERMS_VERSION,
+              marketing_opt_in: signupMarketingOptIn,
+            },
+          },
+        });
+        if (error) {
+          setAuthError(`Registro rechazado: ${error.message}`);
+          return;
+        }
+        setOperatorEmail(cleanEmail);
+        setAuthStatus('authenticated');
+      } catch {
+        setAuthError('Error de red al conectar con Supabase Auth.');
+      } finally {
+        setAuthLoading(false);
+      }
+      return;
+    }
+
+    if (typeof window !== 'undefined') {
+      try {
+        window.sessionStorage.removeItem(LOCAL_DEMO_SIGNED_OUT_KEY);
+        window.sessionStorage.setItem(LOCAL_DEMO_AUTH_KEY, cleanEmail);
+      } catch {
+        // Ignore restricted sessionStorage
+      }
     }
     setOperatorEmail(cleanEmail);
     setAuthStatus('authenticated');
@@ -364,8 +480,12 @@ export function TechPortalView({
     if (supabaseConfigured) return;
     const demoEmail = 'cmendoza@remotesupport365.com';
     if (typeof window !== 'undefined') {
-      window.sessionStorage.removeItem(LOCAL_DEMO_SIGNED_OUT_KEY);
-      window.sessionStorage.setItem(LOCAL_DEMO_AUTH_KEY, demoEmail);
+      try {
+        window.sessionStorage.removeItem(LOCAL_DEMO_SIGNED_OUT_KEY);
+        window.sessionStorage.setItem(LOCAL_DEMO_AUTH_KEY, demoEmail);
+      } catch {
+        // Ignore restricted sessionStorage
+      }
     }
     setOperatorEmail(demoEmail);
     setAuthError(null);
@@ -380,8 +500,12 @@ export function TechPortalView({
       }
     }
     if (typeof window !== 'undefined') {
-      window.sessionStorage.removeItem(LOCAL_DEMO_AUTH_KEY);
-      window.sessionStorage.setItem(LOCAL_DEMO_SIGNED_OUT_KEY, '1');
+      try {
+        window.sessionStorage.removeItem(LOCAL_DEMO_AUTH_KEY);
+        window.sessionStorage.setItem(LOCAL_DEMO_SIGNED_OUT_KEY, '1');
+      } catch {
+        // Ignore restricted sessionStorage
+      }
     }
     setLoginPassword('');
     setAuthStatus('unauthenticated');
@@ -422,9 +546,13 @@ export function TechPortalView({
         category: qtCategory,
         operatingSystem: qtOs,
         serviceTier: qtTier,
+        billingMode: 'one_time',
         description: qtDescription.trim(),
         clientName: qtClientName.trim(),
         clientEmail: qtClientEmail.trim(),
+        birthDate: '1990-01-01',
+        termsAccepted: true,
+        marketingOptIn: false,
         aiTriage: null,
       });
       if (created) {
@@ -460,6 +588,9 @@ export function TechPortalView({
 
           <div className="bg-white border border-[#E5E9F2] rounded-xl p-6 sm:p-8 shadow-[0_1px_3px_rgba(15,23,42,0.03)] space-y-6">
             <div>
+              <p className="text-xs font-bold tracking-tight text-[#2563EB] mb-1.5">
+                Remote Support 365
+              </p>
               <div className="flex items-center gap-2.5 text-[#0F172A]">
                 <span className="w-9 h-9 rounded-xl bg-[#0B1528] text-[#3B82F6] flex items-center justify-center shrink-0">
                   <Lock className="w-4 h-4" aria-hidden="true" />
@@ -484,11 +615,92 @@ export function TechPortalView({
               </p>
             ) : (
               <>
+                <div
+                  role="tablist"
+                  aria-label="Modo de acceso de operador"
+                  className="grid grid-cols-2 p-1 bg-slate-100 border border-[#E5E9F2] rounded-xl"
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={authTab === 'login'}
+                    onClick={() => {
+                      setAuthTab('login');
+                      setAuthError(null);
+                    }}
+                    className={`py-2 text-xs font-semibold rounded-lg transition-colors ${
+                      authTab === 'login'
+                        ? 'bg-[#0B1528] text-white'
+                        : 'text-[#64748B] hover:text-[#0F172A]'
+                    }`}
+                  >
+                    Iniciar Sesión
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={authTab === 'signup'}
+                    onClick={() => {
+                      setAuthTab('signup');
+                      setAuthError(null);
+                    }}
+                    className={`py-2 text-xs font-semibold rounded-lg transition-colors ${
+                      authTab === 'signup'
+                        ? 'bg-[#2563EB] text-white'
+                        : 'text-[#64748B] hover:text-[#0F172A]'
+                    }`}
+                  >
+                    Registrarse (+18)
+                  </button>
+                </div>
+
                 <form
-                  onSubmit={handleSupabaseSignIn}
+                  onSubmit={
+                    authTab === 'login'
+                      ? handleSupabaseSignIn
+                      : handleSupabaseSignUp
+                  }
                   noValidate
                   className="space-y-4"
                 >
+                  {authTab === 'signup' && (
+                    <>
+                      <div>
+                        <label
+                          htmlFor="tech-fullname"
+                          className="block text-xs font-semibold text-[#0F172A] mb-1.5"
+                        >
+                          Nombre completo
+                        </label>
+                        <input
+                          id="tech-fullname"
+                          type="text"
+                          value={signupFullName}
+                          onChange={(e) => setSignupFullName(e.target.value)}
+                          placeholder="Ej. Carlos Mendoza"
+                          className="w-full rounded-xl border border-[#E5E9F2] px-3.5 py-2.5 text-sm text-[#0F172A] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/15"
+                        />
+                      </div>
+
+                      <div>
+                        <label
+                          htmlFor="tech-birthdate"
+                          className="block text-xs font-semibold text-[#0F172A] mb-1.5"
+                        >
+                          Fecha de nacimiento (+18 años)
+                        </label>
+                        <input
+                          id="tech-birthdate"
+                          type="date"
+                          required
+                          value={signupBirthDate}
+                          onChange={(e) => setSignupBirthDate(e.target.value)}
+                          className="w-full rounded-xl border border-[#E5E9F2] px-3.5 py-2.5 text-sm text-[#0F172A] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/15"
+                        />
+                      </div>
+                    </>
+                  )}
+
                   <div>
                     <label
                       htmlFor="tech-email"
@@ -517,13 +729,68 @@ export function TechPortalView({
                     <input
                       id="tech-password"
                       type="password"
-                      autoComplete="current-password"
+                      autoComplete={
+                        authTab === 'login' ? 'current-password' : 'new-password'
+                      }
                       value={loginPassword}
                       onChange={(e) => setLoginPassword(e.target.value)}
                       placeholder="Mínimo 6 caracteres"
                       className="w-full rounded-xl border border-[#E5E9F2] px-3.5 py-2.5 text-sm text-[#0F172A] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/15"
                     />
                   </div>
+
+                  {authTab === 'signup' && (
+                    <div className="space-y-2.5 p-3.5 rounded-xl bg-[#F8FAFC] border border-[#E5E9F2] text-xs">
+                      <label className="flex items-start gap-2 text-[#0F172A] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={signupTermsAccepted}
+                          onChange={(e) => setSignupTermsAccepted(e.target.checked)}
+                          className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#2563EB]"
+                        />
+                        <span>
+                          He leído y acepto los{' '}
+                          <button
+                            type="button"
+                            onClick={() => onOpenLegalDoc?.('terms')}
+                            className="font-semibold text-[#2563EB] hover:underline"
+                          >
+                            Términos y Condiciones
+                          </button>
+                          , la{' '}
+                          <button
+                            type="button"
+                            onClick={() => onOpenLegalDoc?.('privacy')}
+                            className="font-semibold text-[#2563EB] hover:underline"
+                          >
+                            Política de Privacidad
+                          </button>{' '}
+                          y la{' '}
+                          <button
+                            type="button"
+                            onClick={() => onOpenLegalDoc?.('refunds')}
+                            className="font-semibold text-[#2563EB] hover:underline"
+                          >
+                            Política de Reembolsos
+                          </button>
+                          .
+                        </span>
+                      </label>
+
+                      <label className="flex items-start gap-2 text-[#475569] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={signupMarketingOptIn}
+                          onChange={(e) => setSignupMarketingOptIn(e.target.checked)}
+                          className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#2563EB]"
+                        />
+                        <span>
+                          Acepto recibir novedades y consejos técnicos por correo (puedo
+                          darme de baja en cualquier momento).
+                        </span>
+                      </label>
+                    </div>
+                  )}
 
                   {authError && (
                     <p
@@ -541,7 +808,9 @@ export function TechPortalView({
                   >
                     {authLoading
                       ? 'Validando credenciales...'
-                      : 'Ingresar al Centro de operaciones'}
+                      : authTab === 'login'
+                      ? 'Ingresar al Centro de operaciones'
+                      : 'Crear cuenta técnica (+18)'}
                   </button>
                 </form>
 
@@ -607,9 +876,9 @@ export function TechPortalView({
               data-testid="topbar-workspace-indicator"
               className="flex flex-col justify-center min-w-0 leading-[1.25]"
             >
-              <span className="inline-flex items-center gap-2 text-[12px] font-normal text-[#94A3B8] truncate">
+              <span className="inline-flex items-center gap-2 text-[12px] font-normal text-slate-600 truncate">
                 <span>Workspace</span>
-                <span className="text-[#CBD5E1]" aria-hidden="true">
+                <span className="text-slate-400" aria-hidden="true">
                   /
                 </span>
               </span>
@@ -623,7 +892,7 @@ export function TechPortalView({
           <div className="flex items-center justify-end gap-2.5 sm:gap-3.5 min-w-0 flex-1 sm:flex-initial">
             <div className="relative flex-1 max-w-[165px] sm:max-w-none sm:w-64 lg:w-72">
               <Search
-                className="w-4 h-4 text-[#94A3B8] absolute left-3 top-1/2 -translate-y-1/2"
+                className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2"
                 aria-hidden="true"
               />
               <input
@@ -809,6 +1078,12 @@ export function TechPortalView({
               onSaveSettings={onSaveOrgSettings}
               onOpenSqlModal={() => setSqlModalOpen(true)}
               onSignOut={() => void handleSignOut()}
+              onCancelOrgAutoRenew={onCancelOrgAutoRenew}
+              onExportOrgData={onExportOrgData}
+              onDeletePersonalData={() => {
+                onDeletePersonalData?.();
+                void handleSignOut();
+              }}
             />
           )}
         </main>

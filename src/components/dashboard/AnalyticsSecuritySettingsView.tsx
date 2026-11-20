@@ -3,8 +3,11 @@ import {
   CheckCircle2,
   CreditCard,
   Database,
+  Download,
   Globe,
+  RotateCcw,
   ShieldAlert,
+  Trash2,
 } from 'lucide-react';
 import type {
   AuditLogEntry,
@@ -183,6 +186,9 @@ interface OrganizationSettingsViewProps {
   ) => void;
   onOpenSqlModal: () => void;
   onSignOut: () => void;
+  onCancelOrgAutoRenew?: () => void;
+  onExportOrgData?: () => void;
+  onDeletePersonalData?: () => void;
 }
 
 export function OrganizationSettingsView({
@@ -192,6 +198,9 @@ export function OrganizationSettingsView({
   onSaveSettings,
   onOpenSqlModal,
   onSignOut,
+  onCancelOrgAutoRenew,
+  onExportOrgData,
+  onDeletePersonalData,
 }: OrganizationSettingsViewProps) {
   const [orgName, setOrgName] = useState(organization.name);
   const [relayDomain, setRelayDomain] = useState(
@@ -199,6 +208,8 @@ export function OrganizationSettingsView({
   );
   const [gateway, setGateway] = useState(organization.payment_gateway);
   const [savedNotice, setSavedNotice] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [privacyNotice, setPrivacyNotice] = useState<string | null>(null);
 
   useEffect(() => {
     setOrgName(organization.name);
@@ -338,6 +349,135 @@ export function OrganizationSettingsView({
           )}
         </div>
       </form>
+
+      {/* 1-Click SaaS Auto-Renewal Cancellation & GDPR Data Portability */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div
+          data-testid="org-subscription-card"
+          className="bg-white border border-[#E5E9F2] rounded-xl p-6 shadow-[0_1px_3px_rgba(15,23,42,0.03)] space-y-4"
+        >
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#2563EB]">
+              SUSCRIPCIÓN Y TRANSPARENCIA
+            </p>
+            <h3 className="text-base font-bold text-[#0F172A] mt-0.5">
+              Renovación mensual y cancelación en 1 clic
+            </h3>
+            <p className="text-xs text-[#64748B] mt-1 leading-relaxed">
+              Plan activo:{' '}
+              <strong className="text-[#0F172A] font-mono">
+                {organization.plan_tier}
+              </strong>
+              . Sin permanencia ni penalizaciones.
+            </p>
+          </div>
+
+          {organization.subscription_auto_renew === false ? (
+            <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900">
+              Renovación automática cancelada
+              {organization.subscription_canceled_at
+                ? ` el ${new Date(
+                    organization.subscription_canceled_at
+                  ).toLocaleDateString('es-ES')}`
+                : ''}
+              . El espacio continúa activo hasta el final del periodo actual.
+            </div>
+          ) : (
+            onCancelOrgAutoRenew && (
+              <button
+                type="button"
+                onClick={() => {
+                  onCancelOrgAutoRenew();
+                  setPrivacyNotice(
+                    'Renovación automática cancelada en 1 clic y registrada en auditoría.'
+                  );
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-xl transition-colors"
+              >
+                <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>Cancelar renovación automática</span>
+              </button>
+            )
+          )}
+        </div>
+
+        <div
+          data-testid="org-gdpr-card"
+          className="bg-white border border-[#E5E9F2] rounded-xl p-6 shadow-[0_1px_3px_rgba(15,23,42,0.03)] space-y-4"
+        >
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#059669]">
+              DERECHOS GDPR / LOPDP
+            </p>
+            <h3 className="text-base font-bold text-[#0F172A] mt-0.5">
+              Portabilidad y supresión de datos
+            </h3>
+            <p className="text-xs text-[#64748B] mt-1 leading-relaxed">
+              Exporta tu historial de operación en JSON o solicita la anonimización de
+              tus datos personales de operador.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5">
+            {onExportOrgData && (
+              <button
+                type="button"
+                onClick={() => {
+                  onExportOrgData();
+                  setPrivacyNotice('Datos exportados en formato JSON.');
+                }}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-[#0F172A] bg-white hover:bg-[#F8FAFC] border border-[#E5E9F2] rounded-xl transition-colors"
+              >
+                <Download className="w-3.5 h-3.5 text-[#2563EB]" aria-hidden="true" />
+                <span>Descargar mis datos (JSON)</span>
+              </button>
+            )}
+
+            {onDeletePersonalData && !confirmDeleteOpen && (
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteOpen(true)}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-[#DC2626] bg-white hover:bg-red-50 border border-red-200 rounded-xl transition-colors"
+              >
+                <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>Eliminar mis datos personales</span>
+              </button>
+            )}
+          </div>
+
+          {confirmDeleteOpen && onDeletePersonalData && (
+            <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 space-y-2.5 text-xs">
+              <p className="font-semibold text-red-900">
+                ¿Confirmas eliminar y anonimizar tus datos personales de operador y cerrar
+                sesión?
+              </p>
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConfirmDeleteOpen(false)}
+                  className="px-3 py-1.5 font-medium text-[#475569] bg-white border border-[#E5E9F2] rounded-lg"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onDeletePersonalData();
+                    setConfirmDeleteOpen(false);
+                  }}
+                  className="px-3 py-1.5 font-semibold text-white bg-red-700 hover:bg-red-800 rounded-lg"
+                >
+                  Confirmar eliminación
+                </button>
+              </div>
+            </div>
+          )}
+
+          {privacyNotice && (
+            <p className="text-xs font-medium text-[#059669]">{privacyNotice}</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

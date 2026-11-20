@@ -6,7 +6,7 @@
     <title>Remote Support 365 — Soporte Técnico IT Remoto Bajo Demanda</title>
     <meta
       name="description"
-      content="Soporte técnico IT remoto en minutos para Windows y macOS. Diagnóstico guiado en 3 pasos, tarifa única transparente de $25 USD y sala de conexión cifrada."
+      content="Soporte técnico IT remoto en minutos para Windows y macOS. Diagnóstico guiado en 3 pasos, tarifas transparentes desde $15 USD (antes $25 USD) y sala de conexión cifrada."
     />
     <meta property="og:title" content="Remote Support 365 — Soporte Técnico IT Remoto Bajo Demanda" />
     <meta
@@ -21,6 +21,129 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap"
       rel="stylesheet"
     />
+    <script>
+      (function () {
+        var capturedError = null;
+        var timerId = null;
+
+        function isIgnorableHmr(msg, src) {
+          var combined = String(msg || '') + ' ' + String(src || '');
+          return /WebSocket closed without opened|failed to connect to websocket|vite-hmr|@vite\/client/i.test(combined);
+        }
+
+        function showDiagCard(reason, fileUrl) {
+          if (typeof document === 'undefined') return;
+          var render = function () {
+            if (!document.body) return;
+            var existing = document.getElementById('rs365-boot-diagnostic');
+            if (existing) existing.remove();
+
+            var wrap = document.createElement('div');
+            wrap.id = 'rs365-boot-diagnostic';
+            wrap.setAttribute('role', 'alert');
+            wrap.style.cssText =
+              'position:fixed;inset:0;z-index:2147483647;background:rgba(15,23,42,0.86);display:flex;align-items:center;justify-content:center;padding:16px;font-family:Inter,system-ui,sans-serif;';
+
+            var card = document.createElement('div');
+            card.style.cssText =
+              'max-width:560px;width:100%;background:#FFFFFF;border:2px solid #DC2626;border-radius:16px;padding:24px;box-shadow:0 20px 45px rgba(0,0,0,0.3);text-align:left;';
+
+            var heading = document.createElement('h1');
+            heading.textContent = 'Diagnóstico de arranque · Remote Support 365';
+            heading.style.cssText =
+              'font-size:17px;font-weight:700;color:#991B1B;margin:0 0 8px 0;';
+
+            var sub = document.createElement('p');
+            sub.textContent =
+              'No se pudo completar el montaje de la interfaz en #root. Detalle capturado:';
+            sub.style.cssText =
+              'font-size:13px;color:#475569;margin:0 0 12px 0;line-height:1.45;';
+
+            var pre = document.createElement('pre');
+            pre.textContent =
+              'Error: ' +
+              String(reason || 'El contenedor #root permaneció vacío tras 2 segundos.') +
+              '\nArchivo: ' +
+              String(fileUrl || window.location.href);
+            pre.style.cssText =
+              'font-size:12px;color:#7F1D1D;background:#FEF2F2;border:1px solid #FCA5A5;border-radius:10px;padding:12px;white-space:pre-wrap;word-break:break-word;margin:0 0 16px 0;font-family:JetBrains Mono,monospace;';
+
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = 'Limpiar datos locales y reiniciar';
+            btn.style.cssText =
+              'background:#DC2626;color:#FFFFFF;border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:600;cursor:pointer;';
+            btn.onclick = function () {
+              try {
+                window.localStorage.clear();
+                window.sessionStorage.clear();
+              } catch (e) {}
+              window.location.reload();
+            };
+
+            card.appendChild(heading);
+            card.appendChild(sub);
+            card.appendChild(pre);
+            card.appendChild(btn);
+            wrap.appendChild(card);
+            document.body.appendChild(wrap);
+          };
+
+          if (document.body) {
+            render();
+          } else {
+            window.addEventListener('DOMContentLoaded', render, { once: true });
+          }
+        }
+
+        window.onerror = function (message, source, lineno, colno, error) {
+          var msgText = (error && error.message) || String(message || 'Error de script');
+          var fileText = source
+            ? source + ':' + (lineno || 0) + ':' + (colno || 0)
+            : window.location.href;
+          if (isIgnorableHmr(msgText, source)) return false;
+          capturedError = { message: msgText, file: fileText };
+          showDiagCard(msgText, fileText);
+          return false;
+        };
+
+        window.onunhandledrejection = function (event) {
+          var reason = event && event.reason;
+          var msgText =
+            reason && reason.message
+              ? reason.message
+              : typeof reason === 'string'
+              ? reason
+              : 'Promesa rechazada sin manejar';
+          if (isIgnorableHmr(msgText, '')) return;
+          var fileText = window.location.href;
+          capturedError = { message: msgText, file: fileText };
+          showDiagCard(msgText, fileText);
+        };
+
+        timerId = window.setTimeout(function () {
+          var root = document.getElementById('root');
+          var isEmpty = !root || (root.childElementCount === 0 && root.innerHTML.trim() === '');
+          if (isEmpty) {
+            showDiagCard(
+              capturedError
+                ? capturedError.message
+                : 'Timeout de arranque (2s): el módulo /src/main.tsx no montó contenido en #root.',
+              capturedError ? capturedError.file : '/src/main.tsx'
+            );
+          }
+        }, 2000);
+
+        window.__RS365_CLEAR_BOOT_TIMER__ = function () {
+          if (timerId !== null) {
+            window.clearTimeout(timerId);
+            timerId = null;
+          }
+          var diag = document.getElementById('rs365-boot-diagnostic');
+          if (diag) diag.remove();
+        };
+      })();
+    </script>
   </head>
   <body class="bg-[#F6F8FB] text-slate-900 antialiased selection:bg-blue-100 selection:text-blue-950">
     <div id="root"></div>

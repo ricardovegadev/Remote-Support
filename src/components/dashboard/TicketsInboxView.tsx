@@ -437,19 +437,24 @@ export function TicketsInboxView({
                 {/* AI Receptionist + Technician Assistant Box */}
                 <div className="p-4 rounded-xl bg-[#F8FAFC] border border-[#E5E9F2] space-y-2.5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 text-xs font-semibold text-[#0F172A]">
-                      <Sparkles
-                        className="w-3.5 h-3.5 text-[#2563EB]"
-                        aria-hidden="true"
-                      />
-                      <span>Diagnóstico AI Receptionist</span>
+                    <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-[#0F172A]">
+                      <span className="inline-flex items-center gap-1.5">
+                        <Sparkles
+                          className="w-3.5 h-3.5 text-[#2563EB]"
+                          aria-hidden="true"
+                        />
+                        <span>Diagnóstico AI Receptionist</span>
+                      </span>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded bg-blue-50 border border-blue-200 text-[10px] font-semibold text-[#1D4ED8]">
+                        ✦ Generado por IA · Revisado por especialista
+                      </span>
                     </div>
 
                     <button
                       type="button"
                       disabled={assistantLoading || !assistantEnabled}
                       onClick={() => void handleAskTechnicianAssistant()}
-                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#2563EB] hover:text-[#1D4ED8] disabled:text-slate-400"
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#2563EB] hover:text-[#1D4ED8] disabled:text-slate-500"
                     >
                       {assistantLoading ? (
                         <Loader2
@@ -473,9 +478,14 @@ export function TicketsInboxView({
 
                   {assistantData && (
                     <div className="mt-2 pt-2.5 border-t border-[#E5E9F2] space-y-1.5">
-                      <p className="text-xs font-semibold text-[#0F172A]">
-                        Checklist sugerido:
-                      </p>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs font-semibold text-[#0F172A]">
+                          Checklist sugerido:
+                        </p>
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-50 border border-blue-200 text-[10px] font-semibold text-[#1D4ED8]">
+                          ✦ Generado por IA · Revisado por especialista
+                        </span>
+                      </div>
                       <ul className="space-y-1 text-xs text-[#475569] list-disc pl-4">
                         {assistantData.checklist.map((step, i) => (
                           <li key={i}>{step}</li>
@@ -588,7 +598,7 @@ export function TicketsInboxView({
                 className="bg-white border border-[#E5E9F2] rounded-xl p-5 shadow-[0_1px_3px_rgba(15,23,42,0.03)] space-y-4"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 whitespace-nowrap">
+                  <div className="flex flex-wrap items-center gap-2">
                     <FileText
                       className="w-4 h-4 text-[#2563EB] shrink-0"
                       aria-hidden="true"
@@ -596,6 +606,9 @@ export function TicketsInboxView({
                     <h3 className="text-sm font-bold text-[#0F172A]">
                       Cierre e Informe IA
                     </h3>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded bg-blue-50 border border-blue-200 text-[10px] font-semibold text-[#1D4ED8]">
+                      ✦ Generado por IA · Revisado por especialista
+                    </span>
                   </div>
 
                   {activeTicket.status !== 'resolved' && (

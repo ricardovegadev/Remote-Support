@@ -18,59 +18,115 @@ import type {
   WizardDraft,
 } from '../types/support';
 
-export const FIXED_SERVICE_PRICE_USD = 25;
+export const FIXED_SERVICE_PRICE_USD = 15;
+export const LEGAL_TERMS_VERSION = 'v1.0-2026';
+export const ADULT_RESTRICTION_ERROR =
+  'Remote Support 365 está disponible únicamente para personas mayores de 18 años.';
 
 export const SERVICE_TIER_PRICES: Record<ServiceTier, number> = {
-  'Express $25': 25,
-  'Optimización $40': 40,
-  'Avanzado $55': 55,
+  'Express $15': 15,
+  'Optimización $29': 29,
+  'Avanzado $39': 39,
+  'Pyme Esencial $39/mes': 39,
+  'Pyme Corporativo $79/mes': 79,
+};
+
+export const SERVICE_TIER_REGULAR_PRICES: Record<ServiceTier, number> = {
+  'Express $15': 25,
+  'Optimización $29': 40,
+  'Avanzado $39': 55,
+  'Pyme Esencial $39/mes': 59,
+  'Pyme Corporativo $79/mes': 99,
 };
 
 export const SERVICE_TIER_OPTIONS: Array<{
   id: ServiceTier;
   priceUsd: number;
+  regularPriceUsd: number;
+  discountLabel: string;
+  recommended?: boolean;
+  eyebrow: string;
   summary: string;
+  features: string[];
 }> = [
   {
-    id: 'Express $25',
-    priceUsd: 25,
-    summary: 'Asistencia puntual: impresoras, correo o red (tarifa estándar)',
+    id: 'Express $15',
+    priceUsd: 15,
+    regularPriceUsd: 25,
+    discountLabel: '40% OFF',
+    eyebrow: 'Sesión Única Temporal · Inicio Rápido',
+    summary: 'Asistencia puntual rápida para incidencias cotidianas en minutos.',
+    features: [
+      'Impresoras y escáneres',
+      'Correo Outlook / Microsoft 365',
+      'Instalación y configuración rápida',
+    ],
   },
   {
-    id: 'Optimización $40',
-    priceUsd: 40,
-    summary: 'Limpieza profunda de sistema operativo, inicio y actualizaciones',
+    id: 'Optimización $29',
+    priceUsd: 29,
+    regularPriceUsd: 40,
+    discountLabel: '28% OFF',
+    recommended: true,
+    eyebrow: 'Rendimiento Integral',
+    summary: 'Deja tu equipo rápido, limpio y protegido en una sola sesión supervisada.',
+    features: [
+      'Limpieza profunda Windows / macOS',
+      'Eliminación de malware y procesos lentos',
+      'Optimización de arranque y actualizaciones',
+    ],
   },
   {
-    id: 'Avanzado $55',
-    priceUsd: 55,
-    summary: 'Configuración VPN, respaldos críticos o software corporativo',
+    id: 'Avanzado $39',
+    priceUsd: 39,
+    regularPriceUsd: 55,
+    discountLabel: '29% OFF',
+    eyebrow: 'Soporte Especializado',
+    summary: 'Intervención avanzada para conectividad, respaldos y entornos críticos.',
+    features: [
+      'Configuración de redes Wi-Fi y VPN',
+      'Respaldos críticos y migración de datos',
+      'Diagnóstico avanzado de sistema',
+    ],
   },
 ];
 
-export const PYME_PLANS = [
+export const PYME_PLANS: Array<{
+  id: string;
+  name: string;
+  serviceTier: ServiceTier;
+  priceUsd: number;
+  regularPriceUsd: number;
+  devicesLimit: string;
+  summary: string;
+  features: string[];
+}> = [
   {
-    id: 'pyme-99',
+    id: 'pyme-39',
     name: 'Pyme Esencial',
-    priceUsd: 99,
+    serviceTier: 'Pyme Esencial $39/mes',
+    priceUsd: 39,
+    regularPriceUsd: 59,
     devicesLimit: 'Hasta 5 equipos',
     summary: 'Agente instalado desatendido y mesa de ayuda prioritaria mensual.',
     features: [
-      'Hasta 6 sesiones remotas al mes',
+      'Hasta 5 equipos protegidos en red',
       'Agente RustDesk instalado desatendido',
       'Informes técnicos mensuales verificados',
     ],
   },
   {
-    id: 'pyme-199',
+    id: 'pyme-79',
     name: 'Pyme Corporativo',
-    priceUsd: 199,
-    devicesLimit: 'Hasta 15 equipos',
-    summary: 'Cobertura continua con técnico asignado y SLA menor a 10 minutos.',
+    serviceTier: 'Pyme Corporativo $79/mes',
+    priceUsd: 79,
+    regularPriceUsd: 99,
+    devicesLimit: 'Hasta 15 equipos · SLA < 10 min',
+    summary: 'Cobertura continua 365 días con técnico asignado y SLA menor a 10 minutos.',
     features: [
-      'Sesiones remotas ilimitadas en horario hábil',
+      'Sesiones remotas ilimitadas para hasta 15 equipos',
       'Monitoreo preventivo y respaldos críticos',
-      'Consolidación de auditoría e historial',
+      'Consolidación de auditoría e historial IA',
     ],
   },
 ];
@@ -80,6 +136,7 @@ export const SAAS_PLANS = [
     id: 'starter-29',
     name: 'Starter MSP',
     priceUsd: 29,
+    regularPriceUsd: 49,
     seats: 'Hasta 3 técnicos internos',
     summary: 'Para firmas de soporte IT que digitalizan su mesa de ayuda remota.',
     features: [
@@ -92,6 +149,7 @@ export const SAAS_PLANS = [
     id: 'growth-49',
     name: 'Growth Helpdesk',
     priceUsd: 49,
+    regularPriceUsd: 79,
     seats: 'Hasta 10 técnicos + Freelancers',
     summary: 'Escala con colaboradores externos y automatización AI Workforce 365.',
     highlighted: true,
@@ -105,6 +163,7 @@ export const SAAS_PLANS = [
     id: 'scale-79',
     name: 'Scale Marketplace',
     priceUsd: 79,
+    regularPriceUsd: 119,
     seats: 'Ilimitado + Red Global de Desborde',
     summary: 'Operación multiempresa con relay RustDesk dedicado y red global.',
     features: [
@@ -117,50 +176,121 @@ export const SAAS_PLANS = [
 
 export const CATEGORY_OPTIONS: CategoryOption[] = [
   {
-    id: 'Impresoras',
-    label: 'Impresoras',
-    summary: 'Cola de impresión atascada, controladores o conexión en red local.',
+    id: 'Windows lento o bajo rendimiento',
+    label: 'Windows lento o con bajo rendimiento',
+    summary: 'Optimización de arranque, limpieza de procesos en segundo plano y memoria.',
+    typicalResolutionTime: '25–35 min',
+    suggestedTier: 'Optimización $29',
+    examples: ['CPU/Disco al 100%', 'Inicio lento', 'Limpieza de procesos'],
+  },
+  {
+    id: 'Aplicaciones que no arrancan',
+    label: 'Aplicaciones que no arrancan o se cierran',
+    summary: 'Reparación de dependencias, librerías y conflictos de software en el sistema.',
     typicalResolutionTime: '15–25 min',
-    examples: ['No imprime por Wi-Fi', 'Error de driver USB', 'Escáner sin respuesta'],
+    suggestedTier: 'Express $15',
+    examples: ['Error DLL / Runtime', 'Cierres inesperados', 'Reinstalación limpia'],
   },
   {
-    id: 'Correo/Office',
-    label: 'Correo / Microsoft 365',
-    summary: 'Outlook, IMAP/SMTP, licencias Microsoft 365 y sincronización.',
+    id: 'Pantallazos azules (BSOD)',
+    label: 'Pantallazos azules (BSOD)',
+    summary: 'Análisis de volcado de memoria, drivers críticos y estabilidad de hardware/sistema.',
+    typicalResolutionTime: '30–45 min',
+    suggestedTier: 'Avanzado $39',
+    examples: ['Minidump BSOD', 'Fallo de controlador', 'Reinicios críticos'],
+  },
+  {
+    id: 'Problemas de Wi-Fi o red',
+    label: 'Problemas de conexión Wi-Fi o red',
+    summary: 'Diagnóstico de adaptadores, DNS, cortes intermitentes y conectividad en red local.',
+    typicalResolutionTime: '15–25 min',
+    suggestedTier: 'Express $15',
+    examples: ['Sin acceso a internet', 'Cortes de Wi-Fi', 'Ajuste DNS / IP'],
+  },
+  {
+    id: 'Errores de Microsoft 365 y Outlook',
+    label: 'Errores de Microsoft 365 y Outlook',
+    summary: 'Reparación de perfiles PST/OST, sincronización, licencias y autenticación de correo.',
     typicalResolutionTime: '20–30 min',
-    examples: ['Outlook no envía correos', 'Activación de Office', 'Buzón lleno o PST'],
+    suggestedTier: 'Express $15',
+    examples: ['Outlook no sincroniza', 'Bucle contraseña MFA', 'Activación 365'],
   },
   {
-    id: 'Sistema Operativo/Lentitud',
-    label: 'Sistema Operativo / Lentitud',
-    summary: 'Optimización de inicio, actualizaciones bloqueadas y uso alto de disco.',
+    id: 'Configuración de impresoras',
+    label: 'Configuración de impresoras',
+    summary: 'Instalación en red o USB, liberación de cola de impresión atascada y controladores.',
+    typicalResolutionTime: '15–25 min',
+    suggestedTier: 'Express $15',
+    examples: ['Cola atascada', 'Impresora en red/Wi-Fi', 'Driver TCP/IP'],
+  },
+  {
+    id: 'Eliminación de malware y virus',
+    label: 'Eliminación de malware y virus',
+    summary: 'Desinfección profunda, eliminación de adware o secuestradores de navegador y blindaje.',
     typicalResolutionTime: '25–40 min',
-    examples: ['CPU al 100%', 'Actualización fallida', 'Limpieza de procesos'],
+    suggestedTier: 'Optimización $29',
+    examples: ['Adware y pop-ups', 'Secuestro de navegador', 'Blindaje antivirus'],
   },
   {
-    id: 'Redes/Wi-Fi',
-    label: 'Redes / Wi-Fi / VPN',
-    summary: 'Cortes intermitentes, configuración DNS, VPN corporativa y carpetas.',
-    typicalResolutionTime: '15–30 min',
-    examples: ['Sin acceso a internet', 'VPN no autentica', 'DNS lento'],
+    id: 'Recuperación de archivos',
+    label: 'Recuperación de archivos',
+    summary: 'Rescate de documentos eliminados accidentalmente o particiones dañadas y respaldo.',
+    typicalResolutionTime: '35–50 min',
+    suggestedTier: 'Avanzado $39',
+    examples: ['Documentos borrados', 'Partición o USB dañado', 'Respaldo seguro'],
   },
   {
-    id: 'Otro',
-    label: 'Otro',
-    summary: 'Software específico, periféricos, respaldo de archivos o configuración.',
-    typicalResolutionTime: '20–35 min',
-    examples: ['Instalación segura', 'Audio/Cámara en reuniones', 'Certificados digitales'],
+    id: 'Actualizaciones de Windows',
+    label: 'Problemas de actualizaciones de Windows',
+    summary: 'Desbloqueo de Windows Update atascado y reversión segura de parches fallidos.',
+    typicalResolutionTime: '25–40 min',
+    suggestedTier: 'Optimización $29',
+    examples: ['Update al 0% o bucle', 'Error de actualización', 'Reversión de parche'],
+  },
+  {
+    id: 'VPN y acceso remoto',
+    label: 'Configuración de VPN y acceso remoto',
+    summary: 'Túneles corporativos, escritorio remoto RDP seguro y acceso estable para teletrabajo.',
+    typicalResolutionTime: '25–40 min',
+    suggestedTier: 'Avanzado $39',
+    examples: ['WireGuard / IPsec / Fortinet', 'RDP seguro', 'Acceso teletrabajo'],
   },
 ];
+
+export const CATEGORY_SUGGESTED_TIER_MAP: Record<IssueCategory, ServiceTier> = {
+  'Windows lento o bajo rendimiento': 'Optimización $29',
+  'Aplicaciones que no arrancan': 'Express $15',
+  'Pantallazos azules (BSOD)': 'Avanzado $39',
+  'Problemas de Wi-Fi o red': 'Express $15',
+  'Errores de Microsoft 365 y Outlook': 'Express $15',
+  'Configuración de impresoras': 'Express $15',
+  'Eliminación de malware y virus': 'Optimización $29',
+  'Recuperación de archivos': 'Avanzado $39',
+  'Actualizaciones de Windows': 'Optimización $29',
+  'VPN y acceso remoto': 'Avanzado $39',
+  Impresoras: 'Express $15',
+  'Correo/Office': 'Express $15',
+  'Sistema Operativo/Lentitud': 'Optimización $29',
+  'Redes/Wi-Fi': 'Express $15',
+  Otro: 'Express $15',
+};
+
+export function getSuggestedTierForCategory(category: IssueCategory): ServiceTier {
+  return CATEGORY_SUGGESTED_TIER_MAP[category] ?? 'Express $15';
+}
 
 export const INITIAL_WIZARD_DRAFT: WizardDraft = {
   step: 1,
   category: null,
   operatingSystem: null,
-  serviceTier: 'Express $25',
+  serviceTier: 'Express $15',
+  billingMode: 'one_time',
   description: '',
   clientName: '',
   clientEmail: '',
+  birthDate: '',
+  termsAccepted: false,
+  marketingOptIn: false,
   aiTriage: null,
 };
 
@@ -188,8 +318,20 @@ export function getServiceTierPriceUsd(tier: ServiceTier): number {
   return SERVICE_TIER_PRICES[tier] ?? FIXED_SERVICE_PRICE_USD;
 }
 
-export function getInitials(name: string): string {
-  const parts = name
+export function getServiceTierRegularPriceUsd(tier: ServiceTier): number {
+  return SERVICE_TIER_REGULAR_PRICES[tier] ?? 25;
+}
+
+export function getDiscountPercent(
+  priceUsd: number,
+  regularPriceUsd: number
+): number {
+  if (regularPriceUsd <= 0 || priceUsd >= regularPriceUsd) return 0;
+  return Math.round(((regularPriceUsd - priceUsd) / regularPriceUsd) * 100);
+}
+
+export function getInitials(name: string | null | undefined): string {
+  const parts = String(name ?? '')
     .trim()
     .split(/\s+/)
     .filter(Boolean);
@@ -200,10 +342,18 @@ export function getInitials(name: string): string {
 
 export function deriveTicketPriority(ticket: SupportTicket): TicketPriority {
   if (ticket.priority) return ticket.priority;
-  if (ticket.service_tier === 'Avanzado $55' || ticket.status === 'in_progress') {
+  if (
+    ticket.service_tier === 'Avanzado $39' ||
+    ticket.service_tier === 'Pyme Corporativo $79/mes' ||
+    ticket.status === 'in_progress'
+  ) {
     return 'high';
   }
-  if (ticket.service_tier === 'Optimización $40' || ticket.status === 'ready_to_connect') {
+  if (
+    ticket.service_tier === 'Optimización $29' ||
+    ticket.service_tier === 'Pyme Esencial $39/mes' ||
+    ticket.status === 'ready_to_connect'
+  ) {
     return 'medium';
   }
   return 'low';
@@ -222,12 +372,12 @@ export function getPriorityMeta(priority: TicketPriority): {
     case 'medium':
       return {
         label: 'MEDIA',
-        badgeClass: 'bg-[#FEF3C7] text-[#D97706]',
+        badgeClass: 'bg-[#FEF3C7] text-amber-800',
       };
     case 'low':
       return {
         label: 'BAJA',
-        badgeClass: 'bg-[#E0F2FE] text-[#0284C7]',
+        badgeClass: 'bg-[#E0F2FE] text-sky-800',
       };
   }
 }
@@ -237,11 +387,11 @@ export function getStatusBadgeClass(status: TicketStatus): string {
     case 'in_progress':
       return 'bg-[#DBEAFE] text-[#1D4ED8]';
     case 'ready_to_connect':
-      return 'bg-[#D1FAE5] text-[#059669]';
+      return 'bg-[#D1FAE5] text-emerald-800';
     case 'waiting_payment':
-      return 'bg-[#FEF3C7] text-[#D97706]';
+      return 'bg-[#FEF3C7] text-amber-800';
     case 'resolved':
-      return 'bg-[#D1FAE5] text-[#059669]';
+      return 'bg-[#D1FAE5] text-emerald-800';
   }
 }
 
@@ -286,6 +436,52 @@ export function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(trimmed);
 }
 
+export function calculateAgeFromBirthDate(
+  birthDateIso: string | null | undefined,
+  referenceDate: Date = new Date()
+): number | null {
+  if (!birthDateIso) return null;
+  const match = birthDateIso.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  const refYear = referenceDate.getUTCFullYear();
+  const refMonth = referenceDate.getUTCMonth() + 1;
+  const refDay = referenceDate.getUTCDate();
+  if (
+    year > refYear ||
+    (year === refYear && (month > refMonth || (month === refMonth && day > refDay)))
+  ) {
+    return null;
+  }
+
+  let age = refYear - year;
+  if (refMonth < month || (refMonth === month && refDay < day)) {
+    age -= 1;
+  }
+  return age;
+}
+
+export function isAdultBirthDate(
+  birthDateIso: string | null | undefined,
+  referenceDate: Date = new Date()
+): boolean {
+  const age = calculateAgeFromBirthDate(birthDateIso, referenceDate);
+  return age !== null && age >= 18;
+}
+
 export function validateStep1(draft: WizardDraft): ValidationResult {
   const errors: Record<string, string> = {};
   if (!draft.category) {
@@ -297,7 +493,8 @@ export function validateStep1(draft: WizardDraft): ValidationResult {
 export function validateStep2(draft: WizardDraft): ValidationResult {
   const errors: Record<string, string> = {};
   if (!draft.operatingSystem) {
-    errors.operatingSystem = 'Selecciona tu sistema operativo (Windows o Mac).';
+    errors.operatingSystem =
+      'Selecciona tu sistema operativo (Windows, Mac, Linux o Mobile).';
   }
   const desc = draft.description.trim();
   if (desc.length < 10) {
@@ -316,6 +513,17 @@ export function validateStep3(draft: WizardDraft): ValidationResult {
     errors.clientEmail =
       'Ingresa un correo electrónico válido para recibir el comprobante.';
   }
+  const age = calculateAgeFromBirthDate(draft.birthDate);
+  if (age === null) {
+    errors.birthDate =
+      'Ingresa tu fecha de nacimiento válida para verificar la mayoría de edad (+18 años).';
+  } else if (age < 18) {
+    errors.birthDate = ADULT_RESTRICTION_ERROR;
+  }
+  if (!draft.termsAccepted) {
+    errors.termsAccepted =
+      'Debes aceptar los Términos y Condiciones, la Política de Privacidad y la Política de Reembolsos.';
+  }
   return { valid: Object.keys(errors).length === 0, errors };
 }
 
@@ -325,6 +533,16 @@ export function deriveInitialDiagnosisSummary(
   problemDescription: string
 ): string {
   const map: Record<IssueCategory, string> = {
+    'Windows lento o bajo rendimiento': `Protocolo sugerido (${osType}): Auditar Administrador de Tareas, programas de inicio, uso de disco/RAM y servicios en segundo plano.`,
+    'Aplicaciones que no arrancan': `Protocolo sugerido (${osType}): Verificar librerías Runtime/DLL, registros de fallos de aplicación y permisos de ejecución.`,
+    'Pantallazos azules (BSOD)': `Protocolo sugerido (${osType}): Analizar archivos Minidump/volcados de memoria, controladores críticos y estabilidad del sistema.`,
+    'Problemas de Wi-Fi o red': `Protocolo sugerido (${osType}): Validar adaptador de red, concesión DHCP, resolución DNS y estabilidad de puerta de enlace.`,
+    'Errores de Microsoft 365 y Outlook': `Protocolo sugerido (${osType}): Verificar credenciales Modern Auth/WAM, estado de licencia Microsoft 365 y reparación de perfil PST/OST.`,
+    'Configuración de impresoras': `Protocolo sugerido (${osType}): Inspeccionar spooler de impresión, driver oficial y puerto TCP/IP o USB.`,
+    'Eliminación de malware y virus': `Protocolo sugerido (${osType}): Ejecutar desinfección profunda, depurar extensiones/secuestradores de navegador y reforzar protección.`,
+    'Recuperación de archivos': `Protocolo sugerido (${osType}): Evaluar volumen afectado en modo seguro de lectura, rescatar documentos y respaldar en ruta segura.`,
+    'Actualizaciones de Windows': `Protocolo sugerido (${osType}): Limpiar caché de SoftwareDistribution, reparar componentes de Windows Update o revertir parches fallidos.`,
+    'VPN y acceso remoto': `Protocolo sugerido (${osType}): Configurar túnel VPN corporativo, reglas de escritorio remoto RDP seguro y rutas DNS privadas.`,
     Impresoras: `Protocolo sugerido (${osType}): Inspeccionar spooler de impresión, driver activo y puerto TCP/IP.`,
     'Correo/Office': `Protocolo sugerido (${osType}): Verificar credenciales OAuth2/IMAP, caché de perfil y estado de licencia Microsoft 365.`,
     'Sistema Operativo/Lentitud': `Protocolo sugerido (${osType}): Auditar consumo de CPU/disco, servicios en segundo plano y cola de actualizaciones.`,
@@ -367,6 +585,10 @@ export function createTicketFromDraft(
       draft.description
     );
 
+  const billingMode = draft.billingMode ?? 'one_time';
+  const birthDate = draft.birthDate?.trim() || null;
+  const adultVerified = birthDate ? isAdultBirthDate(birthDate) : false;
+
   return {
     id: generateUuid(randomFn),
     ticket_code: generateTicketCode(randomFn),
@@ -376,10 +598,13 @@ export function createTicketFromDraft(
     category: draft.category,
     os_type: draft.operatingSystem,
     service_tier: draft.serviceTier,
+    billing_mode: billingMode,
     priority:
-      draft.serviceTier === 'Avanzado $55'
+      draft.serviceTier === 'Avanzado $39' ||
+      draft.serviceTier === 'Pyme Corporativo $79/mes'
         ? 'high'
-        : draft.serviceTier === 'Optimización $40'
+        : draft.serviceTier === 'Optimización $29' ||
+          draft.serviceTier === 'Pyme Esencial $39/mes'
         ? 'medium'
         : 'low',
     problem_description: draft.description.trim(),
@@ -387,8 +612,15 @@ export function createTicketFromDraft(
     ai_diagnosis: draft.aiTriage ?? null,
     client_name: draft.clientName.trim(),
     client_email: draft.clientEmail.trim().toLowerCase(),
+    client_birth_date: birthDate,
+    is_adult_verified: adultVerified,
+    terms_accepted_at: draft.termsAccepted ? created_at : null,
+    terms_version: draft.termsAccepted ? LEGAL_TERMS_VERSION : null,
+    marketing_opt_in: Boolean(draft.marketingOptIn),
+    subscription_status: billingMode === 'pyme_monthly' ? 'active' : 'none',
+    anonymized_at: null,
     rustdesk_id: null,
-    agent_type: 'temporary',
+    agent_type: billingMode === 'pyme_monthly' ? 'installed' : 'temporary',
     agent_downloaded: false,
     consent_accepted: false,
     consent_accepted_at: null,
@@ -585,6 +817,20 @@ export function getAgentDownloadMeta(
         shaHint: 'Agente instalado con acceso recurrente para planes Pyme',
       };
     }
+    if (os === 'Linux') {
+      return {
+        fileName: 'RemoteSupport365-Host.deb',
+        sizeLabel: '14.9 MB · Linux Debian / Ubuntu (x86_64)',
+        shaHint: 'Agente instalado systemd con acceso recurrente para planes Pyme',
+      };
+    }
+    if (os === 'Mobile') {
+      return {
+        fileName: 'RemoteSupport365-Mobile.apk',
+        sizeLabel: '12.4 MB · Android / Soporte iOS Guiado',
+        shaHint: 'Cliente móvil oficial para asistencia remota asistida',
+      };
+    }
     return {
       fileName: 'RemoteSupport365-Host.msi',
       sizeLabel: '16.4 MB · Windows Servicio Windows (x64)',
@@ -599,6 +845,20 @@ export function getAgentDownloadMeta(
       shaHint: 'Agente temporal sin instalación · Se cierra al terminar',
     };
   }
+  if (os === 'Linux') {
+    return {
+      fileName: 'RemoteSupport365-Quick.AppImage',
+      sizeLabel: '13.5 MB · Linux AppImage / .deb (x86_64)',
+      shaHint: 'Agente portable sin instalación · Se cierra al terminar',
+    };
+  }
+  if (os === 'Mobile') {
+    return {
+      fileName: 'RemoteSupport365-Mobile.apk',
+      sizeLabel: '12.4 MB · Android APK / Guía iOS',
+      shaHint: 'Asistencia móvil segura sin acceso permanente',
+    };
+  }
   return {
     fileName: 'RemoteSupport365-Quick.exe',
     sizeLabel: '11.8 MB · Windows 10 / 11 (x64)',
@@ -609,17 +869,29 @@ export function getAgentDownloadMeta(
 export const OFFICIAL_RUSTDESK_RELEASES_URL =
   'https://github.com/rustdesk/rustdesk/releases/latest';
 
+export function getOfficialRustDeskDownloadEndpoint(os: OperatingSystem): string {
+  return `/api/rustdesk/official-download?os=${encodeURIComponent(os)}`;
+}
+
 export function getRustDeskInstallerUrl(
   os: OperatingSystem,
   _agentType: AgentInstallType = 'temporary',
   env?: { windowsUrl?: string; macUrl?: string }
 ): string {
   const customUrl =
-    os === 'Mac' ? env?.macUrl?.trim() : env?.windowsUrl?.trim();
-  if (customUrl && /^https?:\/\//i.test(customUrl)) {
+    os === 'Mac'
+      ? env?.macUrl?.trim()
+      : os === 'Windows'
+      ? env?.windowsUrl?.trim()
+      : undefined;
+  if (
+    customUrl &&
+    customUrl !== OFFICIAL_RUSTDESK_RELEASES_URL &&
+    /^https?:\/\//i.test(customUrl)
+  ) {
     return customUrl;
   }
-  return OFFICIAL_RUSTDESK_RELEASES_URL;
+  return getOfficialRustDeskDownloadEndpoint(os);
 }
 
 export function parseAppRoute(pathname: string): {
