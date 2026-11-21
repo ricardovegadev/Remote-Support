@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Activity,
+  Check,
+  Copy,
   ExternalLink,
   Laptop,
   MonitorSmartphone,
@@ -14,11 +16,35 @@ import {
 } from '../../utils/ticketLogic';
 
 interface DevicesViewProps {
+  organizationId?: string;
   devices: ClientDevice[];
 }
 
-export function DevicesDirectoryView({ devices }: DevicesViewProps) {
+export function DevicesDirectoryView({
+  organizationId,
+  devices,
+}: DevicesViewProps) {
   const [search, setSearch] = useState('');
+  const [copiedDeviceId, setCopiedDeviceId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSearch('');
+    setCopiedDeviceId(null);
+  }, [organizationId]);
+
+  const handleCopyDeviceId = async (deviceId: string, rawRustDeskId: string) => {
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(rawRustDeskId);
+      }
+    } catch {
+      // Fallback silencioso si el portapapeles está restringido
+    }
+    setCopiedDeviceId(deviceId);
+    window.setTimeout(() => {
+      setCopiedDeviceId((prev) => (prev === deviceId ? null : prev));
+    }, 2000);
+  };
 
   const filtered = devices.filter((dev) => {
     const q = search.trim().toLowerCase();
@@ -48,7 +74,7 @@ export function DevicesDirectoryView({ devices }: DevicesViewProps) {
 
         <div className="relative w-full sm:w-72">
           <Search
-            className="w-4 h-4 text-[#94A3B8] absolute left-3.5 top-1/2 -translate-y-1/2"
+            className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2"
             aria-hidden="true"
           />
           <input
@@ -56,7 +82,7 @@ export function DevicesDirectoryView({ devices }: DevicesViewProps) {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar equipo, empresa o ID..."
-            className="w-full rounded-full border border-[#E5E9F2] bg-[#F8FAFC] pl-10 pr-4 py-2 text-xs text-[#0F172A] focus:bg-white focus:border-[#2563EB] focus:outline-none"
+            className="w-full rounded-full border border-[#E5E9F2] bg-[#F8FAFC] pl-10 pr-4 py-2 text-xs text-[#0F172A] placeholder:text-slate-500 focus:bg-white focus:border-[#2563EB] focus:outline-none"
           />
         </div>
       </div>
@@ -122,19 +148,40 @@ export function DevicesDirectoryView({ devices }: DevicesViewProps) {
                 </div>
               </div>
 
-              <div className="pt-3 border-t border-[#E5E9F2] flex items-center justify-between gap-3">
+              <div className="pt-3 border-t border-[#E5E9F2] flex items-center justify-between gap-2">
                 <span className="font-mono tabular-nums text-xs font-semibold text-[#0F172A]">
                   {formatRustDeskId(dev.rustdesk_id)}
                 </span>
-                {deepLink && (
-                  <a
-                    href={deepLink}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-lg transition-colors whitespace-nowrap"
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    title="Copiar ID para pegar manualmente si RustDesk no abre desde el navegador"
+                    onClick={() => void handleCopyDeviceId(dev.id, dev.rustdesk_id)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-[#0F172A] bg-[#F8FAFC] hover:bg-slate-100 border border-[#E5E9F2] rounded-lg transition-colors whitespace-nowrap"
                   >
-                    <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
-                    <span>Conectar</span>
-                  </a>
-                )}
+                    {copiedDeviceId === dev.id ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-600" aria-hidden="true" />
+                        <span>¡Copiado!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5 text-[#2563EB]" aria-hidden="true" />
+                        <span>Copiar ID</span>
+                      </>
+                    )}
+                  </button>
+                  {deepLink && (
+                    <a
+                      href={deepLink}
+                      title="Abrir en la aplicación oficial de RustDesk"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-lg transition-colors whitespace-nowrap"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Conectar</span>
+                    </a>
+                  )}
+                </div>
               </div>
             </div>
           );
@@ -144,7 +191,7 @@ export function DevicesDirectoryView({ devices }: DevicesViewProps) {
       {filtered.length === 0 && (
         <div className="bg-white border border-[#E5E9F2] rounded-xl p-10 text-center space-y-2 shadow-[0_1px_3px_rgba(15,23,42,0.03)]">
           <MonitorSmartphone
-            className="w-8 h-8 text-[#94A3B8] mx-auto"
+            className="w-8 h-8 text-slate-500 mx-auto"
             aria-hidden="true"
           />
           <p className="text-sm font-semibold text-[#0F172A]">

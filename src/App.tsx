@@ -1,5 +1,4 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { AuthModal } from './components/AuthModal';
 import { CookieConsentBanner } from './components/CookieConsentBanner';
 import {
   DiagnosticWizard,
@@ -9,8 +8,27 @@ import { Footer } from './components/Footer';
 import { Header } from './components/Header';
 import { HeroSection } from './components/HeroSection';
 import { LandingSections } from './components/LandingSections';
-import { LegalDocsModal, type LegalDocTab } from './components/LegalDocsModal';
+import type { LegalDocTab } from './components/LegalDocsModal';
 import { getSupabaseClient, isSupabaseConfigured } from './lib/supabaseClient';
+
+const AuthModal = lazy(() =>
+  import('./components/AuthModal').then((m) => ({ default: m.AuthModal }))
+);
+const ConnectionRoom = lazy(() =>
+  import('./components/ConnectionRoom').then((m) => ({
+    default: m.ConnectionRoom,
+  }))
+);
+const LegalDocsModal = lazy(() =>
+  import('./components/LegalDocsModal').then((m) => ({
+    default: m.LegalDocsModal,
+  }))
+);
+const TechPortalView = lazy(() =>
+  import('./components/TechPortalView').then((m) => ({
+    default: m.TechPortalView,
+  }))
+);
 import {
   haveRecordsChanged,
   haveTicketsChanged,
@@ -44,20 +62,7 @@ import {
   parseAppRoute,
 } from './utils/ticketLogic';
 
-const ConnectionRoom = lazy(() =>
-  import('./components/ConnectionRoom').then((module) => ({ default: module.ConnectionRoom }))
-);
-const TechPortalView = lazy(() =>
-  import('./components/TechPortalView').then((module) => ({ default: module.TechPortalView }))
-);
-
-function ViewLoading() {
-  return (
-    <section className="min-h-[45vh] grid place-items-center bg-[#F8FAFC] px-4">
-      <p className="text-sm font-medium text-slate-600">Cargando tu espacio de trabajo…</p>
-    </section>
-  );
-}
+const PUBLIC_PORTAL_ORG_ID = '00000000-0000-4000-8000-000000000001';
 
 function triggerJsonDownload(filename: string, jsonText: string) {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -143,12 +148,21 @@ export default function App() {
       ) ?? null
     : null;
 
-  const activeTicket =
-    matchedTicket ?? (!activeTicketCode ? tickets[0] ?? null : null);
+  const activeTicket = matchedTicket;
 
   const activeTicketMessages = activeTicket
     ? messages.filter((msg) => msg.ticket_id === activeTicket.id)
     : [];
+
+  useEffect(() => {
+    setAiAgents((prev) => {
+      let next = supportAdapter.ensureOrganizationAiAgents(PUBLIC_PORTAL_ORG_ID, prev);
+      if (activeOrgId && activeOrgId !== PUBLIC_PORTAL_ORG_ID) {
+        next = supportAdapter.ensureOrganizationAiAgents(activeOrgId, next);
+      }
+      return next === prev ? prev : next;
+    });
+  }, [activeOrgId]);
 
   const navigateToRoute = useCallback(
     (path: string, view: AppView, code: string | null = null) => {
@@ -247,6 +261,30 @@ export default function App() {
               haveRecordsChanged(prev, nextMessages) ? nextMessages : prev
             );
           }
+          if (res.data.devices) {
+            const nextDevices = res.data.devices;
+            setDevices((prev) =>
+              haveRecordsChanged(prev, nextDevices) ? nextDevices : prev
+            );
+          }
+          if (res.data.sessions) {
+            const nextSessions = res.data.sessions;
+            setSessions((prev) =>
+              haveRecordsChanged(prev, nextSessions) ? nextSessions : prev
+            );
+          }
+          if (res.data.aiAgents && res.data.aiAgents.length > 0) {
+            const nextAiAgents = res.data.aiAgents;
+            setAiAgents((prev) =>
+              haveRecordsChanged(prev, nextAiAgents) ? nextAiAgents : prev
+            );
+          }
+          if (res.data.auditLogs) {
+            const nextAuditLogs = res.data.auditLogs;
+            setAuditLogs((prev) =>
+              haveRecordsChanged(prev, nextAuditLogs) ? nextAuditLogs : prev
+            );
+          }
         })
         .finally(() => {
           if (!clearHydratingOnDone) return;
@@ -317,7 +355,7 @@ export default function App() {
 
   const handleNavigateSection = (sectionId: string) => {
     if (activeView !== 'landing') {
-      navigateToRoute('/portal', 'landing', null);
+      navigateToRoute('/', 'landing', null);
       window.setTimeout(() => scrollToElement(sectionId), 60);
     } else {
       scrollToElement(sectionId);
@@ -325,7 +363,7 @@ export default function App() {
   };
 
   const handleReturnHome = () => {
-    navigateToRoute('/portal', 'landing', null);
+    navigateToRoute('/', 'landing', null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -341,7 +379,7 @@ export default function App() {
       symptom: '',
       openComposer: true,
     });
-    navigateToRoute('/portal', 'landing', null);
+    navigateToRoute('/', 'landing', null);
     scrollToElement('diagnostico');
   };
 
@@ -366,7 +404,7 @@ export default function App() {
       symptom: cleanSymptom,
       category: payload.category,
     });
-    navigateToRoute('/portal', 'landing', null);
+    navigateToRoute('/', 'landing', null);
     scrollToElement('diagnostico');
   };
 
@@ -375,27 +413,34 @@ export default function App() {
     serviceTier?: ServiceTier,
     billingMode: 'one_time' | 'pyme_monthly' = 'one_time'
   ) => {
+    const resolvedTier: ServiceTier =
+      serviceTier ??
+      (billingMode === 'one_time' && wizardDraft.serviceTier.startsWith('Pyme')
+        ? 'Express $15'
+        : wizardDraft.serviceTier);
+    const shouldLockTier = Boolean(serviceTier) || billingMode === 'pyme_monthly';
     setWizardErrors({});
     setWizardDraft((prev) => ({
       ...prev,
       step: 1,
       category,
       operatingSystem: prev.operatingSystem ?? 'Windows',
-      serviceTier:
-        serviceTier ??
-        (billingMode === 'one_time' && prev.serviceTier.startsWith('Pyme')
-          ? 'Express $15'
-          : prev.serviceTier),
+      serviceTier: resolvedTier,
+      userLockedTier: shouldLockTier,
       billingMode,
     }));
-    if (category !== 'Otro') {
-      setExternalTriageTrigger({
-        id: Date.now(),
-        symptom: `Necesito soporte técnico remoto para: ${category}.`,
-        category,
-      });
-    }
-    navigateToRoute('/portal', 'landing', null);
+    setExternalTriageTrigger({
+      id: Date.now(),
+      symptom:
+        category !== 'Otro'
+          ? `Necesito soporte técnico remoto para: ${category}.`
+          : '',
+      category,
+      openComposer: true,
+      preselectedTier: shouldLockTier ? resolvedTier : undefined,
+      preselectedBillingMode: billingMode,
+    });
+    navigateToRoute('/', 'landing', null);
     scrollToElement('diagnostico');
   };
 
@@ -403,15 +448,23 @@ export default function App() {
     setWizardDraft((prev) => ({ ...prev, ...patch }));
   };
 
-  const handleCreateQuickTicket = async (
-    draft: WizardDraft
+  const createTicketForOrganization = async (
+    draft: WizardDraft,
+    targetOrgId: string
   ): Promise<SupportTicket | null> => {
     const targetOrg =
-      organizations.find((o) => o.id === activeOrgId) ?? organizations[0];
-    const newTicket = createTicketFromDraft(draft, {
-      organizationId: targetOrg?.id,
-      organizationName: targetOrg?.name,
-    });
+      organizations.find((o) => o.id === targetOrgId) ??
+      organizations.find((o) => o.id === PUBLIC_PORTAL_ORG_ID) ??
+      organizations[0];
+    const resolvedOrgId = targetOrg?.id ?? targetOrgId;
+    const newTicket = {
+      ...createTicketFromDraft(draft, {
+        organizationId: resolvedOrgId,
+        organizationName: targetOrg?.name ?? 'Remote Support 365',
+      }),
+      consent_accepted: false,
+      consent_accepted_at: null,
+    };
     const result = await supportAdapter.persistTicket(newTicket, tickets);
     if (!result.ok) {
       setPersistenceError(
@@ -425,8 +478,17 @@ export default function App() {
     return newTicket;
   };
 
+  const handleCreateQuickTicket = async (
+    draft: WizardDraft
+  ): Promise<SupportTicket | null> => {
+    return createTicketForOrganization(draft, activeOrgId);
+  };
+
   const handleSubmitTicket = async () => {
-    const created = await handleCreateQuickTicket(wizardDraft);
+    const created = await createTicketForOrganization(
+      wizardDraft,
+      PUBLIC_PORTAL_ORG_ID
+    );
     if (!created) return;
     navigateToRoute(
       `/sesion/${created.ticket_code}`,
@@ -811,7 +873,7 @@ export default function App() {
   const handleResetToNewTicket = () => {
     setWizardDraft(INITIAL_WIZARD_DRAFT);
     setWizardErrors({});
-    navigateToRoute('/portal', 'landing', null);
+    navigateToRoute('/', 'landing', null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -920,18 +982,39 @@ export default function App() {
     setAuditLogs(supportAdapter.loadAuditLogs());
   };
 
-  const handleDeletePersonalData = () => {
+  const handleDeletePersonalData = async () => {
     const actorLabel = currentUser?.full_name ?? 'Usuario / Operador';
     if (currentUser) {
+      const normalizedEmail = String(currentUser.email ?? '').toLowerCase();
       const matchingIds = tickets
         .filter(
           (t) =>
-            String(t?.client_email ?? '').toLowerCase() ===
-            String(currentUser.email ?? '').toLowerCase()
+            String(t?.client_email ?? '').toLowerCase() === normalizedEmail
         )
         .map((t) => t.id);
+
+      let workingTickets = tickets;
       for (const id of matchingIds) {
-        void handleAnonymizeClientData(id);
+        const target = workingTickets.find((item) => item.id === id);
+        const scope = target
+          ? {
+              ticketCode: target.ticket_code,
+              sessionToken: target.client_session_token,
+            }
+          : undefined;
+        const result = await supportAdapter.anonymizeTicketClientData(
+          id,
+          workingTickets,
+          scope
+        );
+        if (result.ok) {
+          workingTickets = result.data;
+        } else if (result.error) {
+          setPersistenceError(result.error);
+        }
+      }
+      if (workingTickets !== tickets) {
+        setTickets(workingTickets);
       }
     }
     setAuditLogs(
@@ -947,76 +1030,101 @@ export default function App() {
     handleSignOutAccount();
   };
 
+  const lazyFallback = (
+    <div
+      role="status"
+      aria-live="polite"
+      className="min-h-[60vh] flex items-center justify-center bg-[#F8FAFC] px-4 py-16"
+    >
+      <div className="bg-white border border-slate-200 rounded-xl px-6 py-4 shadow-xs text-center space-y-1">
+        <p className="text-sm font-semibold text-[#0B192C]">
+          Cargando módulo seguro...
+        </p>
+        <p className="text-xs text-slate-600">
+          Preparando la interfaz de Remote Support 365.
+        </p>
+      </div>
+    </div>
+  );
+
   const sharedOverlays = (
     <>
-      <LegalDocsModal
-        isOpen={legalDocTab !== null}
-        activeTab={legalDocTab ?? 'privacy'}
-        onSelectTab={setLegalDocTab}
-        onClose={() => setLegalDocTab(null)}
-      />
+      {legalDocTab !== null && (
+        <Suspense fallback={null}>
+          <LegalDocsModal
+            isOpen={true}
+            activeTab={legalDocTab}
+            onSelectTab={setLegalDocTab}
+            onClose={() => setLegalDocTab(null)}
+          />
+        </Suspense>
+      )}
       <CookieConsentBanner
         isOpen={cookieBannerOpen}
         onClose={() => setCookieBannerOpen(false)}
         onOpenPrivacyPolicy={() => setLegalDocTab('privacy')}
       />
-      <AuthModal
-        isOpen={authModalOpen}
-        currentUser={currentUser}
-        onClose={() => setAuthModalOpen(false)}
-        onAuthenticated={handleAuthenticated}
-        onSignOut={handleSignOutAccount}
-        onOpenLegalDoc={setLegalDocTab}
-        onExportUserData={handleExportUserOrOrgData}
-        onDeleteUserData={handleDeletePersonalData}
-      />
+      {authModalOpen && (
+        <Suspense fallback={null}>
+          <AuthModal
+            isOpen={true}
+            currentUser={currentUser}
+            onClose={() => setAuthModalOpen(false)}
+            onAuthenticated={handleAuthenticated}
+            onSignOut={handleSignOutAccount}
+            onOpenLegalDoc={setLegalDocTab}
+            onExportUserData={handleExportUserOrOrgData}
+            onDeleteUserData={handleDeletePersonalData}
+          />
+        </Suspense>
+      )}
     </>
   );
 
   if (activeView === 'tech_portal') {
     return (
       <>
-        <Suspense fallback={<ViewLoading />}>
+        <Suspense fallback={lazyFallback}>
           <TechPortalView
-          organizations={organizations}
-          activeOrgId={activeOrgId}
-          onSelectOrg={setActiveOrgId}
-          tickets={tickets}
-          messages={messages}
-          members={members}
-          devices={devices}
-          sessions={sessions}
-          aiAgents={aiAgents}
-          auditLogs={auditLogs}
-          persistenceError={persistenceError}
-          onDismissPersistenceError={() => setPersistenceError(null)}
-          onStartSession={handleStartSession}
-          onMarkPaymentPaid={handleConfirmPayment}
-          onResolveTicket={handleResolveTicket}
-          onReopenTicket={handleReopenTicket}
-          onSendTechnicianMessage={(ticketId, text) =>
-            handleSendMessage(ticketId, 'technician', text)
-          }
-          onInspectConnectionRoom={(ticket) => {
-            navigateToRoute(
-              `/sesion/${ticket.ticket_code}`,
-              'connection_room',
-              ticket.ticket_code
-            );
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-          }}
-          onClaimTicketAtomically={handleClaimTicketAtomically}
-          onUpdateMemberAvailability={handleUpdateMemberAvailability}
-          onChangeDispatchMode={handleChangeDispatchMode}
-          onInviteMember={handleInviteMember}
-          onToggleAiAgent={handleToggleAiAgent}
-          onToggleAiGovernanceRule={handleToggleAiGovernanceRule}
-          onSaveOrgSettings={handleSaveOrgSettings}
-          onCreateQuickTicket={handleCreateQuickTicket}
-          onOpenPublicPortal={handleReturnHome}
-          onOpenLegalDoc={setLegalDocTab}
-          onExportOrgData={handleExportUserOrOrgData}
-          onDeletePersonalData={handleDeletePersonalData}
+            organizations={organizations}
+            activeOrgId={activeOrgId}
+            onSelectOrg={setActiveOrgId}
+            tickets={tickets}
+            messages={messages}
+            members={members}
+            devices={devices}
+            sessions={sessions}
+            aiAgents={aiAgents}
+            auditLogs={auditLogs}
+            persistenceError={persistenceError}
+            onDismissPersistenceError={() => setPersistenceError(null)}
+            onStartSession={handleStartSession}
+            onMarkPaymentPaid={handleConfirmPayment}
+            onResolveTicket={handleResolveTicket}
+            onReopenTicket={handleReopenTicket}
+            onSendTechnicianMessage={(ticketId, text) =>
+              handleSendMessage(ticketId, 'technician', text)
+            }
+            onInspectConnectionRoom={(ticket) => {
+              navigateToRoute(
+                `/sesion/${ticket.ticket_code}`,
+                'connection_room',
+                ticket.ticket_code
+              );
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onClaimTicketAtomically={handleClaimTicketAtomically}
+            onUpdateMemberAvailability={handleUpdateMemberAvailability}
+            onChangeDispatchMode={handleChangeDispatchMode}
+            onInviteMember={handleInviteMember}
+            onToggleAiAgent={handleToggleAiAgent}
+            onToggleAiGovernanceRule={handleToggleAiGovernanceRule}
+            onSaveOrgSettings={handleSaveOrgSettings}
+            onCreateQuickTicket={handleCreateQuickTicket}
+            onOpenPublicPortal={handleReturnHome}
+            onOpenLegalDoc={setLegalDocTab}
+            onExportOrgData={handleExportUserOrOrgData}
+            onDeletePersonalData={handleDeletePersonalData}
           />
         </Suspense>
         {sharedOverlays}
@@ -1067,11 +1175,9 @@ export default function App() {
               draft={wizardDraft}
               errors={wizardErrors}
               persistenceError={persistenceError}
-              aiAgents={
-                aiAgents.some((a) => a.organization_id === activeOrgId)
-                  ? aiAgents.filter((a) => a.organization_id === activeOrgId)
-                  : aiAgents
-              }
+              aiAgents={aiAgents.filter(
+                (a) => a.organization_id === PUBLIC_PORTAL_ORG_ID
+              )}
               externalTrigger={externalTriageTrigger}
               onChangeDraft={handleChangeWizardDraft}
               onSetErrors={setWizardErrors}
@@ -1088,26 +1194,22 @@ export default function App() {
 
         {activeView === 'connection_room' && (
           activeTicket ? (
-            <Suspense fallback={<ViewLoading />}>
+            <Suspense fallback={lazyFallback}>
               <ConnectionRoom
-              ticket={activeTicket}
-              messages={activeTicketMessages}
-              relayDomain={
-                organizations.find((o) => o.id === activeTicket.organization_id)
-                  ?.rustdesk_relay_domain ?? 'relay.remotesupport365.com'
-              }
-              persistenceError={persistenceError}
-              onDismissError={() => setPersistenceError(null)}
-              onMarkAgentDownloaded={handleMarkAgentDownloaded}
-              onSaveRustDeskId={handleSaveRustDeskId}
-              onConfirmPayment={handleConfirmPayment}
-              onSendClientMessage={(ticketId, text) =>
-                handleSendMessage(ticketId, 'client', text)
-              }
-              onResetToNewTicket={handleResetToNewTicket}
-              onOpenLegalDoc={setLegalDocTab}
-              onExportClientData={handleExportClientData}
-              onAnonymizeClientData={handleAnonymizeClientData}
+                ticket={activeTicket}
+                messages={activeTicketMessages}
+                persistenceError={persistenceError}
+                onDismissError={() => setPersistenceError(null)}
+                onMarkAgentDownloaded={handleMarkAgentDownloaded}
+                onSaveRustDeskId={handleSaveRustDeskId}
+                onConfirmPayment={handleConfirmPayment}
+                onSendClientMessage={(ticketId, text) =>
+                  handleSendMessage(ticketId, 'client', text)
+                }
+                onResetToNewTicket={handleResetToNewTicket}
+                onOpenLegalDoc={setLegalDocTab}
+                onExportClientData={handleExportClientData}
+                onAnonymizeClientData={handleAnonymizeClientData}
               />
             </Suspense>
           ) : isHydratingSession ? (
@@ -1128,29 +1230,15 @@ export default function App() {
                   No encontramos la sala {activeTicketCode ?? 'solicitada'} en este navegador
                 </h1>
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  Si abriste el enlace desde otra sesión o limpiaste el almacenamiento
-                  local, puedes abrir el último ticket disponible o generar uno nuevo.
+                  Si abriste el enlace desde otra sesión, cerraste esta pestaña o limpiaste
+                  el almacenamiento del navegador, vuelve al portal para iniciar una nueva
+                  solicitud de soporte.
                 </p>
                 <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
-                  {tickets[0] && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        navigateToRoute(
-                          `/sesion/${tickets[0].ticket_code}`,
-                          'connection_room',
-                          tickets[0].ticket_code
-                        )
-                      }
-                      className="px-4 py-2 text-xs font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-lg transition-colors"
-                    >
-                      Abrir sala {tickets[0].ticket_code}
-                    </button>
-                  )}
                   <button
                     type="button"
                     onClick={handleResetToNewTicket}
-                    className="px-4 py-2 text-xs font-semibold text-[#0B192C] bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+                    className="px-4 py-2 text-xs font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-lg transition-colors"
                   >
                     Volver al Portal de Clientes
                   </button>

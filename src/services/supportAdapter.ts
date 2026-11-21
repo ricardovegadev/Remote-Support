@@ -293,7 +293,8 @@ export const SEED_TICKETS: SupportTicket[] = [
     assigned_technician_name: 'Carlos Mendoza',
     assigned_technician_specialty: 'Redes & VPN · Windows & BSOD',
     resolution_notes: null,
-    client_session_token: 'seed-token-rs1024-a1b2c3d4e5f6',
+    client_session_token:
+      'a1b2c3d4e5f60718293a4b5c6d7e8f901024a1b2c3d4e5f60718293a4b5c6d7e',
     claimed_at: `${TODAY_ISO}T09:17:00.000Z`,
     created_at: `${TODAY_ISO}T09:15:00.000Z`,
   },
@@ -324,7 +325,8 @@ export const SEED_TICKETS: SupportTicket[] = [
     assigned_technician_name: null,
     assigned_technician_specialty: null,
     resolution_notes: null,
-    client_session_token: 'seed-token-rs1025-a1b2c3d4e5f6',
+    client_session_token:
+      'b2c3d4e5f60718293a4b5c6d7e8f90a11025b2c3d4e5f60718293a4b5c6d7e8f',
     created_at: `${TODAY_ISO}T08:40:00.000Z`,
   },
   {
@@ -354,7 +356,8 @@ export const SEED_TICKETS: SupportTicket[] = [
     assigned_technician_name: null,
     assigned_technician_specialty: null,
     resolution_notes: null,
-    client_session_token: 'seed-token-rs1026-a1b2c3d4e5f6',
+    client_session_token:
+      'c3d4e5f60718293a4b5c6d7e8f90a1b21026c3d4e5f60718293a4b5c6d7e8f90',
     created_at: `${TODAY_ISO}T09:50:00.000Z`,
   },
   {
@@ -384,7 +387,8 @@ export const SEED_TICKETS: SupportTicket[] = [
     assigned_technician_name: null,
     assigned_technician_specialty: null,
     resolution_notes: null,
-    client_session_token: 'seed-token-rs1027-a1b2c3d4e5f6',
+    client_session_token:
+      'd4e5f60718293a4b5c6d7e8f90a1b2c31027d4e5f60718293a4b5c6d7e8f90a1',
     created_at: `${TODAY_ISO}T09:28:00.000Z`,
   },
   {
@@ -415,7 +419,8 @@ export const SEED_TICKETS: SupportTicket[] = [
     assigned_technician_specialty: 'Windows & BSOD · Redes & VPN',
     resolution_notes:
       'INFORME TÉCNICO DE CIERRE · RS-1023\nSe asignó reserva DHCP al equipo multifunción y se reinstaló la cola IPP en macOS. Prueba de impresión verificada.',
-    client_session_token: 'seed-token-rs1023-a1b2c3d4e5f6',
+    client_session_token:
+      'e5f60718293a4b5c6d7e8f90a1b2c3d41023e5f60718293a4b5c6d7e8f90a1b2',
     claimed_at: `${TODAY_ISO}T07:23:00.000Z`,
     resolved_at: `${TODAY_ISO}T07:42:00.000Z`,
     created_at: `${TODAY_ISO}T07:20:00.000Z`,
@@ -447,7 +452,8 @@ export const SEED_TICKETS: SupportTicket[] = [
     assigned_technician_name: null,
     assigned_technician_specialty: null,
     resolution_notes: null,
-    client_session_token: 'seed-token-rs4418-a1b2c3d4e5f6',
+    client_session_token:
+      'f60718293a4b5c6d7e8f90a1b2c3d4e54418f60718293a4b5c6d7e8f90a1b2c3',
     created_at: `${TODAY_ISO}T09:00:00.000Z`,
   },
   {
@@ -477,7 +483,8 @@ export const SEED_TICKETS: SupportTicket[] = [
     assigned_technician_name: null,
     assigned_technician_specialty: null,
     resolution_notes: null,
-    client_session_token: 'seed-token-rs5509-a1b2c3d4e5f6',
+    client_session_token:
+      '0718293a4b5c6d7e8f90a1b2c3d4e5f655090718293a4b5c6d7e8f90a1b2c3d4',
     created_at: `${TODAY_ISO}T09:10:00.000Z`,
   },
 ];
@@ -798,12 +805,16 @@ function writeLocalSilentIfChanged<T>(key: string, value: T): void {
 }
 
 function saveRoomToken(ticketCode: string, token: string): void {
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined' || !ticketCode || !token) return;
   try {
-    const raw = window.localStorage.getItem(ROOM_TOKENS_STORAGE_KEY);
+    // Limpieza defensiva de tokens legados que pudieran existir en localStorage
+    if (window.localStorage.getItem(ROOM_TOKENS_STORAGE_KEY) !== null) {
+      window.localStorage.removeItem(ROOM_TOKENS_STORAGE_KEY);
+    }
+    const raw = window.sessionStorage.getItem(ROOM_TOKENS_STORAGE_KEY);
     const map: Record<string, string> = raw ? JSON.parse(raw) : {};
     map[ticketCode.toUpperCase()] = token;
-    window.localStorage.setItem(ROOM_TOKENS_STORAGE_KEY, JSON.stringify(map));
+    window.sessionStorage.setItem(ROOM_TOKENS_STORAGE_KEY, JSON.stringify(map));
   } catch {
     // Ignore storage errors
   }
@@ -823,15 +834,51 @@ function removeRoomToken(ticketCode: string): void {
 }
 
 function getRoomToken(ticketCode: string): string | null {
-  if (typeof window === 'undefined') return null;
+  if (typeof window === 'undefined' || !ticketCode) return null;
   try {
-    const raw = window.localStorage.getItem(ROOM_TOKENS_STORAGE_KEY);
+    if (window.localStorage.getItem(ROOM_TOKENS_STORAGE_KEY) !== null) {
+      window.localStorage.removeItem(ROOM_TOKENS_STORAGE_KEY);
+    }
+    const raw = window.sessionStorage.getItem(ROOM_TOKENS_STORAGE_KEY);
     if (!raw) return null;
     const map = JSON.parse(raw) as Record<string, string>;
     return map[ticketCode.toUpperCase()] ?? null;
   } catch {
     return null;
   }
+}
+
+function stripSessionTokensForLocalStorage(tickets: SupportTicket[]): SupportTicket[] {
+  return tickets.map((ticket) => {
+    if (ticket.client_session_token) {
+      saveRoomToken(ticket.ticket_code, ticket.client_session_token);
+    }
+    return {
+      ...ticket,
+      client_session_token: '',
+    };
+  });
+}
+
+function rehydrateTicketSessionTokens(tickets: SupportTicket[]): SupportTicket[] {
+  return tickets.map((ticket) => {
+    if (ticket.client_session_token) {
+      saveRoomToken(ticket.ticket_code, ticket.client_session_token);
+      return ticket;
+    }
+    const sessionToken = getRoomToken(ticket.ticket_code);
+    return sessionToken ? { ...ticket, client_session_token: sessionToken } : ticket;
+  });
+}
+
+export function createDefaultAiAgentsForOrganization(orgId: string): AiAgentConfig[] {
+  return SEED_AI_AGENTS.map((template) => ({
+    ...template,
+    id: generateUuid(),
+    organization_id: orgId,
+    governance_rules: template.governance_rules.map((rule) => ({ ...rule })),
+    credits_used: 0,
+  }));
 }
 
 function getLocalFallbackTicketIds(): Set<string> {
@@ -946,9 +993,10 @@ export function haveRecordsChanged<T>(prev: T[], next: T[]): boolean {
 
 export const supportAdapter = {
   loadTickets(): SupportTicket[] {
+    const sanitizedSeedTickets = stripSessionTokensForLocalStorage(SEED_TICKETS);
     const valid = loadSanitizedCollection<SupportTicket>(
       TICKETS_STORAGE_KEY,
-      SEED_TICKETS,
+      sanitizedSeedTickets,
       (item): item is SupportTicket => {
         if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
         const t = item as Partial<SupportTicket>;
@@ -963,12 +1011,22 @@ export const supportAdapter = {
         );
       }
     );
-    return sortTicketsDeterministically(excludeSeedRecords(valid, SEED_TICKETS));
+    const hadPlaintextTokenInStorage = valid.some(
+      (ticket) => Boolean(ticket.client_session_token)
+    );
+    const rehydrated = rehydrateTicketSessionTokens(valid);
+    if (hadPlaintextTokenInStorage) {
+      writeLocalSilentIfChanged(
+        TICKETS_STORAGE_KEY,
+        stripSessionTokensForLocalStorage(rehydrated)
+      );
+    }
+    return sortTicketsDeterministically(excludeSeedRecords(rehydrated, SEED_TICKETS));
   },
 
   saveTickets(tickets: SupportTicket[]): SupportTicket[] {
     const sorted = sortTicketsDeterministically(tickets);
-    writeLocal(TICKETS_STORAGE_KEY, sorted);
+    writeLocal(TICKETS_STORAGE_KEY, stripSessionTokensForLocalStorage(sorted));
     return sorted;
   },
 
@@ -1170,21 +1228,48 @@ export const supportAdapter = {
         : `Asistencia Puntual (${ticket.service_tier})`;
 
     if (existingIndex >= 0) {
+      const updatedDevice: ClientDevice = {
+        ...devices[existingIndex],
+        client_name: ticket.client_name,
+        client_email: ticket.client_email,
+        os_type: ticket.os_type,
+        agent_type: ticket.agent_type,
+        plan_name: planLabel,
+        is_online: true,
+        last_seen_at: nowIso,
+      };
       const next = devices.map((dev, idx) =>
-        idx === existingIndex
-          ? {
-              ...dev,
-              client_name: ticket.client_name,
-              client_email: ticket.client_email,
-              os_type: ticket.os_type,
-              agent_type: ticket.agent_type,
-              plan_name: planLabel,
-              is_online: true,
-              last_seen_at: nowIso,
-            }
-          : dev
+        idx === existingIndex ? updatedDevice : dev
       );
       this.saveDevices(next);
+      if (isSupabaseConfigured()) {
+        const supabase = getSupabaseClient();
+        if (supabase) {
+          void supabase.auth.getSession().then(({ data }) => {
+            if (!data.session) return;
+            void supabase
+              .from('client_devices')
+              .upsert(
+                {
+                  id: updatedDevice.id,
+                  organization_id: updatedDevice.organization_id,
+                  client_name: updatedDevice.client_name,
+                  client_email: updatedDevice.client_email,
+                  device_name: updatedDevice.device_name,
+                  os_type: updatedDevice.os_type,
+                  rustdesk_id: updatedDevice.rustdesk_id,
+                  agent_type: updatedDevice.agent_type,
+                  service_tier: ticket.service_tier,
+                  plan_name: updatedDevice.plan_name,
+                  is_online: updatedDevice.is_online,
+                  last_seen_at: updatedDevice.last_seen_at,
+                },
+                { onConflict: 'id' }
+              )
+              .then(() => undefined, () => undefined);
+          });
+        }
+      }
       return next;
     }
 
@@ -1217,6 +1302,34 @@ export const supportAdapter = {
     };
     const next = [created, ...devices];
     this.saveDevices(next);
+    if (isSupabaseConfigured()) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        void supabase.auth.getSession().then(({ data }) => {
+          if (!data.session) return;
+          void supabase
+            .from('client_devices')
+            .upsert(
+              {
+                id: created.id,
+                organization_id: created.organization_id,
+                client_name: created.client_name,
+                client_email: created.client_email,
+                device_name: created.device_name,
+                os_type: created.os_type,
+                rustdesk_id: created.rustdesk_id,
+                agent_type: created.agent_type,
+                service_tier: ticket.service_tier,
+                plan_name: created.plan_name,
+                is_online: created.is_online,
+                last_seen_at: created.last_seen_at,
+              },
+              { onConflict: 'id' }
+            )
+            .then(() => undefined, () => undefined);
+        });
+      }
+    }
     return next;
   },
 
@@ -1229,8 +1342,47 @@ export const supportAdapter = {
       (s) => s.ticket_code === ticket.ticket_code
     );
 
+    const persistSessionRemote = (record: RemoteSessionRecord) => {
+      if (!isSupabaseConfigured()) return;
+      const supabase = getSupabaseClient();
+      if (!supabase) return;
+      void supabase.auth.getSession().then(({ data }) => {
+        if (!data.session) return;
+        const payload: Record<string, unknown> = {
+          id: record.id,
+          organization_id: record.organization_id,
+          ticket_id: isValidUuid(ticket.id) ? ticket.id : null,
+          ticket_code: record.ticket_code,
+          client_name: record.client_name,
+          technician_id: isValidUuid(ticket.assigned_to ?? '') ? ticket.assigned_to : null,
+          technician_name: record.technician_name,
+          rustdesk_id: record.rustdesk_id,
+          agent_type: record.agent_type,
+          status: record.status,
+          started_at: record.started_at,
+          ended_at: record.ended_at,
+          duration_minutes: record.duration_minutes,
+        };
+        void (async () => {
+          for (let attempt = 0; attempt < 6; attempt += 1) {
+            const { error } = await supabase
+              .from('remote_sessions')
+              .upsert(payload, { onConflict: 'id' });
+            if (!error) break;
+            const missingCol = extractMissingSchemaColumn(error);
+            if (missingCol && missingCol in payload) {
+              delete payload[missingCol];
+              continue;
+            }
+            break;
+          }
+        })();
+      });
+    };
+
     if (ticket.status === 'resolved') {
       if (existingIndex < 0) return sessions;
+      let resolvedRecord: RemoteSessionRecord | null = null;
       const next = sessions.map((ses, idx) => {
         if (idx !== existingIndex) return ses;
         const startMs = Date.parse(ses.started_at);
@@ -1239,14 +1391,16 @@ export const supportAdapter = {
           !Number.isNaN(startMs) && endMs >= startMs
             ? Math.max(1, Math.round((endMs - startMs) / 60000))
             : ses.duration_minutes;
-        return {
+        resolvedRecord = {
           ...ses,
           status: 'ended' as const,
           ended_at: nowIso,
           duration_minutes: computedMin,
         };
+        return resolvedRecord;
       });
       this.saveSessions(next);
+      if (resolvedRecord) persistSessionRemote(resolvedRecord);
       return next;
     }
 
@@ -1254,19 +1408,21 @@ export const supportAdapter = {
       const techName = ticket.assigned_technician_name ?? 'Carlos Mendoza';
       const rustdeskId = ticket.rustdesk_id ?? '000000000';
       if (existingIndex >= 0) {
-        const next = sessions.map((ses, idx) =>
-          idx === existingIndex
-            ? {
-                ...ses,
-                technician_name: techName,
-                rustdesk_id: rustdeskId,
-                agent_type: ticket.agent_type,
-                status: 'active' as const,
-                ended_at: null,
-              }
-            : ses
-        );
+        let updatedRecord: RemoteSessionRecord | null = null;
+        const next = sessions.map((ses, idx) => {
+          if (idx !== existingIndex) return ses;
+          updatedRecord = {
+            ...ses,
+            technician_name: techName,
+            rustdesk_id: rustdeskId,
+            agent_type: ticket.agent_type,
+            status: 'active' as const,
+            ended_at: null,
+          };
+          return updatedRecord;
+        });
         this.saveSessions(next);
+        if (updatedRecord) persistSessionRemote(updatedRecord);
         return next;
       }
 
@@ -1285,6 +1441,7 @@ export const supportAdapter = {
       };
       const next = [created, ...sessions];
       this.saveSessions(next);
+      persistSessionRemote(created);
       return next;
     }
 
@@ -1293,19 +1450,107 @@ export const supportAdapter = {
 
   saveAiAgents(agents: AiAgentConfig[]): void {
     writeLocal(AI_AGENTS_STORAGE_KEY, agents);
+    if (!isSupabaseConfigured() || agents.length === 0) return;
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+    void supabase.auth.getSession().then(({ data }) => {
+      if (!data.session) return;
+      const nowIso = new Date().toISOString();
+      const rows = agents.map((agent) => ({
+        id: isValidUuid(agent.id) ? agent.id : generateUuid(),
+        organization_id: agent.organization_id,
+        agent_key: agent.agent_key,
+        agent_name: agent.agent_name,
+        role_description: agent.role_description,
+        is_enabled: agent.is_enabled,
+        governance_rules: agent.governance_rules,
+        credits_used: agent.credits_used,
+        updated_at: nowIso,
+      }));
+      void supabase
+        .from('ai_agents_config')
+        .upsert(rows, { onConflict: 'organization_id,agent_key' })
+        .then(() => undefined, () => undefined);
+    });
+  },
+
+  incrementAiAgentCredits(
+    orgId: string | null | undefined,
+    agentKey: AiAgentConfig['agent_key'],
+    delta = 1
+  ): void {
+    if (delta <= 0) return;
+    const resolvedOrgId =
+      orgId && isValidUuid(orgId)
+        ? orgId
+        : '00000000-0000-4000-8000-000000000001';
+
+    const currentAgents = this.ensureOrganizationAiAgents(
+      resolvedOrgId,
+      this.loadAiAgents()
+    );
+    const updatedAgents = currentAgents.map((agent) =>
+      agent.organization_id === resolvedOrgId && agent.agent_key === agentKey
+        ? { ...agent, credits_used: agent.credits_used + delta }
+        : agent
+    );
+    writeLocal(AI_AGENTS_STORAGE_KEY, updatedAgents);
+
+    const currentOrgs = this.loadOrganizations();
+    const updatedOrgs = currentOrgs.map((org) =>
+      org.id === resolvedOrgId
+        ? { ...org, ai_credits_used: org.ai_credits_used + delta }
+        : org
+    );
+    writeLocal(ORGS_STORAGE_KEY, updatedOrgs);
+  },
+
+  ensureOrganizationAiAgents(
+    orgId: string,
+    existing: AiAgentConfig[]
+  ): AiAgentConfig[] {
+    if (existing.some((agent) => agent.organization_id === orgId)) {
+      return existing;
+    }
+    const created = createDefaultAiAgentsForOrganization(orgId);
+    const next = [...existing, ...created];
+    writeLocalSilentIfChanged(AI_AGENTS_STORAGE_KEY, next);
+    return next;
   },
 
   appendAuditLog(entry: Omit<AuditLogEntry, 'id' | 'created_at'>): AuditLogEntry[] {
     const current = this.loadAuditLogs();
-    const next: AuditLogEntry[] = [
-      {
-        ...entry,
-        id: generateUuid(),
-        created_at: new Date().toISOString(),
-      },
-      ...current,
-    ];
+    const created: AuditLogEntry = {
+      ...entry,
+      id: generateUuid(),
+      created_at: new Date().toISOString(),
+    };
+    const next: AuditLogEntry[] = [created, ...current];
     writeLocal(AUDIT_STORAGE_KEY, next);
+    if (
+      isSupabaseConfigured() &&
+      created.actor_type !== 'client' &&
+      isValidUuid(created.organization_id)
+    ) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        void supabase.auth.getSession().then(({ data }) => {
+          if (!data.session) return;
+          void supabase
+            .from('audit_logs')
+            .insert({
+              id: created.id,
+              organization_id: created.organization_id,
+              actor_type: created.actor_type,
+              actor_label: created.actor_label,
+              action: created.action,
+              target_ref: created.target_ref,
+              created_at: created.created_at,
+            })
+            .then(() => undefined, () => undefined);
+        });
+      }
+    }
     return next;
   },
 
@@ -1317,6 +1562,10 @@ export const supportAdapter = {
       messages?: TicketMessage[];
       organizations?: Organization[];
       members?: OrganizationMember[];
+      devices?: ClientDevice[];
+      sessions?: RemoteSessionRecord[];
+      aiAgents?: AiAgentConfig[];
+      auditLogs?: AuditLogEntry[];
     }>
   > {
     if (!isSupabaseConfigured()) {
@@ -1348,6 +1597,10 @@ export const supportAdapter = {
         orgsQuery,
         membersQuery,
         techProfilesQuery,
+        devicesQuery,
+        sessionsQuery,
+        aiAgentsQuery,
+        auditLogsQuery,
       ] = await Promise.all([
         client
           .from('tickets')
@@ -1363,6 +1616,18 @@ export const supportAdapter = {
           : Promise.resolve({ data: null, error: null }),
         hasOperatorSession
           ? client.from('technician_profiles').select('*')
+          : Promise.resolve({ data: null, error: null }),
+        hasOperatorSession
+          ? client.from('client_devices').select('*').order('last_seen_at', { ascending: false })
+          : Promise.resolve({ data: null, error: null }),
+        hasOperatorSession
+          ? client.from('remote_sessions').select('*').order('started_at', { ascending: false })
+          : Promise.resolve({ data: null, error: null }),
+        hasOperatorSession
+          ? client.from('ai_agents_config').select('*').order('agent_key', { ascending: true })
+          : Promise.resolve({ data: null, error: null }),
+        hasOperatorSession
+          ? client.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(200)
           : Promise.resolve({ data: null, error: null }),
       ]);
 
@@ -1497,7 +1762,88 @@ export const supportAdapter = {
           : undefined;
 
       if (hydratedTickets) {
-        writeLocalSilentIfChanged(TICKETS_STORAGE_KEY, hydratedTickets);
+        writeLocalSilentIfChanged(
+          TICKETS_STORAGE_KEY,
+          stripSessionTokensForLocalStorage(hydratedTickets)
+        );
+      }
+
+      const remoteDevices =
+        !devicesQuery.error && Array.isArray(devicesQuery.data)
+          ? (devicesQuery.data as ClientDevice[])
+          : undefined;
+      if (remoteDevices) {
+        writeLocalSilentIfChanged(DEVICES_STORAGE_KEY, remoteDevices);
+      }
+
+      const ticketById = new Map<string, SupportTicket>(
+        (hydratedTickets ?? []).map((t) => [t.id, t])
+      );
+      const remoteSessions =
+        !sessionsQuery.error && Array.isArray(sessionsQuery.data)
+          ? (
+              sessionsQuery.data as Array<
+                Partial<RemoteSessionRecord> & {
+                  id: string;
+                  organization_id?: string | null;
+                  ticket_id?: string | null;
+                  rustdesk_id: string;
+                  agent_type?: 'temporary' | 'installed';
+                  status?: 'active' | 'ended';
+                  started_at: string;
+                  ended_at?: string | null;
+                  duration_minutes?: number | null;
+                }
+              >
+            ).map((row) => {
+              const linkedTicket = row.ticket_id ? ticketById.get(row.ticket_id) : undefined;
+              return {
+                id: row.id,
+                organization_id:
+                  row.organization_id ??
+                  linkedTicket?.organization_id ??
+                  '00000000-0000-4000-8000-000000000001',
+                ticket_code: row.ticket_code ?? linkedTicket?.ticket_code ?? 'RS-SESION',
+                client_name: row.client_name ?? linkedTicket?.client_name ?? 'Cliente',
+                technician_name:
+                  row.technician_name ??
+                  linkedTicket?.assigned_technician_name ??
+                  'Técnico asignado',
+                rustdesk_id: row.rustdesk_id,
+                agent_type: row.agent_type ?? 'temporary',
+                status: row.status ?? 'ended',
+                started_at: row.started_at,
+                ended_at: row.ended_at ?? null,
+                duration_minutes: Number(row.duration_minutes ?? 1),
+              } satisfies RemoteSessionRecord;
+            })
+          : undefined;
+      if (remoteSessions) {
+        writeLocalSilentIfChanged(SESSIONS_STORAGE_KEY, remoteSessions);
+      }
+
+      const remoteAiAgents =
+        !aiAgentsQuery.error &&
+        Array.isArray(aiAgentsQuery.data) &&
+        aiAgentsQuery.data.length > 0
+          ? (aiAgentsQuery.data as AiAgentConfig[]).map((agent) => ({
+              ...agent,
+              governance_rules: Array.isArray(agent.governance_rules)
+                ? agent.governance_rules
+                : [],
+              credits_used: Number(agent.credits_used ?? 0),
+            }))
+          : undefined;
+      if (remoteAiAgents) {
+        writeLocalSilentIfChanged(AI_AGENTS_STORAGE_KEY, remoteAiAgents);
+      }
+
+      const remoteAuditLogs =
+        !auditLogsQuery.error && Array.isArray(auditLogsQuery.data)
+          ? (auditLogsQuery.data as AuditLogEntry[])
+          : undefined;
+      if (remoteAuditLogs) {
+        writeLocalSilentIfChanged(AUDIT_STORAGE_KEY, remoteAuditLogs);
       }
 
       return {
@@ -1507,6 +1853,10 @@ export const supportAdapter = {
           messages: (messagesQuery.data as TicketMessage[] | null) ?? undefined,
           organizations: remoteOrgs,
           members: remoteMembers,
+          devices: remoteDevices,
+          sessions: remoteSessions,
+          aiAgents: remoteAiAgents,
+          auditLogs: remoteAuditLogs,
         },
       };
     } catch (error) {
@@ -1851,31 +2201,71 @@ export const supportAdapter = {
           delete dbPatch.resolved_at;
         }
 
-        for (let attempt = 0; attempt < 20; attempt += 1) {
-          if (Object.keys(dbPatch).length === 0) {
-            updateError = null;
-            break;
-          }
-          const { data, error } = await client
-            .from('tickets')
-            .update(dbPatch)
-            .eq('id', ticketId)
-            .select('id')
-            .maybeSingle();
+        const isAuthenticatedDirectClient =
+          hasTechSession && (!ticketCode || !token || client === staffClient);
 
-          if (!error) {
-            updateError = data
-              ? null
-              : new Error('Supabase no actualizó el ticket; revisa la sesión, la política RLS y la versión del esquema.');
+        if (isAuthenticatedDirectClient && staffClient && Object.keys(dbPatch).length > 0) {
+          const isAnonymizeOp =
+            'anonymized_at' in dbPatch && Boolean(dbPatch.anonymized_at);
+          const { data: rpcOk, error: rpcError } = await staffClient.rpc(
+            'update_own_ticket_as_authenticated',
+            {
+              p_ticket_id: ticketId,
+              p_rustdesk_id:
+                typeof dbPatch.rustdesk_id === 'string' ? dbPatch.rustdesk_id : null,
+              p_agent_type:
+                typeof dbPatch.agent_type === 'string' ? dbPatch.agent_type : null,
+              p_consent_accepted:
+                typeof dbPatch.consent_accepted === 'boolean'
+                  ? dbPatch.consent_accepted
+                  : null,
+              p_consent_accepted_at:
+                typeof dbPatch.consent_accepted_at === 'string'
+                  ? dbPatch.consent_accepted_at
+                  : null,
+              p_agent_downloaded:
+                typeof dbPatch.agent_downloaded === 'boolean'
+                  ? dbPatch.agent_downloaded
+                  : null,
+              p_anonymize: isAnonymizeOp,
+            }
+          );
+          if (rpcError || rpcOk !== true) {
+            updateError =
+              rpcError ??
+              new Error(
+                'No tienes permiso para actualizar este ticket desde esta cuenta autenticada.'
+              );
+          } else {
+            updateError = null;
+          }
+        } else {
+          for (let attempt = 0; attempt < 20; attempt += 1) {
+            if (Object.keys(dbPatch).length === 0) {
+              updateError = null;
+              break;
+            }
+            const { data, error } = await client
+              .from('tickets')
+              .update(dbPatch)
+              .eq('id', ticketId)
+              .select('id')
+              .maybeSingle();
+
+            if (!error) {
+              updateError = data
+                ? null
+                : new Error('Supabase no actualizó el ticket; revisa la sesión, la política RLS y la versión del esquema.');
+              break;
+            }
+            const missingCol = extractMissingSchemaColumn(error);
+            if (missingCol && missingCol in dbPatch) {
+              delete dbPatch[missingCol];
+              continue;
+            }
+            updateError = error;
             break;
           }
-          const missingCol = extractMissingSchemaColumn(error);
-          if (missingCol && missingCol in dbPatch) {
-            delete dbPatch[missingCol];
-            continue;
-          }
-          updateError = error;
-          break;
         }
 
         if (updateError) {
@@ -2015,8 +2405,22 @@ export const supportAdapter = {
     }>,
     members: OrganizationMember[]
   ): OrganizationMember[] {
+    const target = members.find((m) => m.id === memberId);
     const next = members.map((m) => (m.id === memberId ? { ...m, ...patch } : m));
     this.saveMembers(next);
+    if (isSupabaseConfigured() && target?.user_id && isValidUuid(target.user_id)) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        void supabase
+          .from('technician_profiles')
+          .update({
+            ...patch,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('user_id', target.user_id)
+          .then(() => undefined, () => undefined);
+      }
+    }
     return next;
   },
 
@@ -2034,13 +2438,13 @@ export const supportAdapter = {
     const created: OrganizationMember = {
       id: generateUuid(),
       organization_id: input.organization_id,
-      user_id: generateUuid(),
+      user_id: null,
       full_name: input.full_name.trim(),
       email: input.email.trim().toLowerCase(),
       member_type: input.member_type,
       role: 'technician',
       agreed_ticket_rate_usd: input.agreed_ticket_rate_usd,
-      status: 'active',
+      status: isSupabaseConfigured() ? 'invited' : 'active',
       specialties:
         input.specialties.length > 0 ? input.specialties : ['Windows & BSOD'],
       availability_status: 'available',
@@ -2050,6 +2454,24 @@ export const supportAdapter = {
     };
     const next = [created, ...members];
     this.saveMembers(next);
+    if (isSupabaseConfigured()) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        void supabase
+          .from('organization_members')
+          .insert({
+            id: created.id,
+            organization_id: created.organization_id,
+            full_name: created.full_name,
+            email: created.email,
+            member_type: created.member_type,
+            role: created.role,
+            agreed_ticket_rate_usd: created.agreed_ticket_rate_usd,
+            status: 'invited',
+          })
+          .then(() => undefined, () => undefined);
+      }
+    }
     this.appendAuditLog({
       organization_id: input.organization_id,
       actor_type: 'system',
@@ -2072,6 +2494,16 @@ export const supportAdapter = {
   ): Organization[] {
     const next = orgs.map((o) => (o.id === orgId ? { ...o, ...patch } : o));
     this.saveOrganizations(next);
+    if (isSupabaseConfigured() && isValidUuid(orgId)) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        void supabase
+          .from('organizations')
+          .update(patch)
+          .eq('id', orgId)
+          .then(() => undefined, () => undefined);
+      }
+    }
     return next;
   },
 
@@ -2122,6 +2554,11 @@ export const supportAdapter = {
           { event: '*', schema: 'public', table: 'technician_profiles' },
           onRefresh
         )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'ai_agents_config' },
+          onRefresh
+        )
         .subscribe();
 
       cleanups.push(() => {
@@ -2135,6 +2572,20 @@ export const supportAdapter = {
   },
 
   persistEnterpriseLead(lead: EnterpriseLead): void {
+    if (isSupabaseConfigured()) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        void supabase
+          .from('enterprise_leads')
+          .insert({
+            company_name: lead.companyName.trim(),
+            contact_email: lead.contactEmail.trim().toLowerCase(),
+            team_size: lead.teamSize.trim(),
+            plan_interest: lead.planInterest?.trim() || null,
+          })
+          .then(() => undefined, () => undefined);
+      }
+    }
     if (typeof window === 'undefined') return;
     try {
       const raw = window.localStorage.getItem(ENTERPRISE_STORAGE_KEY);

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Menu, ShieldCheck, UserCircle2, X } from 'lucide-react';
 import type { AppView, UserAccountProfile } from '../types/support';
 
@@ -27,6 +27,17 @@ export function Header({
   onReturnHome,
 }: HeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setMobileMenuOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [mobileMenuOpen]);
 
   const handleNavClick = (sectionId: string) => {
     setMobileMenuOpen(false);

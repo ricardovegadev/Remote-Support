@@ -1,14 +1,5 @@
 export type CardNetwork = 'visa' | 'mc' | 'amex';
 
-export function detectCardNetwork(cardNumber: string): CardNetwork | null {
-  const digits = cardNumber.replace(/\D/g, '');
-  if (!digits) return null;
-  if (digits.startsWith('4')) return 'visa';
-  if (digits.startsWith('5')) return 'mc';
-  if (digits.startsWith('34') || digits.startsWith('37')) return 'amex';
-  return null;
-}
-
 interface LogoVariantProps {
   variant?: 'dark' | 'light';
   className?: string;

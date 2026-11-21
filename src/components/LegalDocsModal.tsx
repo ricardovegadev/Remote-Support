@@ -262,13 +262,15 @@ export function LegalDocsModal({
 
               <div className="p-4 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-950 space-y-1.5">
                 <p className="font-semibold">
-                  Solicitudes de reembolso
+                  Garantía de resolución y solicitudes de reembolso
                 </p>
                 <p>
-                  El pago se procesa antes de prestar la asistencia. Esta aplicación no
-                  emite reembolsos automáticamente. Para solicitar una revisión, escribe
-                  a soporte con el código del ticket y el comprobante; la elegibilidad,
-                  decisión y plazos dependen de los términos aplicables y del procesador.
+                  Garantía de resolución: si el problema técnico no puede resolverse en
+                  sesión, gestionamos el reembolso conforme a nuestra Política de
+                  Reembolsos. El pago se procesa antes de iniciar la asistencia remota;
+                  si tu incidente no pudo ser resuelto durante la sesión, escribe a
+                  soporte con el código de ticket y el comprobante para tramitar la
+                  devolución a través del procesador original (Stripe o PayPal).
                 </p>
               </div>
 

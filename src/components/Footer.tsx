@@ -108,7 +108,7 @@ export function Footer({
             </button>
           </div>
 
-          <p className="text-slate-400 shrink-0">
+          <p className="text-slate-300 shrink-0">
             © 2026 Remote Support 365 · v1.0-2026
           </p>
         </div>

@@ -94,12 +94,15 @@ export class AppErrorBoundary extends Component<
                 Error al renderizar la interfaz
               </h1>
               <p className="text-xs text-slate-600 leading-relaxed">
-                La aplicación capturó una excepción en tiempo de ejecución para evitar
-                una pantalla en blanco.
+                {import.meta.env.PROD
+                  ? 'Ocurrió un inconveniente inesperado al mostrar esta vista. Puedes recargar o restablecer los datos locales para continuar.'
+                  : 'La aplicación capturó una excepción en tiempo de ejecución para evitar una pantalla en blanco.'}
               </p>
-              <div className="text-left text-xs font-mono text-red-800 bg-red-50 border border-red-200 rounded-lg px-3.5 py-2.5 break-words">
-                {this.state.errorMessage ?? 'Error desconocido en el cliente.'}
-              </div>
+              {!import.meta.env.PROD && (
+                <div className="text-left text-xs font-mono text-red-800 bg-red-50 border border-red-200 rounded-lg px-3.5 py-2.5 break-words">
+                  {this.state.errorMessage ?? 'Error desconocido en el cliente.'}
+                </div>
+              )}
             </div>
             <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">
               <button

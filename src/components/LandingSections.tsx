@@ -437,7 +437,10 @@ export function LandingSections({
                         <span className="relative z-10 w-12 h-12 rounded-xl bg-gradient-to-br from-[#0B1528] to-[#2563EB] text-white flex items-center justify-center shadow-md shadow-blue-950/15">
                           <StepIcon className="w-5 h-5" aria-hidden="true" />
                         </span>
-                        <span className="font-mono tabular-nums text-3xl font-bold text-slate-200 select-none">
+                        <span
+                          aria-hidden="true"
+                          className="font-mono tabular-nums text-3xl font-bold text-slate-200 select-none"
+                        >
                           {step.num}
                         </span>
                       </div>
@@ -560,7 +563,7 @@ export function LandingSections({
                             {service.suggestedTier}
                           </span>
                           <ArrowRight
-                            className="w-4 h-4 text-slate-400 group-hover:text-[#2563EB] group-hover:translate-x-1 transition-all duration-200"
+                            className="w-4 h-4 text-slate-500 group-hover:text-[#2563EB] group-hover:translate-x-1 transition-all duration-200"
                             aria-hidden="true"
                           />
                         </div>

@@ -565,9 +565,7 @@ export function generateSessionToken(randomFn?: () => number): string {
   }
   const random = randomFn;
   const partA = generateUuid(random).replace(/-/g, '');
-  const partB = Math.floor(random() * 0xffffffff)
-    .toString(16)
-    .padStart(8, '0');
+  const partB = generateUuid(random).replace(/-/g, '');
   return `${partA}${partB}`;
 }
 
@@ -583,7 +581,8 @@ export function createTicketFromDraft(
   if (!draft.category || !draft.operatingSystem) {
     throw new Error('Cannot create ticket without category and operatingSystem');
   }
-  const randomFn = options?.randomFn ?? Math.random;
+  const explicitRandomFn = options?.randomFn;
+  const randomFn = explicitRandomFn ?? Math.random;
   const created_at = options?.nowIso ?? new Date().toISOString();
   const aiSummary =
     draft.aiTriage?.preDiagnosis ??
@@ -639,7 +638,7 @@ export function createTicketFromDraft(
     assigned_technician_name: null,
     assigned_technician_specialty: null,
     resolution_notes: null,
-    client_session_token: generateSessionToken(randomFn),
+    client_session_token: generateSessionToken(explicitRandomFn),
     claimed_at: null,
     resolved_at: null,
     created_at,
@@ -907,11 +906,11 @@ export function parseAppRoute(pathname: string): {
   ticketCode: string | null;
 } {
   const clean = pathname.replace(/\/+$/, '') || '/';
-  if (clean === '/' || clean === '/dashboard') {
-    return { view: 'tech_portal', ticketCode: null };
-  }
-  if (clean === '/portal') {
+  if (clean === '/' || clean === '/portal') {
     return { view: 'landing', ticketCode: null };
+  }
+  if (clean === '/dashboard') {
+    return { view: 'tech_portal', ticketCode: null };
   }
   const sessionMatch = clean.match(/^\/sesion\/([^/]+)$/i);
   if (sessionMatch) {
@@ -920,5 +919,5 @@ export function parseAppRoute(pathname: string): {
       ticketCode: decodeURIComponent(sessionMatch[1]).toUpperCase(),
     };
   }
-  return { view: 'tech_portal', ticketCode: null };
+  return { view: 'landing', ticketCode: null };
 }

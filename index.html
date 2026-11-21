@@ -6,15 +6,46 @@
     <title>Remote Support 365 — Soporte Técnico IT Remoto Bajo Demanda</title>
     <meta
       name="description"
-      content="Soporte técnico IT remoto para Windows y macOS. Diagnóstico guiado, tarifas publicadas desde $15 USD y una sala de conexión para coordinar la asistencia."
+      content="Soporte técnico IT remoto bajo demanda para Windows, macOS, Linux y Mobile. Diagnóstico guiado con IA, tarifas transparentes desde $15 USD y sala de conexión segura."
     />
+    <link rel="canonical" href="https://remotesupport365.com/" />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230B1528'/%3E%3Cpath d='M32 14L18 20v12c0 9.5 6 17.5 14 20 8-2.5 14-10.5 14-20V20L32 14z' fill='%232563EB'/%3E%3Cpath d='M26.5 32.5l4 4 7.5-8.5' fill='none' stroke='%2310B981' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
+    />
+    <meta property="og:site_name" content="Remote Support 365" />
     <meta property="og:title" content="Remote Support 365 — Soporte Técnico IT Remoto Bajo Demanda" />
     <meta
       property="og:description"
-      content="Solicita ayuda remota para fallas de impresoras, correo, lentitud del sistema o redes Wi-Fi. Revisa las tarifas y condiciones antes de pagar."
+      content="Asistencia remota segura para Windows, macOS, Linux y Mobile. Diagnóstico guiado con IA, precios fijos desde $15 USD y control total de tu sesión."
     />
     <meta property="og:type" content="website" />
+    <meta property="og:image" content="/assets/aistudio/image_d9221c48.png" />
+    <meta property="og:image:alt" content="Especialista de Remote Support 365 brindando soporte técnico IT remoto" />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Remote Support 365 — Soporte Técnico IT Remoto Bajo Demanda" />
+    <meta
+      name="twitter:description"
+      content="Soporte IT remoto para Windows, macOS, Linux y Mobile desde $15 USD con diagnóstico IA y especialistas verificados."
+    />
+    <meta name="twitter:image" content="/assets/aistudio/image_d9221c48.png" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Remote Support 365",
+        "applicationCategory": "BusinessApplication",
+        "operatingSystem": "Windows, macOS, Linux, Android, iOS",
+        "description": "Plataforma de soporte técnico IT remoto bajo demanda para Windows, macOS, Linux y Mobile con diagnóstico guiado por IA y especialistas verificados.",
+        "offers": {
+          "@type": "AggregateOffer",
+          "priceCurrency": "USD",
+          "lowPrice": "15",
+          "highPrice": "79"
+        }
+      }
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -145,6 +176,8 @@
             window.clearTimeout(timerId);
             timerId = null;
           }
+          window.onerror = null;
+          window.onunhandledrejection = null;
           var diag = document.getElementById('rs365-boot-diagnostic');
           if (diag) diag.remove();
         };

@@ -97,28 +97,71 @@ export function AuthModal({
           );
           return;
         }
+        const { data: dbProfile } = await supabase
+          .from('profiles')
+          .select(
+            'full_name,email,role,birth_date,is_adult_verified,terms_accepted_at,terms_version,marketing_opt_in,subscription_plan,subscription_status,created_at'
+          )
+          .eq('id', data.user.id)
+          .maybeSingle();
+
         const meta = data.user.user_metadata ?? {};
+        const dbRole = dbProfile?.role;
+        const resolvedRole: UserAccountProfile['role'] =
+          dbRole === 'admin' || dbRole === 'technician' || dbRole === 'client'
+            ? dbRole
+            : 'client';
+        const dbSubStatus = dbProfile?.subscription_status;
+        const resolvedSubStatus: UserAccountProfile['subscription_status'] =
+          dbSubStatus === 'active' ||
+          dbSubStatus === 'past_due' ||
+          dbSubStatus === 'canceled' ||
+          dbSubStatus === 'none'
+            ? dbSubStatus
+            : 'none';
+
         const profile: UserAccountProfile = {
           id: data.user.id,
           full_name:
-            typeof meta.full_name === 'string' && meta.full_name
-              ? meta.full_name
-              : cleanEmail.split('@')[0],
-          email: data.user.email ?? cleanEmail,
-          role: 'client',
-          birth_date: typeof meta.birth_date === 'string' ? meta.birth_date : '1990-01-01',
-          is_adult_verified: true,
+            (typeof dbProfile?.full_name === 'string' && dbProfile.full_name.trim()) ||
+            (typeof meta.full_name === 'string' && meta.full_name.trim()) ||
+            cleanEmail.split('@')[0],
+          email:
+            (typeof dbProfile?.email === 'string' && dbProfile.email.trim()) ||
+            data.user.email ||
+            cleanEmail,
+          role: resolvedRole,
+          birth_date:
+            (typeof dbProfile?.birth_date === 'string' && dbProfile.birth_date) ||
+            (typeof meta.birth_date === 'string' ? meta.birth_date : ''),
+          is_adult_verified:
+            typeof dbProfile?.is_adult_verified === 'boolean'
+              ? dbProfile.is_adult_verified
+              : Boolean(meta.is_adult_verified),
           terms_accepted_at:
-            typeof meta.terms_accepted_at === 'string'
+            (typeof dbProfile?.terms_accepted_at === 'string' &&
+              dbProfile.terms_accepted_at) ||
+            (typeof meta.terms_accepted_at === 'string'
               ? meta.terms_accepted_at
-              : new Date().toISOString(),
+              : ''),
           terms_version:
-            typeof meta.terms_version === 'string'
+            (typeof dbProfile?.terms_version === 'string' && dbProfile.terms_version) ||
+            (typeof meta.terms_version === 'string'
               ? meta.terms_version
-              : LEGAL_TERMS_VERSION,
-          marketing_opt_in: Boolean(meta.marketing_opt_in),
-          subscription_status: 'none',
-          created_at: data.user.created_at ?? new Date().toISOString(),
+              : LEGAL_TERMS_VERSION),
+          marketing_opt_in:
+            typeof dbProfile?.marketing_opt_in === 'boolean'
+              ? dbProfile.marketing_opt_in
+              : Boolean(meta.marketing_opt_in),
+          subscription_plan:
+            typeof dbProfile?.subscription_plan === 'string'
+              ? dbProfile.subscription_plan
+              : null,
+          subscription_status: resolvedSubStatus,
+          created_at:
+            (typeof dbProfile?.created_at === 'string' && dbProfile.created_at) ||
+            data.user.created_at ||
+            new Date().toISOString(),
         };
         onAuthenticated(profile);
         onClose();
@@ -552,19 +595,22 @@ export function AuthModal({
                 </div>
 
                 {/* Mandatory Unchecked Consent */}
-                <label className="flex items-start gap-2.5 text-xs text-slate-700 cursor-pointer pt-1">
+                <div className="flex items-start gap-2.5 text-xs text-slate-700 pt-1">
                   <input
+                    id="auth-signup-terms"
                     type="checkbox"
                     checked={termsAccepted}
                     onChange={(e) => setTermsAccepted(e.target.checked)}
-                    className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB]"
+                    className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
                   />
                   <span>
-                    He leído y acepto los{' '}
+                    <label htmlFor="auth-signup-terms" className="cursor-pointer">
+                      He leído y acepto los{' '}
+                    </label>
                     <button
                       type="button"
                       onClick={() => onOpenLegalDoc('terms')}
-                      className="font-semibold text-[#2563EB] hover:underline"
+                      className="font-semibold text-[#2563EB] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] rounded"
                     >
                       Términos y Condiciones
                     </button>
@@ -572,7 +618,7 @@ export function AuthModal({
                     <button
                       type="button"
                       onClick={() => onOpenLegalDoc('privacy')}
-                      className="font-semibold text-[#2563EB] hover:underline"
+                      className="font-semibold text-[#2563EB] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] rounded"
                     >
                       Política de Privacidad
                     </button>{' '}
@@ -580,27 +626,28 @@ export function AuthModal({
                     <button
                       type="button"
                       onClick={() => onOpenLegalDoc('refunds')}
-                      className="font-semibold text-[#2563EB] hover:underline"
+                      className="font-semibold text-[#2563EB] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] rounded"
                     >
                       Política de Reembolsos
                     </button>
                     .
                   </span>
-                </label>
+                </div>
 
                 {/* Optional Unchecked Marketing Consent */}
-                <label className="flex items-start gap-2.5 text-xs text-slate-600 cursor-pointer">
+                <div className="flex items-start gap-2.5 text-xs text-slate-600">
                   <input
+                    id="auth-signup-marketing"
                     type="checkbox"
                     checked={marketingOptIn}
                     onChange={(e) => setMarketingOptIn(e.target.checked)}
-                    className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB]"
+                    className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
                   />
-                  <span>
+                  <label htmlFor="auth-signup-marketing" className="cursor-pointer">
                     Acepto recibir novedades y consejos técnicos por correo (puedo darme de
                     baja en cualquier momento).
-                  </span>
-                </label>
+                  </label>
+                </div>
 
                 {authError && (
                   <p role="alert" className="text-xs font-medium text-red-700">

@@ -44,7 +44,6 @@ import {
 interface ConnectionRoomProps {
   ticket: SupportTicket;
   messages: TicketMessage[];
-  relayDomain?: string;
   persistenceError?: string | null;
   onDismissError?: () => void;
   onMarkAgentDownloaded: (ticketId: string, agentType: AgentInstallType) => Promise<void>;
@@ -73,7 +72,6 @@ function isEmbeddedInIframe(): boolean {
 export function ConnectionRoom({
   ticket,
   messages,
-  relayDomain: _relayDomain = 'relay.remotesupport365.com',
   persistenceError,
   onDismissError,
   onMarkAgentDownloaded,
@@ -122,6 +120,11 @@ export function ConnectionRoom({
     ticket.billing_mode === 'pyme_monthly' || ticket.service_tier.startsWith('Pyme ');
 
   const [addonPerformance, setAddonPerformance] = useState(false);
+  const [paidAmountUsd, setPaidAmountUsd] = useState<number | null>(null);
+  const computedTotalUsd = isMonthlyPlan
+    ? tierPrice
+    : tierPrice + (addonPerformance ? 12 : 0);
+  const displayedPaidUsd = paidAmountUsd ?? computedTotalUsd;
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [paymentSuccessNotice, setPaymentSuccessNotice] = useState<string | null>(null);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
@@ -178,11 +181,17 @@ export function ConnectionRoom({
         setProcessingMethod('stripe');
         setPaymentError(null);
         void fetch(
-          `/api/payments/stripe/verify-session?session_id=${encodeURIComponent(sessionId)}&ticket_code=${encodeURIComponent(ticket.ticket_code)}`
+          `/api/payments/stripe/verify-session?session_id=${encodeURIComponent(sessionId)}&ticket_code=${encodeURIComponent(ticket.ticket_code)}`,
+          {
+            headers: {
+              'x-ticket-token': ticket.client_session_token,
+            },
+          }
         )
           .then(async (res) => {
             const data = (await res.json()) as {
               verified?: boolean;
+              amountUsd?: number;
               error?: string;
             };
             if (!res.ok || !data.verified) {
@@ -191,6 +200,9 @@ export function ConnectionRoom({
                   'Stripe no confirmó el pago todavía. Inténtalo nuevamente.'
               );
               return;
+            }
+            if (typeof data.amountUsd === 'number' && Number.isFinite(data.amountUsd)) {
+              setPaidAmountUsd(data.amountUsd);
             }
             await onConfirmPayment(ticket.id);
             setPendingExternalCheckout(null);
@@ -214,13 +226,21 @@ export function ConnectionRoom({
         setPaymentError(null);
         void fetch('/api/payments/paypal/capture-order', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orderId: paypalToken, ticketCode: ticket.ticket_code }),
+          headers: {
+            'Content-Type': 'application/json',
+            'x-ticket-token': ticket.client_session_token,
+          },
+          body: JSON.stringify({
+            orderId: paypalToken,
+            ticketCode: ticket.ticket_code,
+            sessionToken: ticket.client_session_token,
+          }),
         })
           .then(async (res) => {
             const data = (await res.json()) as {
               verified?: boolean;
               status?: string;
+              amountUsd?: number;
               error?: string;
             };
             if (!res.ok || !data.verified || data.status !== 'COMPLETED') {
@@ -229,6 +249,9 @@ export function ConnectionRoom({
                   'PayPal no completó la captura del pago. Inténtalo nuevamente.'
               );
               return;
+            }
+            if (typeof data.amountUsd === 'number' && Number.isFinite(data.amountUsd)) {
+              setPaidAmountUsd(data.amountUsd);
             }
             await onConfirmPayment(ticket.id);
             setPendingExternalCheckout(null);
@@ -248,7 +271,7 @@ export function ConnectionRoom({
         cleanUrl();
       }
     }
-  }, [ticket.id, ticket.payment_status, onConfirmPayment]);
+  }, [ticket.id, ticket.ticket_code, ticket.client_session_token, ticket.payment_status, onConfirmPayment]);
 
   const handleShareReferral = async () => {
     const shareUrl =
@@ -292,11 +315,17 @@ export function ConnectionRoom({
         const res = await fetch(
           `/api/payments/stripe/verify-session?session_id=${encodeURIComponent(
             pendingExternalCheckout.sessionId
-          )}&ticket_code=${encodeURIComponent(ticket.ticket_code)}`
+          )}&ticket_code=${encodeURIComponent(ticket.ticket_code)}`,
+          {
+            headers: {
+              'x-ticket-token': ticket.client_session_token,
+            },
+          }
         );
         const data = (await res.json()) as {
           verified?: boolean;
           payment_status?: string;
+          amountUsd?: number;
           error?: string;
         };
         if (!res.ok || !data.verified) {
@@ -305,6 +334,9 @@ export function ConnectionRoom({
               'El pago aún figura pendiente en Stripe. Complétalo en la pestaña abierta y vuelve a pulsar "Ya completé el pago · Verificar ahora".'
           );
           return;
+        }
+        if (typeof data.amountUsd === 'number' && Number.isFinite(data.amountUsd)) {
+          setPaidAmountUsd(data.amountUsd);
         }
         setPendingExternalCheckout(null);
         await onConfirmPayment(ticket.id);
@@ -320,12 +352,20 @@ export function ConnectionRoom({
         }
         const res = await fetch('/api/payments/paypal/capture-order', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orderId: pendingExternalCheckout.orderId, ticketCode: ticket.ticket_code }),
+          headers: {
+            'Content-Type': 'application/json',
+            'x-ticket-token': ticket.client_session_token,
+          },
+          body: JSON.stringify({
+            orderId: pendingExternalCheckout.orderId,
+            ticketCode: ticket.ticket_code,
+            sessionToken: ticket.client_session_token,
+          }),
         });
         const data = (await res.json()) as {
           verified?: boolean;
           status?: string;
+          amountUsd?: number;
           error?: string;
         };
         if (!res.ok || !data.verified || data.status !== 'COMPLETED') {
@@ -334,6 +374,9 @@ export function ConnectionRoom({
               'PayPal aún no reporta la orden aprobada. Completa la aprobación en la pestaña abierta e inténtalo de nuevo.'
           );
           return;
+        }
+        if (typeof data.amountUsd === 'number' && Number.isFinite(data.amountUsd)) {
+          setPaidAmountUsd(data.amountUsd);
         }
         setPendingExternalCheckout(null);
         await onConfirmPayment(ticket.id);
@@ -366,7 +409,7 @@ export function ConnectionRoom({
             ticketCode: ticket.ticket_code,
             sessionToken: ticket.client_session_token,
             serviceTier: ticket.service_tier,
-            addonPerformance,
+            addonPerformance: !isMonthlyPlan && addonPerformance,
           }),
         });
         const data = (await res.json()) as {
@@ -375,6 +418,7 @@ export function ConnectionRoom({
           verified?: boolean;
           sessionId?: string;
           url?: string | null;
+          amountUsd?: number;
           error?: string;
         };
 
@@ -400,7 +444,6 @@ export function ConnectionRoom({
                 : isDirectCard
                 ? 'Tarjeta (Stripe Checkout)'
                 : 'Stripe Checkout';
-            window.open(data.url, '_blank', 'noopener,noreferrer');
             setPendingExternalCheckout({
               gateway: 'stripe',
               sessionId: data.sessionId,
@@ -415,6 +458,11 @@ export function ConnectionRoom({
         }
 
         if (data.verified === true) {
+          setPaidAmountUsd(
+            typeof data.amountUsd === 'number' && Number.isFinite(data.amountUsd)
+              ? data.amountUsd
+              : computedTotalUsd
+          );
           await onConfirmPayment(ticket.id);
           setPaymentSuccessNotice(
             `Pago confirmado en modo sandbox (${
@@ -433,7 +481,7 @@ export function ConnectionRoom({
             ticketCode: ticket.ticket_code,
             sessionToken: ticket.client_session_token,
             serviceTier: ticket.service_tier,
-            addonPerformance,
+            addonPerformance: !isMonthlyPlan && addonPerformance,
           }),
         });
         const orderData = (await orderRes.json()) as {
@@ -441,6 +489,7 @@ export function ConnectionRoom({
           mode?: 'sandbox' | 'live';
           orderId?: string;
           approvalUrl?: string | null;
+          amountUsd?: number;
           error?: string;
         };
 
@@ -460,7 +509,6 @@ export function ConnectionRoom({
           }
 
           if (isEmbeddedInIframe()) {
-            window.open(orderData.approvalUrl, '_blank', 'noopener,noreferrer');
             setPendingExternalCheckout({
               gateway: 'paypal',
               orderId: orderData.orderId,
@@ -476,13 +524,21 @@ export function ConnectionRoom({
 
         const captureRes = await fetch('/api/payments/paypal/capture-order', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orderId: orderData.orderId, ticketCode: ticket.ticket_code }),
+          headers: {
+            'Content-Type': 'application/json',
+            'x-ticket-token': ticket.client_session_token,
+          },
+          body: JSON.stringify({
+            orderId: orderData.orderId,
+            ticketCode: ticket.ticket_code,
+            sessionToken: ticket.client_session_token,
+          }),
         });
         const captureData = (await captureRes.json()) as {
           success?: boolean;
           verified?: boolean;
           status?: string;
+          amountUsd?: number;
           error?: string;
         };
 
@@ -499,6 +555,13 @@ export function ConnectionRoom({
           return;
         }
 
+        setPaidAmountUsd(
+          typeof captureData.amountUsd === 'number' && Number.isFinite(captureData.amountUsd)
+            ? captureData.amountUsd
+            : typeof orderData.amountUsd === 'number' && Number.isFinite(orderData.amountUsd)
+            ? orderData.amountUsd
+            : computedTotalUsd
+        );
         await onConfirmPayment(ticket.id);
         setPaymentSuccessNotice(
           'Pago confirmado en modo sandbox (PayPal). Tu Sala de Conexión ya está habilitada.'
@@ -630,7 +693,7 @@ export function ConnectionRoom({
 
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 shrink-0">
               <div className="bg-[#0F172A] border border-slate-700 rounded-lg px-5 py-3">
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-slate-300">
                   Tarifa vigente
                 </p>
                 <div className="flex items-baseline gap-2 mt-0.5">
@@ -653,11 +716,11 @@ export function ConnectionRoom({
                 aria-hidden="true"
               />
               <div>
-                <p className="text-[11px] text-slate-400">Organización responsable</p>
+                <p className="text-[11px] text-slate-300">Organización responsable</p>
                 <p className="text-sm font-semibold text-white mt-0.5">
                   {ticket.organization_name}
                 </p>
-                <p className="text-xs text-slate-400 mt-0.5">
+                <p className="text-xs text-slate-300 mt-0.5">
                   Se registran eventos técnicos seleccionados de esta operación.
                 </p>
               </div>
@@ -669,11 +732,11 @@ export function ConnectionRoom({
                 aria-hidden="true"
               />
               <div>
-                <p className="text-[11px] text-slate-400">Técnico asignado al equipo</p>
+                <p className="text-[11px] text-slate-300">Técnico asignado al equipo</p>
                 <p className="text-sm font-semibold text-white mt-0.5">
                   {ticket.assigned_technician_name ?? 'En cola prioritaria de despacho'}
                 </p>
-                <p className="text-xs text-slate-400 mt-0.5">
+                <p className="text-xs text-slate-300 mt-0.5">
                   {ticket.assigned_technician_name
                     ? `${ticket.assigned_technician_specialty ?? 'Especialista Verificado'} · Asignación atómica confirmada`
                     : 'El primer especialista disponible tomará tu ticket'}
@@ -704,7 +767,7 @@ export function ConnectionRoom({
               <div className="text-left md:text-right bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 shrink-0">
                 <p className="text-[11px] text-slate-600 font-medium">Total a pagar</p>
                 <p className="font-mono tabular-nums text-2xl font-bold text-emerald-700">
-                  USD ${(tierPrice + (addonPerformance ? 12 : 0)).toFixed(2)}
+                  USD ${computedTotalUsd.toFixed(2)}
                 </p>
               </div>
             </div>
@@ -725,7 +788,7 @@ export function ConnectionRoom({
                         </span>
                       </div>
                     </div>
-                    {tierPrice === 15 && (
+                    {!isMonthlyPlan && (
                       <div className="flex items-start gap-2.5 pt-2">
                         <input
                           type="checkbox"
@@ -740,13 +803,27 @@ export function ConnectionRoom({
                         </label>
                       </div>
                     )}
+                    <div className="flex justify-between items-center pt-2 border-t border-slate-200/80 font-semibold text-[#0B192C]">
+                      <span>Total a pagar</span>
+                      <span className="font-mono tabular-nums">
+                        ${computedTotalUsd.toFixed(2)} USD{isMonthlyPlan ? '/mes' : ''}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
                 <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 space-y-1.5">
-                  <p className="font-semibold">Revisa los términos antes de pagar</p>
+                  <p className="font-semibold">Garantía de resolución y reembolsos</p>
                   <p className="leading-relaxed">
-                    El pago se procesa antes de la asistencia. La elegibilidad y el procedimiento de reembolso se rigen por los términos aplicables; esta sala no emite reembolsos automáticamente.
+                    Garantía de resolución: si el problema técnico no puede resolverse en sesión, gestionamos el reembolso conforme a nuestra{' '}
+                    <button
+                      type="button"
+                      onClick={() => onOpenLegalDoc?.('refunds')}
+                      className="font-semibold text-[#2563EB] hover:underline"
+                    >
+                      Política de Reembolsos
+                    </button>
+                    .
                   </p>
                 </div>
 
@@ -771,15 +848,15 @@ export function ConnectionRoom({
                   >
                     <div className="space-y-1">
                       <p className="text-xs font-semibold text-[#1D4ED8]">
-                        Pasarela Segura Abierta en Nueva Pestaña ({pendingExternalCheckout.methodLabel})
+                        Pasarela Segura Lista ({pendingExternalCheckout.methodLabel})
                       </p>
                       <h3 className="text-base font-bold text-[#0B192C]">
-                        Completa el pago en la ventana externa y confirma aquí
+                        Abre la pasarela cifrada y luego confirma tu pago aquí
                       </h3>
                       <p className="text-xs text-slate-700 leading-relaxed">
-                        Abrimos la pasarela cifrada fuera del marco de vista previa para
-                        evitar bloqueos del navegador. Al terminar el pago, pulsa el
-                        botón de verificación.
+                        Para evitar bloqueos dentro del marco de vista previa, abre el
+                        checkout seguro en una nueva pestaña. Al completar el pago, pulsa
+                        el botón de verificación.
                       </p>
                     </div>
 
@@ -790,6 +867,16 @@ export function ConnectionRoom({
                     )}
 
                     <div className="space-y-2.5">
+                      <a
+                        href={pendingExternalCheckout.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full h-11 inline-flex items-center justify-center gap-2 px-4 text-xs sm:text-sm font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-lg transition-colors shadow-xs"
+                      >
+                        <span>Abrir pasarela segura en nueva pestaña</span>
+                        <ExternalLink className="w-4 h-4" aria-hidden="true" />
+                      </a>
+
                       <button
                         type="button"
                         disabled={isVerifyingExternal}
@@ -809,17 +896,7 @@ export function ConnectionRoom({
                         )}
                       </button>
 
-                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                        <a
-                          href={pendingExternalCheckout.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#2563EB] hover:underline"
-                        >
-                          <span>Reabrir pasarela en nueva pestaña</span>
-                          <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
-                        </a>
-
+                      <div className="flex justify-end pt-1">
                         <button
                           type="button"
                           onClick={() => {
@@ -947,7 +1024,7 @@ export function ConnectionRoom({
                           <>
                             <Lock className="w-4 h-4" aria-hidden="true" />
                             <span>
-                              {`Pagar con tarjeta · $${(tierPrice + (addonPerformance ? 12 : 0)).toFixed(2)} USD`}
+                              {`Pagar con tarjeta · $${computedTotalUsd.toFixed(2)} USD`}
                             </span>
                           </>
                         )}
@@ -982,7 +1059,7 @@ export function ConnectionRoom({
               </div>
             </div>
             <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-white border border-emerald-300 font-mono text-xs font-semibold text-emerald-800 shrink-0 self-start sm:self-center">
-              PAGADO · USD ${tierPrice}.00
+              PAGADO · USD ${displayedPaidUsd.toFixed(2)}
             </span>
           </div>
         )}
@@ -1147,7 +1224,7 @@ export function ConnectionRoom({
                 <span className="text-xs font-semibold text-[#2563EB]">
                   Paso 2 · Vinculación Remota y Consentimiento
                 </span>
-                <Lock className="w-4 h-4 text-slate-400" aria-hidden="true" />
+                <Lock className="w-4 h-4 text-slate-500" aria-hidden="true" />
               </div>
 
               <div>
@@ -1170,7 +1247,7 @@ export function ConnectionRoom({
                   </label>
                   <div className="relative">
                     <KeyRound
-                      className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2"
+                      className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2"
                       aria-hidden="true"
                     />
                     <input
@@ -1180,7 +1257,7 @@ export function ConnectionRoom({
                       value={rustdeskInput}
                       onChange={(e) => handleRustDeskInputChange(e.target.value)}
                       placeholder="Ej. 123 456 789"
-                      className="w-full rounded-lg border border-slate-300 pl-10 pr-4 py-3 font-mono tabular-nums text-lg tracking-wider text-[#0B192C] placeholder:text-slate-400 focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/15"
+                      className="w-full rounded-lg border border-slate-300 pl-10 pr-4 py-3 font-mono tabular-nums text-lg tracking-wider text-[#0B192C] placeholder:text-slate-500 focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/15"
                     />
                   </div>
                 </div>
@@ -1286,7 +1363,7 @@ export function ConnectionRoom({
                 ) : (
                   <>
                     <Share2 className="w-4 h-4 text-[#2563EB]" aria-hidden="true" />
-                    <span>Compartir enlace de $5 USD</span>
+                    <span>Compartir enlace de soporte</span>
                   </>
                 )}
               </button>

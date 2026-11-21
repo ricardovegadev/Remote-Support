@@ -34,15 +34,18 @@ export function CookieConsentBanner({
   }, [isOpen]);
 
   useEffect(() => {
-    if (!isOpen || !showConfig) return;
+    if (!isOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key !== 'Escape') return;
+      if (showConfig) {
         setShowConfig(false);
+      } else if (readCookieConsent()) {
+        onClose();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isOpen, showConfig]);
+  }, [isOpen, showConfig, onClose]);
 
   if (!isOpen) return null;
 
@@ -131,39 +134,41 @@ export function CookieConsentBanner({
               </span>
             </div>
 
-            <label className="flex items-start justify-between gap-4 pt-2 border-t border-slate-200 text-xs cursor-pointer">
-              <div>
+            <div className="flex items-start justify-between gap-4 pt-2 border-t border-slate-200 text-xs">
+              <label htmlFor="cookie-analytics-optin" className="cursor-pointer">
                 <p className="font-semibold text-[#0B192C]">
                   Analítica técnica de rendimiento
                 </p>
                 <p className="text-slate-600">
                   Mide tiempos de carga y estabilidad sin identificar datos personales.
                 </p>
-              </div>
+              </label>
               <input
+                id="cookie-analytics-optin"
                 type="checkbox"
                 checked={analyticsEnabled}
                 onChange={(e) => setAnalyticsEnabled(e.target.checked)}
-                className="mt-1 w-4 h-4 rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB]"
+                className="mt-1 w-4 h-4 rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
               />
-            </label>
+            </div>
 
-            <label className="flex items-start justify-between gap-4 pt-2 border-t border-slate-200 text-xs cursor-pointer">
-              <div>
+            <div className="flex items-start justify-between gap-4 pt-2 border-t border-slate-200 text-xs">
+              <label htmlFor="cookie-marketing-optin" className="cursor-pointer">
                 <p className="font-semibold text-[#0B192C]">
                   Preferencias y atribución de campañas
                 </p>
                 <p className="text-slate-600">
                   Recuerda códigos de invitación y descuentos aplicados en el portal.
                 </p>
-              </div>
+              </label>
               <input
+                id="cookie-marketing-optin"
                 type="checkbox"
                 checked={marketingEnabled}
                 onChange={(e) => setMarketingEnabled(e.target.checked)}
-                className="mt-1 w-4 h-4 rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB]"
+                className="mt-1 w-4 h-4 rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
               />
-            </label>
+            </div>
           </div>
         )}
 

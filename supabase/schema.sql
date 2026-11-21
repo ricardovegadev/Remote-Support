@@ -230,20 +230,6 @@ create table if not exists public.client_devices (
 -- Migración idempotente para bases ya provisionadas (actualiza constraints y columnas nuevas)
 do $$
 begin
-  if tg_op = 'INSERT' then
-    if new.terms_accepted_at is not null then
-      insert into public.audit_logs (organization_id, actor_type, actor_label, action, target_ref)
-      values (
-        new.organization_id,
-        'client',
-        new.client_name,
-        'Declaró mayoría de edad y aceptó términos ' || coalesce(new.terms_version, 'sin versión'),
-        new.ticket_code
-      );
-    end if;
-    return new;
-  end if;
-
   alter table public.tickets add column if not exists organization_name text;
   alter table public.tickets add column if not exists billing_mode text not null default 'one_time';
   alter table public.tickets add column if not exists subscription_status text not null default 'none';
@@ -337,7 +323,10 @@ create table if not exists public.remote_sessions (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid references public.organizations(id) on delete set null,
   ticket_id uuid references public.tickets(id) on delete set null,
+  ticket_code text,
+  client_name text,
   technician_id uuid references auth.users(id) on delete set null,
+  technician_name text,
   rustdesk_id text not null,
   agent_type text not null default 'temporary' check (agent_type in ('temporary', 'installed')),
   status text not null default 'active' check (status in ('active', 'ended')),
@@ -345,6 +334,10 @@ create table if not exists public.remote_sessions (
   ended_at timestamptz,
   duration_minutes integer
 );
+
+alter table public.remote_sessions add column if not exists ticket_code text;
+alter table public.remote_sessions add column if not exists client_name text;
+alter table public.remote_sessions add column if not exists technician_name text;
 
 -- ----------------------------------------------------------------------------
 -- 9. Tabla: ai_agents_config
@@ -385,6 +378,19 @@ create table if not exists public.audit_logs (
   created_at timestamptz not null default now()
 );
 
+-- ----------------------------------------------------------------------------
+-- 10b. Tabla: enterprise_leads
+-- Solicitudes comerciales Pyme / MSP / SaaS desde la landing pública
+-- ----------------------------------------------------------------------------
+create table if not exists public.enterprise_leads (
+  id uuid primary key default gen_random_uuid(),
+  company_name text not null,
+  contact_email text not null,
+  team_size text not null,
+  plan_interest text,
+  created_at timestamptz not null default now()
+);
+
 create or replace function public.audit_ticket_security_changes()
 returns trigger
 language plpgsql
@@ -392,6 +398,20 @@ security definer
 set search_path = pg_catalog, public
 as $$
 begin
+  if tg_op = 'INSERT' then
+    if new.terms_accepted_at is not null then
+      insert into public.audit_logs (organization_id, actor_type, actor_label, action, target_ref)
+      values (
+        new.organization_id,
+        'client',
+        new.client_name,
+        'Declaró mayoría de edad y aceptó términos ' || coalesce(new.terms_version, 'sin versión'),
+        new.ticket_code
+      );
+    end if;
+    return new;
+  end if;
+
   if new.payment_status is distinct from old.payment_status
      and new.payment_status = 'paid' then
     insert into public.audit_logs (organization_id, actor_type, actor_label, action, target_ref)
@@ -698,6 +718,7 @@ alter table public.client_devices enable row level security;
 alter table public.remote_sessions enable row level security;
 alter table public.ai_agents_config enable row level security;
 alter table public.audit_logs enable row level security;
+alter table public.enterprise_leads enable row level security;
 
 -- Remove legacy permissive policies before installing the reviewed policy set.
 -- Old deployments used localized policy names which a list of known names missed.
@@ -823,6 +844,21 @@ create policy "tickets_insert_public" on public.tickets
     and consent_accepted = false
   );
 
+drop policy if exists "tickets_insert_org_member" on public.tickets;
+create policy "tickets_insert_org_member" on public.tickets
+  for insert to authenticated with check (
+    organization_id is not null
+    and public.is_org_member(organization_id)
+    and ticket_code ~* '^RS-[A-Z0-9]{4,12}$'
+    and char_length(trim(client_email)) >= 5
+    and client_session_token ~ '^[A-Fa-f0-9]{64}$'
+    and payment_status = 'pending'
+    and status = 'waiting_payment'
+    and assigned_to is null
+    and assigned_technician_id is null
+    and consent_accepted = false
+  );
+
 drop policy if exists "tickets_select_client_room" on public.tickets;
 create policy "tickets_select_client_room" on public.tickets
   for select to anon, authenticated
@@ -866,6 +902,89 @@ grant update (
   on public.tickets to anon;
 revoke update on public.tickets from authenticated;
 alter table public.tickets alter column is_adult_verified set default false;
+
+-- RPC controlada SECURITY DEFINER para que un usuario autenticado actualice o anonimice
+-- únicamente sus propios tickets sin otorgar UPDATE directo sobre columnas sensibles (pago/estado).
+create or replace function public.update_own_ticket_as_authenticated(
+  p_ticket_id uuid,
+  p_rustdesk_id text default null,
+  p_agent_type text default null,
+  p_consent_accepted boolean default null,
+  p_consent_accepted_at timestamptz default null,
+  p_agent_downloaded boolean default null,
+  p_anonymize boolean default false
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid;
+  v_email text;
+  v_ticket public.tickets%rowtype;
+begin
+  v_uid := auth.uid();
+  if v_uid is null then
+    return false;
+  end if;
+
+  select * into v_ticket
+  from public.tickets
+  where id = p_ticket_id
+  for update;
+
+  if not found then
+    return false;
+  end if;
+
+  v_email := lower(coalesce(auth.jwt() ->> 'email', ''));
+  if not (
+    (v_email <> '' and lower(coalesce(v_ticket.client_email, '')) = v_email)
+    or public.is_client_room_authorized(v_ticket.ticket_code, v_ticket.client_session_token)
+  ) then
+    return false;
+  end if;
+
+  if p_anonymize then
+    update public.tickets
+    set
+      client_name = 'Usuario Anonimizado',
+      client_email = 'eliminado@anonimizado.invalid',
+      client_birth_date = null,
+      rustdesk_id = null,
+      marketing_opt_in = false,
+      anonymized_at = now()
+    where id = p_ticket_id;
+    return true;
+  end if;
+
+  if p_rustdesk_id is not null and p_rustdesk_id !~ '^[0-9]{9}$' then
+    return false;
+  end if;
+
+  if p_agent_type is not null and p_agent_type not in ('temporary', 'installed') then
+    return false;
+  end if;
+
+  update public.tickets
+  set
+    rustdesk_id = coalesce(p_rustdesk_id, rustdesk_id),
+    agent_type = coalesce(p_agent_type, agent_type),
+    consent_accepted = coalesce(p_consent_accepted, consent_accepted),
+    consent_accepted_at = case
+      when p_consent_accepted = true then coalesce(p_consent_accepted_at, now())
+      when p_consent_accepted = false then null
+      else consent_accepted_at
+    end,
+    agent_downloaded = coalesce(p_agent_downloaded, agent_downloaded)
+  where id = p_ticket_id;
+
+  return true;
+end;
+$$;
+revoke all on function public.update_own_ticket_as_authenticated(uuid, text, text, boolean, timestamptz, boolean, boolean) from public, anon, authenticated;
+grant execute on function public.update_own_ticket_as_authenticated(uuid, text, text, boolean, timestamptz, boolean, boolean) to authenticated;
 
 drop policy if exists "ticket_messages_org_member_all" on public.ticket_messages;
 drop policy if exists "ticket_messages_org_member_select" on public.ticket_messages;
@@ -919,24 +1038,39 @@ grant insert (id, ticket_id, sender_role, message, created_at) on public.ticket_
 
 drop policy if exists "client_devices_org_scoped" on public.client_devices;
 drop policy if exists "client_devices_select_members" on public.client_devices;
+drop policy if exists "client_devices_insert_members" on public.client_devices;
+drop policy if exists "client_devices_update_members" on public.client_devices;
 drop policy if exists "client_devices_manage_admins" on public.client_devices;
 create policy "client_devices_select_members" on public.client_devices
   for select to authenticated using (public.is_org_member(organization_id));
+create policy "client_devices_insert_members" on public.client_devices
+  for insert to authenticated with check (public.is_org_member(organization_id));
+create policy "client_devices_update_members" on public.client_devices
+  for update to authenticated
+  using (public.is_org_member(organization_id))
+  with check (public.is_org_member(organization_id));
 create policy "client_devices_manage_admins" on public.client_devices
-  for all to authenticated using (public.is_org_admin(organization_id))
-  with check (public.is_org_admin(organization_id));
+  for delete to authenticated using (public.is_org_admin(organization_id));
 revoke all on public.client_devices from public, anon, authenticated;
 grant select, insert, update, delete on public.client_devices to authenticated;
 
 drop policy if exists "remote_sessions_org_scoped" on public.remote_sessions;
 drop policy if exists "remote_sessions_select_members" on public.remote_sessions;
+drop policy if exists "remote_sessions_insert_members" on public.remote_sessions;
+drop policy if exists "remote_sessions_update_members" on public.remote_sessions;
 drop policy if exists "remote_sessions_manage_admins" on public.remote_sessions;
 create policy "remote_sessions_select_members" on public.remote_sessions
   for select to authenticated
   using (organization_id is not null and public.is_org_member(organization_id));
+create policy "remote_sessions_insert_members" on public.remote_sessions
+  for insert to authenticated
+  with check (organization_id is not null and public.is_org_member(organization_id));
+create policy "remote_sessions_update_members" on public.remote_sessions
+  for update to authenticated
+  using (organization_id is not null and public.is_org_member(organization_id))
+  with check (organization_id is not null and public.is_org_member(organization_id));
 create policy "remote_sessions_manage_admins" on public.remote_sessions
-  for all to authenticated using (public.is_org_admin(organization_id))
-  with check (public.is_org_admin(organization_id));
+  for delete to authenticated using (public.is_org_admin(organization_id));
 revoke all on public.remote_sessions from public, anon, authenticated;
 grant select, insert, update, delete on public.remote_sessions to authenticated;
 
@@ -957,10 +1091,50 @@ create policy "audit_logs_org_scoped" on public.audit_logs
   using (organization_id is not null and public.is_org_member(organization_id));
 
 drop policy if exists "audit_logs_insert_org_member" on public.audit_logs;
+create policy "audit_logs_insert_org_member" on public.audit_logs
+  for insert to authenticated
+  with check (
+    organization_id is not null
+    and public.is_org_member(organization_id)
+    and actor_type in ('technician', 'ai_agent', 'system')
+  );
 revoke all on public.audit_logs from public, anon, authenticated;
 grant select on public.audit_logs to authenticated;
+grant insert (id, organization_id, actor_type, actor_label, action, target_ref, created_at)
+  on public.audit_logs to authenticated;
 
 drop policy if exists "audit_logs_insert_client_room" on public.audit_logs;
+
+drop policy if exists "enterprise_leads_insert_public" on public.enterprise_leads;
+create policy "enterprise_leads_insert_public" on public.enterprise_leads
+  for insert to anon, authenticated
+  with check (
+    char_length(trim(company_name)) >= 2
+    and char_length(trim(contact_email)) >= 5
+    and char_length(trim(team_size)) >= 1
+  );
+
+drop policy if exists "enterprise_leads_select_operators" on public.enterprise_leads;
+create policy "enterprise_leads_select_operators" on public.enterprise_leads
+  for select to authenticated
+  using (
+    exists (
+      select 1
+      from public.organization_members om
+      where om.user_id = (select auth.uid())
+        and om.status = 'active'
+    ) or exists (
+      select 1
+      from public.profiles p
+      where p.id = (select auth.uid())
+        and p.role = 'admin'
+    )
+  );
+
+revoke all on public.enterprise_leads from public, anon, authenticated;
+grant insert (company_name, contact_email, team_size, plan_interest)
+  on public.enterprise_leads to anon, authenticated;
+grant select on public.enterprise_leads to authenticated;
 
 -- ----------------------------------------------------------------------------
 -- 14. Publicación Supabase Realtime

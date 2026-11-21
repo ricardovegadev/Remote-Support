@@ -4,6 +4,64 @@
 
 ---
 
+## [2026-11-21] · v2.6 Remediación Fase 2: Rendimiento, Supabase Completo, Accesibilidad y Limpieza (`AUD-12`–`AUD-22`)
+### Cambios implementados
+- **Optimización de Peso, Imágenes y Code-Splitting (`src/App.tsx`, `vite.config.ts`, `src/components/HeroSection.tsx`, `src/components/DiagnosticWizard.tsx`):**
+  - Purgados **20 archivos de imagen huérfanos** (~8.8 MB): 17 PNG sin referencia en `public/assets/aistudio/` (conservando `image_d9221c48.png`) y 3 JPG residuales en `src/assets/images/`.
+  - Convertidos `TechPortalView`, `ConnectionRoom`, `LegalDocsModal` y `AuthModal` a `React.lazy` + `<Suspense>` (con montaje condicional de modales) y configurado `build.rolldownOptions.output.codeSplitting` en `vite.config.ts` (`react-vendor`, `supabase-vendor`, `lucide-vendor`), dejando el entry bundle inicial en **250.69 kB** (gzip 58.09 kB) y eliminando por completo las advertencias de chunks > 500 kB.
+  - Añadidas dimensiones explícitas (`width`/`height`) en las imágenes del carrusel (`HeroSection.tsx`) con `loading="eager"` + `fetchPriority="high"` en el slide inicial y `loading="lazy"` en los slides 1–3, más `width={24} height={24} loading="lazy" decoding="async"` en el avatar miniatura de `DiagnosticWizard.tsx`.
+- **Sincronización Completa con Supabase y Consumo Real de Créditos IA (`supabase/schema.sql`, `server.ts`, `src/services/supportAdapter.ts`, `src/services/aiService.ts`, `src/components/dashboard/AiWorkforceView.tsx`):**
+  - Añadida la tabla `public.enterprise_leads` con RLS (inserción pública controlada y lectura exclusiva para operadores activos/admins), columnas `ticket_code`, `client_name`, `technician_name` en `public.remote_sessions`, y políticas RLS para sincronización de `client_devices`, `remote_sessions` y `audit_logs` por miembros activos.
+  - Conectados a Supabase (con fallback transparente a `localStorage`) los ajustes de `organizations`, disponibilidad e invitaciones de `organization_members`, `client_devices`, `remote_sessions`, `ai_agents_config`, `audit_logs` y `enterprise_leads`, además de suscripción Realtime en `ai_agents_config` e hidratación completa al iniciar sesión.
+  - Implementado el contador real `recordAiCreditsUsage()` en `server.ts` y `supportAdapter.incrementAiAgentCredits()` para incrementar `ai_agents_config.credits_used` y `organizations.ai_credits_used` en cada llamada a `/api/ai/receptionist`, `/api/ai/report` y `/api/ai/assistant`; diferenciados los 3 agentes en vivo (`En vivo`) de los 3 agentes de hoja de ruta (`Próximamente`) en `AiWorkforceView.tsx`.
+  - Eliminado el banner obsoleto de «Persistencia parcial» en `TechPortalView.tsx`.
+- **Motor RustDesk, Limpieza de Código y SEO (`server.ts`, `package.json`, `tsconfig.json`, `index.html`, `src/main.tsx`, `src/components/AppErrorBoundary.tsx`, `src/index.css`, `src/components/PaymentBrandLogos.tsx`):**
+  - Actualizado `/api/rustdesk/official-download` con caché en memoria (30 min), detección de arquitectura macOS Apple Silicon (`aarch64`/`arm64`) vs Intel/Universal y enrutamiento móvil (App Store para iOS y `.apk` oficial para Android).
+  - Añadido botón/guía fallback de «Copiar ID» junto a los deep-links `rustdesk://` en `TicketsInboxView.tsx` y `DevicesAndSessionsView.tsx`.
+  - Eliminado código muerto: `addonBackup` en `server.ts`, `detectCardNetwork` en `PaymentBrandLogos.tsx`, `.bg-tech-grid` en `src/index.css`, `icon` sin uso en `DAILY_APP_SHORTCUTS` (`HeroSection.tsx`), prop sin uso `relayDomain` (`App.tsx`/`ConnectionRoom.tsx`) y `onOpenPublicPortal` en `DashboardOverview.tsx`.
+  - Movidas dependencias de build (`vite`, `@vitejs/plugin-react`, `@tailwindcss/vite`) a `devDependencies`, limpiado `tsconfig.json`, añadido favicon SVG + meta tags SEO/OpenGraph/Twitter + JSON-LD `WebApplication` en `index.html`, unificado `<AppErrorBoundary>` en `main.tsx` ocultando stack/mensajes técnicos en producción y liberando `window.onerror`/`onunhandledrejection` al completar el arranque.
+- **Accesibilidad WCAG AA, Teclado y Reseteo Multi-Organización (`Header.tsx`, `CookieConsentBanner.tsx`, `DashboardSidebar.tsx`, `TechPortalView.tsx`, `DiagnosticWizard.tsx`, `AuthModal.tsx`, `LandingSections.tsx`, `Footer.tsx`, `TicketChatPanel.tsx`, `TicketsInboxView.tsx`, `DevicesAndSessionsView.tsx`, `WorkforceDispatchView.tsx`):**
+  - Añadido cierre por tecla `Escape` en menú móvil (`Header`), banner de cookies (`CookieConsentBanner`), drawer lateral (`DashboardSidebar`) y popover de notificaciones (`TechPortalView`).
+  - Extraídos los botones de enlaces legales fuera de `<label>` y añadidos pares `htmlFor`/`id` explícitos en todos los formularios de registro, cookies, invitación de freelancers y modal `+ Nueva solicitud`.
+  - Elevado el contraste de placeholders, separadores e íconos sobre fondos claros (`text-slate-500` / `placeholder:text-slate-500`) y oscuros (`text-slate-300`), añadido `aria-hidden="true"` a numerales decorativos en `LandingSections.tsx`, derivadas dinámicamente las iniciales del operador con `getInitials(...)` en lugar de `AD` fijo, y reseteados filtros locales al cambiar de organización.
+
+### Verificación técnica
+- `npm run build` (`vite build`): **0 errores y 0 advertencias de chunks > 500 kB** (`index` 250.69 kB / gzip 58.09 kB, `TechPortalView` 259.93 kB, `ConnectionRoom` 53.82 kB, `AuthModal` 20.43 kB, `LegalDocsModal` 19.39 kB, `react-vendor` 425.68 kB, `supabase-vendor` 216.00 kB, `lucide-vendor` 15.92 kB).
+- `npm test`: **13/13 pruebas unitarias aprobadas**.
+- `compile_applet` y `lint_applet` (`tsc --noEmit`): **0 errores**.
+
+---
+
+## [2026-11-21] · v2.5 Remediación Fase 1: Seguridad, Supabase, Pagos, Aislamiento Multi-Tenant y Flujo Comercial (`AUD-01`–`AUD-11`, `AUD-16`, `AUD-17`)
+### Cambios implementados
+- **Desbloqueo de Supabase y Tokens Criptográficos (`supabase/schema.sql`, `src/utils/ticketLogic.ts`, `src/services/supportAdapter.ts`):**
+  - Movida la guarda `if tg_op = 'INSERT' ... return new; end if;` desde el bloque anónimo `do $$ ... end $$;` al inicio de la función trigger `public.audit_ticket_security_changes()`, evitando `record "old" is not assigned yet` y permitiendo la ejecución limpia de la migración e inserciones.
+  - Añadidas la política RLS `tickets_insert_org_member` para operadores autenticados (`consent_accepted = false`) y la RPC controlada `SECURITY DEFINER` `public.update_own_ticket_as_authenticated(...)` (con `grant execute ... to authenticated`) para permitir que usuarios autenticados actualicen o anonimicen únicamente sus propios tickets sin abrir `UPDATE` directo sobre columnas de pago/estado.
+  - Corregido `createTicketFromDraft` en `src/utils/ticketLogic.ts` para dejar `options?.randomFn` estrictamente `undefined` en tiempo de ejecución, garantizando tokens `client_session_token` de **64 caracteres hexadecimales** generados con `crypto.getRandomValues(new Uint8Array(32))` compatibles con RLS `tickets_insert_public`.
+  - Actualizados los 7 tokens semilla en `SEED_TICKETS` a cadenas hexadecimales válidas de 64 caracteres.
+- **Blindaje de Endpoints de Pagos, IA y Salud (`server.ts`, `src/services/aiService.ts`):**
+  - Exigida validación de `sessionToken` (`x-ticket-token` o query/body) comparada en tiempo constante (`crypto.timingSafeEqual`) en `GET /api/payments/stripe/verify-session`, `POST /api/payments/paypal/capture-order`, `create-session` y `create-order`.
+  - Protegidos `/api/ai/report` y `/api/ai/assistant` con verificación de JWT de Supabase Auth (`Authorization: Bearer <token>` + verificación de membresía activa / rol técnico o admin cuando Supabase está configurado), adjuntando el token desde `aiService.ts`.
+  - Encapsuladas todas las entradas de usuario en bloques `<user_input>...</user_input>` con instrucciones explícitas anti-prompt-injection en `/api/ai/receptionist`, `/api/ai/report` y `/api/ai/assistant`.
+  - Configurado `app.set('trust proxy', Number(process.env.TRUST_PROXY || 1))` de forma incondicional y ocultado el detalle interno `geminiStatus` en `/api/health` cuando `NODE_ENV === 'production'`.
+- **Aislamiento Multi-Tenant, Privacidad de Sesión, ARCO y Perfiles (`src/App.tsx`, `src/services/supportAdapter.ts`, `src/components/TechPortalView.tsx`, `src/components/AuthModal.tsx`):**
+  - Definida la constante `PUBLIC_PORTAL_ORG_ID` en `App.tsx` para vincular siempre el portal público a HQ, reservando `activeOrgId` exclusivamente para el panel `/dashboard`.
+  - Eliminado el fallback global de agentes IA entre organizaciones (`tenantAiAgents.length > 0 ? tenantAiAgents : aiAgents`); cada organización inicializa sus propias copias aisladas con UUIDs propios vía `supportAdapter.ensureOrganizationAiAgents`.
+  - Eliminado el fallback `tickets[0]` en `activeTicket` y el botón `Abrir sala {tickets[0].ticket_code}` en la vista de ticket no encontrado.
+  - Migrado `rs365_room_tokens_v1` a `window.sessionStorage` (limpiando claves legadas en `localStorage`) y omitido `client_session_token` al serializar `rs365_v1_tickets_v5` en `localStorage`.
+  - Convertido `handleDeletePersonalData` en `async` para esperar la anonimización completa de tickets antes de cerrar sesión (`handleSignOutAccount`).
+  - Hidratado el perfil real desde `public.profiles` en `AuthModal.tsx` tras `signInWithPassword` en lugar de usar `role: 'client'` / `birth_date` fijos, y eliminado el hardcode de aceptación legal en el modal interno `+ Nueva solicitud` de `TechPortalView.tsx` (`consent_accepted: false`).
+- **Flujo Comercial, Accesos Directos, Checkout y Copy Legal (`src/components/HeroSection.tsx`, `src/components/DiagnosticWizard.tsx`, `src/components/ConnectionRoom.tsx`, `src/components/LegalDocsModal.tsx`):**
+  - Al pulsar cualquier plan (`Express $15`, `Optimización $29`, `Avanzado $39`, `Pyme Esencial $39/mes`, `Pyme Corporativo $79/mes`), se abre el chat del `DiagnosticWizard` con banner visible del plan preseleccionado y bloqueo `userLockedTier: true` para que el triaje IA sugiera sin sobrescribir la tarifa elegida.
+  - Enviadas respuestas estructuradas `followUpAnswers` en `handleRefineWithAnswers`.
+  - Corregido el mapeo de **OneDrive** a `Errores de Microsoft 365 y Outlook` ($15) y **Wi-Fi, red e impresoras** a `Problemas de Wi-Fi o red` ($15), reservando `VPN y acceso remoto` ($39) para VPN corporativa/RDP.
+  - Eliminado `window.open(...)` en `ConnectionRoom.tsx` para entornos embebidos (reemplazado por enlace seguro `<a target="_blank" rel="noopener noreferrer">`), habilitado el complemento `+$12 USD` en todos los servicios `one_time`, mostrado el importe total real en el badge `PAGADO · USD $XX.00`, sustituido `"Compartir enlace de $5 USD"` por `"Compartir enlace de soporte"` y unificada la redacción de la Garantía de resolución con reembolso en Hero, Wizard, Sala de Conexión y Modal Legal.
+
+### Verificación técnica
+- `npm run lint` (`tsc --noEmit`), `npm test` (`13/13`), y `npm run build` (`vite build`) verificados con `0` errores.
+
+---
+
 ## [2026-11-20] · v2.4 Reorganización Estructural del Hero (`HeroSection.tsx`) — Carrusel Superior Libre, CTAs Inmediatos y Tarjeta de Asistente de Altura Fija (`h-[340px]`)
 ### Cambios implementados
 - **Reorganización del Layout del Hero (`src/components/HeroSection.tsx`):**

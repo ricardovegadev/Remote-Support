@@ -8,14 +8,23 @@ interface AiWorkforceViewProps {
   onToggleGovernanceRule: (agentId: string, ruleId: string) => void;
 }
 
+const ROADMAP_AGENT_KEYS = new Set<AiAgentConfig['agent_key']>([
+  'ai_dispatcher',
+  'ai_follow_up',
+  'ai_operations_manager',
+]);
+
 export function AiWorkforceView({
   organization,
   agents,
   onToggleAgent,
   onToggleGovernanceRule,
 }: AiWorkforceViewProps) {
-  const totalCreditsUsed = agents.reduce((acc, a) => acc + a.credits_used, 0);
-  const creditsLimit = organization.ai_credits_monthly;
+  const totalCreditsUsed = Math.max(
+    organization.ai_credits_used,
+    agents.reduce((acc, a) => acc + a.credits_used, 0)
+  );
+  const creditsLimit = Math.max(1, organization.ai_credits_monthly);
   const remainingCredits = Math.max(0, creditsLimit - totalCreditsUsed);
   const usagePct = Math.min(
     100,
@@ -85,9 +94,20 @@ export function AiWorkforceView({
                     <Bot className="w-5 h-5" aria-hidden="true" />
                   </span>
                   <div>
-                    <h3 className="text-sm font-bold text-[#0F172A]">
-                      {agent.agent_name}
-                    </h3>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <h3 className="text-sm font-bold text-[#0F172A]">
+                        {agent.agent_name}
+                      </h3>
+                      {ROADMAP_AGENT_KEYS.has(agent.agent_key) ? (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-50 border border-amber-200 text-[10px] font-semibold text-amber-800">
+                          Próximamente
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-50 border border-blue-200 text-[10px] font-semibold text-[#1D4ED8]">
+                          En vivo
+                        </span>
+                      )}
+                    </div>
                     <p className="text-[11px] text-[#64748B] font-mono tabular-nums mt-0.5">
                       {agent.credits_used} créditos este mes
                     </p>

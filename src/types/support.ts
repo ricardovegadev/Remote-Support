@@ -149,6 +149,7 @@ export interface WizardDraft {
   category: IssueCategory | null;
   operatingSystem: OperatingSystem | null;
   serviceTier: ServiceTier;
+  userLockedTier?: boolean;
   billingMode?: 'one_time' | 'pyme_monthly';
   description: string;
   clientName: string;

@@ -200,9 +200,10 @@ test('createTicketFromDraft, computeDashboardMetrics, and computeAverageResponse
 });
 
 test('parseAppRoute resolves /, /dashboard, /portal, and /sesion/[ticket_code]', () => {
-  assert.deepEqual(parseAppRoute('/'), { view: 'tech_portal', ticketCode: null });
-  assert.deepEqual(parseAppRoute('/dashboard'), { view: 'tech_portal', ticketCode: null });
+  assert.deepEqual(parseAppRoute('/'), { view: 'landing', ticketCode: null });
   assert.deepEqual(parseAppRoute('/portal'), { view: 'landing', ticketCode: null });
+  assert.deepEqual(parseAppRoute('/dashboard'), { view: 'tech_portal', ticketCode: null });
+  assert.deepEqual(parseAppRoute('/ruta-inexistente'), { view: 'landing', ticketCode: null });
   assert.deepEqual(parseAppRoute('/sesion/rs-8492'), {
     view: 'connection_room',
     ticketCode: 'RS-8492',
@@ -319,4 +320,29 @@ test('10-service launch catalog maps suggested tiers accurately and preserves le
   assert.equal(getSuggestedTierForCategory('Redes/Wi-Fi'), 'Express $15');
   assert.equal(getSuggestedTierForCategory('Otro'), 'Express $15');
 });
+
+test('createTicketFromDraft generates cryptographic 64-char hex client_session_token when randomFn is omitted', () => {
+  const baseDraft: WizardDraft = {
+    step: 3,
+    category: 'Errores de Microsoft 365 y Outlook',
+    operatingSystem: 'Windows',
+    serviceTier: 'Express $15',
+    billingMode: 'one_time',
+    description: 'Outlook no sincroniza correos tras actualizar Windows',
+    clientName: 'Ana Lucía Paredes',
+    clientEmail: 'ana@empresa.ec',
+    birthDate: '1991-04-12',
+    termsAccepted: true,
+    marketingOptIn: false,
+  };
+
+  const tA = createTicketFromDraft(baseDraft);
+  const tB = createTicketFromDraft(baseDraft);
+
+  assert.match(tA.client_session_token, /^[a-f0-9]{64}$/);
+  assert.match(tB.client_session_token, /^[a-f0-9]{64}$/);
+  assert.notEqual(tA.client_session_token, tB.client_session_token);
+  assert.equal(tA.consent_accepted, false);
+});
+
 

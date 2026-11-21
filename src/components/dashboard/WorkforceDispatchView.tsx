@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   CheckCircle2,
   Globe,
@@ -109,6 +109,13 @@ export function WorkforceDispatchView({
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRate, setInviteRate] = useState('15');
   const [inviteError, setInviteError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setTierFilter('all');
+    setInviteOpen(false);
+    setInviteError(null);
+    setClaimingId(null);
+  }, [organization.id]);
 
   const currentMember =
     members.find(
@@ -515,39 +522,51 @@ export function WorkforceDispatchView({
             className="p-4 rounded-xl bg-[#F8FAFC] border border-[#E5E9F2] grid grid-cols-1 sm:grid-cols-4 gap-3 items-end"
           >
             <div>
-              <label className="block text-xs font-semibold text-[#0F172A] mb-1">
+              <label
+                htmlFor="invite-full-name"
+                className="block text-xs font-semibold text-[#0F172A] mb-1"
+              >
                 Nombre completo
               </label>
               <input
+                id="invite-full-name"
                 type="text"
                 value={inviteName}
                 onChange={(e) => setInviteName(e.target.value)}
                 placeholder="Ej. Elena Vargas"
-                className="w-full rounded-lg border border-[#E5E9F2] bg-white px-3 py-2 text-xs"
+                className="w-full rounded-lg border border-[#E5E9F2] bg-white px-3 py-2 text-xs text-[#0F172A] placeholder:text-slate-500"
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-[#0F172A] mb-1">
+              <label
+                htmlFor="invite-email"
+                className="block text-xs font-semibold text-[#0F172A] mb-1"
+              >
                 Correo
               </label>
               <input
+                id="invite-email"
                 type="email"
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
                 placeholder="elena@freelance.ec"
-                className="w-full rounded-lg border border-[#E5E9F2] bg-white px-3 py-2 text-xs"
+                className="w-full rounded-lg border border-[#E5E9F2] bg-white px-3 py-2 text-xs text-[#0F172A] placeholder:text-slate-500"
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-[#0F172A] mb-1">
+              <label
+                htmlFor="invite-rate"
+                className="block text-xs font-semibold text-[#0F172A] mb-1"
+              >
                 Tarifa pactada ($ USD)
               </label>
               <input
+                id="invite-rate"
                 type="number"
                 min={1}
                 value={inviteRate}
                 onChange={(e) => setInviteRate(e.target.value)}
-                className="w-full rounded-lg border border-[#E5E9F2] bg-white px-3 py-2 text-xs font-mono"
+                className="w-full rounded-lg border border-[#E5E9F2] bg-white px-3 py-2 text-xs font-mono text-[#0F172A]"
               />
             </div>
             <button

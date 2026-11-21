@@ -48,6 +48,8 @@ export interface ExternalTriageTrigger {
   symptom: string;
   category?: IssueCategory;
   openComposer?: boolean;
+  preselectedTier?: ServiceTier;
+  preselectedBillingMode?: 'one_time' | 'pyme_monthly';
 }
 
 interface DiagnosticWizardProps {
@@ -109,10 +111,10 @@ const TOPIC_CARDS: Array<{
   {
     id: 'onedrive',
     title: 'OneDrive',
-    subtitle: 'Archivos y estado de sincronización',
-    category: 'Recuperación de archivos',
+    subtitle: 'Sincronización y cuenta Microsoft 365',
+    category: 'Errores de Microsoft 365 y Outlook',
     starterPrompt:
-      'OneDrive no sincroniza mis carpetas o necesito recuperar archivos importantes.',
+      'OneDrive no sincroniza mis carpetas o muestra errores de sesión en Microsoft 365.',
     icon: Cloud,
     iconStyle: 'bg-cyan-50 text-cyan-700 border-cyan-100',
   },
@@ -128,11 +130,11 @@ const TOPIC_CARDS: Array<{
   },
   {
     id: 'vpn-red',
-    title: 'VPN y conectividad',
-    subtitle: 'Acceso remoto, Wi-Fi e impresoras',
-    category: 'VPN y acceso remoto',
+    title: 'Wi-Fi, red e impresoras',
+    subtitle: 'Conectividad, red local e impresoras',
+    category: 'Problemas de Wi-Fi o red',
     starterPrompt:
-      'Mi conexión Wi-Fi, impresora en red o acceso VPN se desconecta y no puedo trabajar.',
+      'Mi conexión Wi-Fi, red local o impresora no conecta correctamente en el equipo.',
     icon: Wifi,
     iconStyle: 'bg-emerald-50 text-emerald-700 border-emerald-100',
   },
@@ -161,8 +163,8 @@ const QUICK_STARTER_OPTIONS: Array<{
   },
   {
     label: 'OneDrive no sincroniza',
-    symptom: 'OneDrive se quedó detenido sincronizando o no muestra mis archivos recientes.',
-    category: 'Recuperación de archivos',
+    symptom: 'OneDrive se quedó detenido sincronizando o muestra error de cuenta.',
+    category: 'Errores de Microsoft 365 y Outlook',
     badgeStyle: 'bg-cyan-50 text-cyan-700 border-cyan-100',
     icon: Cloud,
   },
@@ -223,7 +225,9 @@ export function DiagnosticWizard({
 
   const executeAiTriage = async (
     symptomText: string,
-    overrideCategory?: IssueCategory
+    overrideCategory?: IssueCategory,
+    followUpAnswers?: Array<{ question: string; answer: string }>,
+    lockedTierOverride?: boolean
   ) => {
     const cleanText = symptomText.trim();
     if (!cleanText) return;
@@ -275,11 +279,17 @@ export function DiagnosticWizard({
         category: nextCategory,
         osType: currentOs,
         description: nextDescription,
+        ...(followUpAnswers && followUpAnswers.length > 0
+          ? { followUpAnswers }
+          : {}),
       });
 
       const resolvedCategory = triage.suggestedCategory || nextCategory;
-      const shouldKeepPyme = draft.billingMode === 'pyme_monthly';
-      const suggestedTier = shouldKeepPyme
+      const shouldPreserveSelectedTier =
+        draft.billingMode === 'pyme_monthly' ||
+        Boolean(draft.userLockedTier) ||
+        Boolean(lockedTierOverride);
+      const suggestedTier = shouldPreserveSelectedTier
         ? draft.serviceTier
         : triage.suggestedTier || getSuggestedTierForCategory(resolvedCategory);
 
@@ -315,8 +325,23 @@ export function DiagnosticWizard({
     lastTriggerIdRef.current = externalTrigger.id;
 
     setChatOpen(true);
+    const hasLockedTier = Boolean(
+      externalTrigger.preselectedTier ||
+        externalTrigger.preselectedBillingMode === 'pyme_monthly'
+    );
     if (externalTrigger.openComposer && !externalTrigger.symptom.trim()) {
-      onChangeDraft({ step: 1 });
+      onChangeDraft({
+        step: 1,
+        ...(externalTrigger.preselectedTier
+          ? {
+              serviceTier: externalTrigger.preselectedTier,
+              userLockedTier: true,
+            }
+          : {}),
+        ...(externalTrigger.preselectedBillingMode
+          ? { billingMode: externalTrigger.preselectedBillingMode }
+          : {}),
+      });
       scrollToChatCard();
       window.setTimeout(() => composerRef.current?.focus(), 220);
       return;
@@ -325,7 +350,12 @@ export function DiagnosticWizard({
     if (externalTrigger.symptom.trim()) {
       setComposerText('');
       scrollToChatCard();
-      void executeAiTriage(externalTrigger.symptom, externalTrigger.category);
+      void executeAiTriage(
+        externalTrigger.symptom,
+        externalTrigger.category,
+        undefined,
+        hasLockedTier
+      );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalTrigger]);
@@ -358,6 +388,7 @@ export function DiagnosticWizard({
       step: 1,
       description: '',
       aiTriage: null,
+      userLockedTier: false,
     });
     window.setTimeout(() => composerRef.current?.focus(), 80);
   };
@@ -371,16 +402,22 @@ export function DiagnosticWizard({
   };
 
   const handleRefineWithAnswers = () => {
-    const qaSummary = Object.entries(aiQuestionAnswers)
+    const structuredAnswers = Object.entries(aiQuestionAnswers)
       .filter(([, ans]) => ans.trim().length > 0)
-      .map(([idx, ans]) => {
-        const q = draft.aiTriage?.followUpQuestions[Number(idx)] ?? 'Detalle';
-        return `${q} → ${ans.trim()}`;
-      })
-      .join(' | ');
+      .map(([idx, ans]) => ({
+        question: draft.aiTriage?.followUpQuestions[Number(idx)] ?? 'Detalle',
+        answer: ans.trim(),
+      }));
 
-    if (!qaSummary) return;
-    void executeAiTriage(`Respuestas rápidas: ${qaSummary}`, draft.category ?? 'Otro');
+    if (structuredAnswers.length === 0) return;
+    const qaSummary = structuredAnswers
+      .map((item) => `${item.question} → ${item.answer}`)
+      .join(' | ');
+    void executeAiTriage(
+      `Respuestas rápidas: ${qaSummary}`,
+      draft.category ?? 'Otro',
+      structuredAnswers
+    );
   };
 
   const handleEscalateToSpecialist = () => {
@@ -390,10 +427,11 @@ export function DiagnosticWizard({
         ? draft.description.trim()
         : `Solicitud de atención directa con especialista remoto en ${currentOs} (${resolvedCategory}).`;
 
-    const resolvedTier =
-      draft.billingMode === 'pyme_monthly'
-        ? draft.serviceTier
-        : draft.aiTriage?.suggestedTier ?? getSuggestedTierForCategory(resolvedCategory);
+    const shouldPreserveSelectedTier =
+      draft.billingMode === 'pyme_monthly' || Boolean(draft.userLockedTier);
+    const resolvedTier = shouldPreserveSelectedTier
+      ? draft.serviceTier
+      : draft.aiTriage?.suggestedTier ?? getSuggestedTierForCategory(resolvedCategory);
 
     setChatOpen(true);
     onSetErrors({});
@@ -411,6 +449,7 @@ export function DiagnosticWizard({
     onChangeDraft({
       serviceTier: tier,
       billingMode: 'one_time',
+      userLockedTier: true,
     });
   };
 
@@ -418,6 +457,7 @@ export function DiagnosticWizard({
     onChangeDraft({
       serviceTier: tier,
       billingMode: 'pyme_monthly',
+      userLockedTier: true,
     });
   };
 
@@ -508,7 +548,7 @@ export function DiagnosticWizard({
                     </div>
                   </div>
                   <ArrowUpRight
-                    className="w-4 h-4 text-slate-400 group-hover:text-[#2563EB] group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all shrink-0"
+                    className="w-4 h-4 text-slate-500 group-hover:text-[#2563EB] group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all shrink-0"
                     aria-hidden="true"
                   />
                 </button>
@@ -573,6 +613,10 @@ export function DiagnosticWizard({
                     <img
                       src={heroWarmSpecialistImg}
                       alt=""
+                      width={24}
+                      height={24}
+                      loading="lazy"
+                      decoding="async"
                       aria-hidden="true"
                       referrerPolicy="no-referrer"
                       className="w-6 h-6 rounded-full object-cover border border-slate-200"
@@ -636,6 +680,60 @@ export function DiagnosticWizard({
                   </div>
                 </div>
 
+                {/* Pre-selected Plan Banner when user selected a specific pricing plan */}
+                {(draft.userLockedTier || isPymeMonthly) && (
+                  <div
+                    data-testid="preselected-plan-banner"
+                    className="rounded-xl bg-blue-50/80 border border-blue-200 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  >
+                    <div className="space-y-0.5 text-xs">
+                      <p className="font-semibold text-[#0B192C]">
+                        Plan preseleccionado:{' '}
+                        <span className="text-[#1D4ED8]">{activeTier}</span>{' '}
+                        <span className="font-mono tabular-nums">
+                          (${activePrice} USD{isPymeMonthly ? '/mes' : ''})
+                        </span>
+                      </p>
+                      <p className="text-slate-600">
+                        Mantendremos tu tarifa elegida intacta durante el diagnóstico.
+                        {draft.aiTriage?.suggestedTier &&
+                          draft.aiTriage.suggestedTier !== activeTier &&
+                          !isPymeMonthly && (
+                            <>
+                              {' '}
+                              Sugerencia opcional de IA:{' '}
+                              <strong className="text-[#0B192C]">
+                                {draft.aiTriage.suggestedTier}
+                              </strong>
+                              .
+                            </>
+                          )}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleEscalateToSpecialist}
+                        className="px-3 py-1.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold transition-colors whitespace-nowrap"
+                      >
+                        Continuar con este plan
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onChangeDraft({
+                            userLockedTier: false,
+                            billingMode: 'one_time',
+                          })
+                        }
+                        className="px-2.5 py-1.5 rounded-lg border border-blue-200 bg-white hover:bg-blue-50 text-xs font-medium text-slate-700 transition-colors whitespace-nowrap"
+                      >
+                        Cambiar plan
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Chat Conversation Area */}
                 <div className="space-y-4">
                   {chatTurns.length === 0 ? (
@@ -668,7 +766,7 @@ export function DiagnosticWizard({
                                 </span>
                               </span>
                               <ArrowUpRight
-                                className="w-4 h-4 text-slate-400 group-hover:text-[#2563EB] shrink-0"
+                                className="w-4 h-4 text-slate-500 group-hover:text-[#2563EB] shrink-0"
                                 aria-hidden="true"
                               />
                             </button>
@@ -868,12 +966,14 @@ export function DiagnosticWizard({
                                   ¿Sigue igual o prefieres que un especialista lo resuelva por ti?
                                 </p>
                                 <p className="text-xs text-slate-600">
-                                  Tarifa fija sugerida:{' '}
+                                  {draft.userLockedTier || isPymeMonthly
+                                    ? 'Tarifa seleccionada:'
+                                    : 'Tarifa fija sugerida:'}{' '}
                                   <strong className="font-mono tabular-nums text-[#0B192C]">
-                                    ${activePrice} USD
+                                    ${activePrice} USD{isPymeMonthly ? '/mes' : ''}
                                   </strong>{' '}
-                                  <span className="text-slate-500 font-medium">
-                                    · Revisa el alcance antes de confirmar
+                                  <span className="text-emerald-700 font-medium">
+                                    · Garantía de resolución: si el problema técnico no puede resolverse en sesión, gestionamos el reembolso conforme a nuestra Política de Reembolsos.
                                   </span>
                                 </p>
                               </div>
@@ -919,23 +1019,23 @@ export function DiagnosticWizard({
                         }
                       }}
                       placeholder="Escribe aquí qué está pasando..."
-                      className="w-full bg-transparent px-4 pt-3.5 pb-2 text-sm text-[#0B192C] placeholder:text-slate-400 focus:outline-none resize-none"
+                      className="w-full bg-transparent px-4 pt-3.5 pb-2 text-sm text-[#0B192C] placeholder:text-slate-500 focus:outline-none resize-none"
                     />
                     <div className="px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100">
-                      <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-500">
-                        <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" aria-hidden="true" />
+                      <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-600">
+                        <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0" aria-hidden="true" />
                         <span>No incluyas contraseñas ni códigos de acceso</span>
                       </span>
 
                       <div className="flex items-center gap-3 ml-auto">
-                        <span className="font-mono tabular-nums text-[11px] text-slate-400">
+                        <span className="font-mono tabular-nums text-[11px] text-slate-600">
                           {composerText.length}/500
                         </span>
                         <button
                           type="submit"
                           aria-label="Enviar mensaje al asistente IA"
                           disabled={aiLoading || composerText.trim().length === 0}
-                          className="w-9 h-9 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] disabled:bg-slate-200 disabled:text-slate-400 text-white flex items-center justify-center shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+                          className="w-9 h-9 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] disabled:bg-slate-200 disabled:text-slate-500 text-white flex items-center justify-center shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
                         >
                           {aiLoading ? (
                             <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
@@ -1184,21 +1284,24 @@ export function DiagnosticWizard({
 
                 {/* Mandatory Unchecked-by-Default Legal & Marketing Checkboxes (ADR-05) */}
                 <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                  <label className="flex items-start gap-3 cursor-pointer">
+                  <div className="flex items-start gap-3">
                     <input
+                      id="wizard-terms-accepted"
                       type="checkbox"
                       checked={Boolean(draft.termsAccepted)}
                       onChange={(e) =>
                         onChangeDraft({ termsAccepted: e.target.checked })
                       }
-                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB]"
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
                     />
                     <span className="text-xs text-slate-700 leading-relaxed">
-                      Declaro ser mayor de 18 años y acepto los{' '}
+                      <label htmlFor="wizard-terms-accepted" className="cursor-pointer">
+                        Declaro ser mayor de 18 años y acepto los{' '}
+                      </label>
                       <button
                         type="button"
                         onClick={() => onOpenLegalDoc?.('terms')}
-                        className="font-semibold text-[#2563EB] underline underline-offset-2"
+                        className="font-semibold text-[#2563EB] underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] rounded"
                       >
                         Términos de Servicio
                       </button>
@@ -1206,7 +1309,7 @@ export function DiagnosticWizard({
                       <button
                         type="button"
                         onClick={() => onOpenLegalDoc?.('privacy')}
-                        className="font-semibold text-[#2563EB] underline underline-offset-2"
+                        className="font-semibold text-[#2563EB] underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] rounded"
                       >
                         Política de Privacidad
                       </button>{' '}
@@ -1214,31 +1317,35 @@ export function DiagnosticWizard({
                       <button
                         type="button"
                         onClick={() => onOpenLegalDoc?.('refunds')}
-                        className="font-semibold text-[#2563EB] underline underline-offset-2"
+                        className="font-semibold text-[#2563EB] underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] rounded"
                       >
                         Política de Reembolsos y Garantía
                       </button>
                       . *
                     </span>
-                  </label>
+                  </div>
                   {errors.termsAccepted && (
                     <p className="text-xs text-red-600 pl-7">{errors.termsAccepted}</p>
                   )}
 
-                  <label className="flex items-start gap-3 cursor-pointer">
+                  <div className="flex items-start gap-3">
                     <input
+                      id="wizard-marketing-optin"
                       type="checkbox"
                       checked={Boolean(draft.marketingOptIn)}
                       onChange={(e) =>
                         onChangeDraft({ marketingOptIn: e.target.checked })
                       }
-                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB]"
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
                     />
-                    <span className="text-xs text-slate-600 leading-relaxed">
+                    <label
+                      htmlFor="wizard-marketing-optin"
+                      className="text-xs text-slate-600 leading-relaxed cursor-pointer"
+                    >
                       Deseo recibir consejos preventivos de seguridad y promociones de
                       Remote Support 365 por correo (opcional).
-                    </span>
-                  </label>
+                    </label>
+                  </div>
                 </div>
 
                 {/* Error Summary Above Submit CTA */}

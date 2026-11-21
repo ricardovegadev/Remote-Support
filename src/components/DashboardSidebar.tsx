@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Activity,
   ArrowUpRight,
@@ -56,6 +56,17 @@ export function DashboardSidebar({
   onOpenPublicPortal,
 }: DashboardSidebarProps) {
   const [orgMenuOpen, setOrgMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onCloseMobile();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [mobileOpen, onCloseMobile]);
 
   const activeOrg =
     organizations.find((o) => o.id === activeOrgId) ?? organizations[0];
@@ -346,7 +357,7 @@ export function DashboardSidebar({
           >
             <div className="flex items-center gap-2.5 min-w-0">
               <span className="w-8 h-8 rounded-full bg-[#1E2E4A] text-white text-xs font-bold flex items-center justify-center shrink-0">
-                AD
+                {getInitials(operatorName)}
               </span>
               {!isCompact && (
                 <div className="min-w-0 leading-tight">

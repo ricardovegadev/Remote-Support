@@ -40,6 +40,31 @@ export default defineConfig(() => {
         '@': path.resolve(import.meta.dirname, '.'),
       },
     },
+    build: {
+      rolldownOptions: {
+        output: {
+          codeSplitting: {
+            groups: [
+              {
+                name: 'react-vendor',
+                test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/,
+                priority: 30,
+              },
+              {
+                name: 'supabase-vendor',
+                test: /node_modules[\\/]@supabase[\\/]/,
+                priority: 25,
+              },
+              {
+                name: 'lucide-vendor',
+                test: /node_modules[\\/]lucide-react[\\/]/,
+                priority: 20,
+              },
+            ],
+          },
+        },
+      },
+    },
     server: {
       // Keep host checking enabled while allowing explicitly configured preview
       // proxy hosts and Cloud Run's generated hostname.

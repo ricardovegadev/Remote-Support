@@ -41,7 +41,6 @@ interface DashboardOverviewProps {
   onNavigateSection: (section: DashboardSection) => void;
   onSelectTicket: (ticketId: string) => void;
   onOpenNewTicketModal: () => void;
-  onOpenPublicPortal: () => void;
 }
 
 const AVATAR_STYLES = [

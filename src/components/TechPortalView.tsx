@@ -38,6 +38,7 @@ import {
   ADULT_RESTRICTION_ERROR,
   calculateAgeFromBirthDate,
   CATEGORY_OPTIONS,
+  getInitials,
   isValidEmail,
   LEGAL_TERMS_VERSION,
   SERVICE_TIER_OPTIONS,
@@ -271,11 +272,12 @@ export function TechPortalView({
       if (e.key === 'Escape') {
         if (newTicketModalOpen) setNewTicketModalOpen(false);
         if (sqlModalOpen) setSqlModalOpen(false);
+        if (notificationsOpen) setNotificationsOpen(false);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [newTicketModalOpen, sqlModalOpen]);
+  }, [newTicketModalOpen, sqlModalOpen, notificationsOpen]);
 
   useEffect(() => {
     if (!supabaseConfigured) return;
@@ -335,14 +337,17 @@ export function TechPortalView({
     (t) => !t.organization_id || t.organization_id === activeOrg.id
   );
   const orgMembers = members.filter((m) => m.organization_id === activeOrg.id);
+  const operatorDisplayName =
+    members.find(
+      (m) => m.email.toLowerCase() === operatorEmail.toLowerCase()
+    )?.full_name ?? 'Administrador';
   const orgDevices = devices.filter((d) => d.organization_id === activeOrg.id);
   const orgSessions = sessions.filter(
     (s) => s.organization_id === activeOrg.id
   );
-  const tenantAiAgents = aiAgents.filter(
+  const orgAiAgents = aiAgents.filter(
     (a) => a.organization_id === activeOrg.id
   );
-  const orgAiAgents = tenantAiAgents.length > 0 ? tenantAiAgents : aiAgents;
   const orgAuditLogs = auditLogs.filter(
     (a) => !a.organization_id || a.organization_id === activeOrg.id
   );
@@ -602,8 +607,8 @@ export function TechPortalView({
         description: qtDescription.trim(),
         clientName: qtClientName.trim(),
         clientEmail: qtClientEmail.trim(),
-        birthDate: '1990-01-01',
-        termsAccepted: true,
+        birthDate: undefined,
+        termsAccepted: false,
         marketingOptIn: false,
         aiTriage: null,
       });
@@ -793,15 +798,18 @@ export function TechPortalView({
 
                   {authTab === 'signup' && (
                     <div className="space-y-2.5 p-3.5 rounded-xl bg-[#F8FAFC] border border-[#E5E9F2] text-xs">
-                      <label className="flex items-start gap-2 text-[#0F172A] cursor-pointer">
+                      <div className="flex items-start gap-2 text-[#0F172A]">
                         <input
+                          id="tech-signup-terms"
                           type="checkbox"
                           checked={signupTermsAccepted}
                           onChange={(e) => setSignupTermsAccepted(e.target.checked)}
-                          className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#2563EB]"
+                          className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#2563EB] cursor-pointer"
                         />
                         <span>
-                          He leído y acepto los{' '}
+                          <label htmlFor="tech-signup-terms" className="cursor-pointer">
+                            He leído y acepto los{' '}
+                          </label>
                           <button
                             type="button"
                             onClick={() => onOpenLegalDoc?.('terms')}
@@ -809,15 +817,19 @@ export function TechPortalView({
                           >
                             Términos y Condiciones
                           </button>
-                          , la{' '}
+                          <label htmlFor="tech-signup-terms" className="cursor-pointer">
+                            , la{' '}
+                          </label>
                           <button
                             type="button"
                             onClick={() => onOpenLegalDoc?.('privacy')}
                             className="font-semibold text-[#2563EB] hover:underline"
                           >
                             Política de Privacidad
-                          </button>{' '}
-                          y la{' '}
+                          </button>
+                          <label htmlFor="tech-signup-terms" className="cursor-pointer">
+                            {' '}y la{' '}
+                          </label>
                           <button
                             type="button"
                             onClick={() => onOpenLegalDoc?.('refunds')}
@@ -827,20 +839,21 @@ export function TechPortalView({
                           </button>
                           .
                         </span>
-                      </label>
+                      </div>
 
-                      <label className="flex items-start gap-2 text-[#475569] cursor-pointer">
+                      <div className="flex items-start gap-2 text-[#475569]">
                         <input
+                          id="tech-signup-marketing"
                           type="checkbox"
                           checked={signupMarketingOptIn}
                           onChange={(e) => setSignupMarketingOptIn(e.target.checked)}
-                          className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#2563EB]"
+                          className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#2563EB] cursor-pointer"
                         />
-                        <span>
+                        <label htmlFor="tech-signup-marketing" className="cursor-pointer">
                           Acepto recibir novedades y consejos técnicos por correo (puedo
                           darme de baja en cualquier momento).
-                        </span>
-                      </label>
+                        </label>
+                      </div>
                     </div>
                   )}
 
@@ -901,7 +914,7 @@ export function TechPortalView({
         onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
         mobileOpen={mobileDrawerOpen}
         onCloseMobile={() => setMobileDrawerOpen(false)}
-        operatorName="Administrador"
+        operatorName={operatorDisplayName}
         operatorRoleLabel={
           supabaseConfigured ? operatorEmail : 'Cuenta de demostración'
         }
@@ -930,7 +943,7 @@ export function TechPortalView({
             >
               <span className="inline-flex items-center gap-2 text-[12px] font-normal text-slate-600 truncate">
                 <span>Workspace</span>
-                <span className="text-slate-400" aria-hidden="true">
+                <span className="text-slate-500" aria-hidden="true">
                   /
                 </span>
               </span>
@@ -1014,10 +1027,10 @@ export function TechPortalView({
             </div>
 
             <span
-              title="Administrador · Cuenta de demostración"
+              title={`${operatorDisplayName} · ${supabaseConfigured ? operatorEmail : 'Cuenta de demostración'}`}
               className="w-9 h-9 rounded-full bg-[#EFF6FF] text-[#2563EB] text-[12px] font-bold flex items-center justify-center shrink-0"
             >
-              AD
+              {getInitials(operatorDisplayName)}
             </span>
           </div>
         </header>
@@ -1027,11 +1040,6 @@ export function TechPortalView({
           {demoModeEnabled && (
             <div role="status" className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-950">
               DEMO LOCAL · No autentica operadores ni sincroniza cambios con Supabase.
-            </div>
-          )}
-          {!demoModeEnabled && supabaseConfigured && (
-            <div role="status" className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-950">
-              <strong>Persistencia parcial:</strong> tickets, mensajes y pagos usan servicios remotos. La configuración de organización, invitaciones, disponibilidad, dispositivos, sesiones, agentes IA y parte de la bitácora todavía no se sincronizan de forma completa con Supabase; esos cambios pueden quedar solo en este navegador.
             </div>
           )}
           {persistenceError && (
@@ -1072,12 +1080,12 @@ export function TechPortalView({
                 setActiveSection('tickets');
               }}
               onOpenNewTicketModal={() => setNewTicketModalOpen(true)}
-              onOpenPublicPortal={onOpenPublicPortal}
             />
           )}
 
           {activeSection === 'tickets' && (
             <TicketsInboxView
+              organizationId={activeOrg.id}
               tickets={orgTickets}
               messages={messages}
               aiAgents={orgAiAgents}
@@ -1094,7 +1102,10 @@ export function TechPortalView({
           )}
 
           {activeSection === 'devices' && (
-            <DevicesDirectoryView devices={orgDevices} />
+            <DevicesDirectoryView
+              organizationId={activeOrg.id}
+              devices={orgDevices}
+            />
           )}
 
           {activeSection === 'sessions' && (
@@ -1194,10 +1205,14 @@ export function TechPortalView({
             >
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 <div>
-                  <label className="block text-xs font-semibold text-[#0F172A] mb-1">
+                  <label
+                    htmlFor="qt-client-name"
+                    className="block text-xs font-semibold text-[#0F172A] mb-1"
+                  >
                     Cliente o empresa
                   </label>
                   <input
+                    id="qt-client-name"
                     type="text"
                     value={qtClientName}
                     onChange={(e) => setQtClientName(e.target.value)}
@@ -1206,10 +1221,14 @@ export function TechPortalView({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-[#0F172A] mb-1">
+                  <label
+                    htmlFor="qt-client-email"
+                    className="block text-xs font-semibold text-[#0F172A] mb-1"
+                  >
                     Correo de contacto
                   </label>
                   <input
+                    id="qt-client-email"
                     type="email"
                     value={qtClientEmail}
                     onChange={(e) => setQtClientEmail(e.target.value)}
@@ -1221,10 +1240,14 @@ export function TechPortalView({
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-[#0F172A] mb-1">
+                  <label
+                    htmlFor="qt-category"
+                    className="block text-xs font-semibold text-[#0F172A] mb-1"
+                  >
                     Categoría
                   </label>
                   <select
+                    id="qt-category"
                     value={qtCategory}
                     onChange={(e) =>
                       setQtCategory(e.target.value as IssueCategory)
@@ -1240,10 +1263,14 @@ export function TechPortalView({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-[#0F172A] mb-1">
+                  <label
+                    htmlFor="qt-os"
+                    className="block text-xs font-semibold text-[#0F172A] mb-1"
+                  >
                     Sistema Operativo
                   </label>
                   <select
+                    id="qt-os"
                     value={qtOs}
                     onChange={(e) =>
                       setQtOs(e.target.value as OperatingSystem)
@@ -1256,10 +1283,14 @@ export function TechPortalView({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-[#0F172A] mb-1">
+                  <label
+                    htmlFor="qt-tier"
+                    className="block text-xs font-semibold text-[#0F172A] mb-1"
+                  >
                     Nivel / Tarifa
                   </label>
                   <select
+                    id="qt-tier"
                     value={qtTier}
                     onChange={(e) => setQtTier(e.target.value as ServiceTier)}
                     className="w-full rounded-xl border border-[#E5E9F2] bg-white px-2.5 py-2 text-xs text-[#0F172A]"
@@ -1274,10 +1305,14 @@ export function TechPortalView({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-[#0F172A] mb-1">
+                <label
+                  htmlFor="qt-description"
+                  className="block text-xs font-semibold text-[#0F172A] mb-1"
+                >
                   Descripción del problema
                 </label>
                 <textarea
+                  id="qt-description"
                   rows={3}
                   value={qtDescription}
                   onChange={(e) => setQtDescription(e.target.value)}

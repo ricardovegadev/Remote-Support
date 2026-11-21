@@ -37,6 +37,7 @@ import {
 import { TicketChatPanel } from '../TicketChatPanel';
 
 interface TicketsInboxViewProps {
+  organizationId?: string;
   tickets: SupportTicket[];
   messages: TicketMessage[];
   aiAgents?: AiAgentConfig[];
@@ -52,6 +53,7 @@ interface TicketsInboxViewProps {
 }
 
 export function TicketsInboxView({
+  organizationId,
   tickets,
   messages,
   aiAgents = [],
@@ -82,6 +84,14 @@ export function TicketsInboxView({
   useEffect(() => {
     setSearchQuery(externalSearchQuery);
   }, [externalSearchQuery]);
+
+  useEffect(() => {
+    setStatusFilter('all');
+    setSearchQuery(externalSearchQuery);
+    setConfirmingClosure(false);
+    setClosureError(null);
+    setAssistantData(null);
+  }, [organizationId]);
 
   const filteredTickets = tickets.filter((ticket) => {
     const matchesStatus =
@@ -285,7 +295,7 @@ export function TicketsInboxView({
 
         <div className="relative w-full xl:w-80">
           <Search
-            className="w-4 h-4 text-[#94A3B8] absolute left-3.5 top-1/2 -translate-y-1/2"
+            className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2"
             aria-hidden="true"
           />
           <input
@@ -293,7 +303,7 @@ export function TicketsInboxView({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Filtrar RS-XXXX, cliente o falla..."
-            className="w-full rounded-full border border-[#E5E9F2] bg-white pl-10 pr-4 py-2 text-xs text-[#0F172A] placeholder:text-[#94A3B8] focus:border-[#2563EB] focus:outline-none"
+            className="w-full rounded-full border border-[#E5E9F2] bg-white pl-10 pr-4 py-2 text-xs text-[#0F172A] placeholder:text-slate-500 focus:border-[#2563EB] focus:outline-none"
           />
         </div>
       </div>
@@ -522,27 +532,32 @@ export function TicketsInboxView({
                 </div>
 
                 {formattedRustDesk && rustdeskDeepLink ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleCopyRustDeskId(activeTicket.rustdesk_id ?? '')
-                      }
-                      className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-[#0F172A] bg-white hover:bg-slate-50 border border-[#BFDBFE] rounded-xl transition-colors whitespace-nowrap"
-                    >
-                      <Copy className="w-4 h-4 text-[#2563EB]" aria-hidden="true" />
-                      <span>
-                        {copiedId ? '¡Copiado!' : 'Copiar ID'}
-                      </span>
-                    </button>
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleCopyRustDeskId(activeTicket.rustdesk_id ?? '')
+                        }
+                        className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-[#0F172A] bg-white hover:bg-slate-50 border border-[#BFDBFE] rounded-xl transition-colors whitespace-nowrap"
+                      >
+                        <Copy className="w-4 h-4 text-[#2563EB]" aria-hidden="true" />
+                        <span>
+                          {copiedId ? '¡Copiado!' : 'Copiar ID'}
+                        </span>
+                      </button>
 
-                    <a
-                      href={rustdeskDeepLink}
-                      className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-xl transition-colors whitespace-nowrap shadow-sm"
-                    >
-                      <ExternalLink className="w-4 h-4" aria-hidden="true" />
-                      <span>Conectar vía RustDesk</span>
-                    </a>
+                      <a
+                        href={rustdeskDeepLink}
+                        className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-xl transition-colors whitespace-nowrap shadow-sm"
+                      >
+                        <ExternalLink className="w-4 h-4" aria-hidden="true" />
+                        <span>Conectar vía RustDesk</span>
+                      </a>
+                    </div>
+                    <p className="text-[11px] text-[#1E3A8A]">
+                      ¿Sin cliente RustDesk en este navegador o en móvil? Usa «Copiar ID» y pégalo manualmente en la app oficial de RustDesk.
+                    </p>
                   </div>
                 ) : (
                   <p className="text-xs text-[#1E3A8A]">
@@ -657,7 +672,7 @@ export function TicketsInboxView({
                       if (closureError) setClosureError(null);
                     }}
                     placeholder="Describe las acciones ejecutadas o genera el informe automático..."
-                    className="w-full rounded-xl border border-[#E5E9F2] px-3.5 py-2.5 text-xs text-[#0F172A] placeholder:text-[#94A3B8] focus:border-[#2563EB] focus:outline-none disabled:bg-[#F8FAFC] disabled:text-[#64748B]"
+                    className="w-full rounded-xl border border-[#E5E9F2] px-3.5 py-2.5 text-xs text-[#0F172A] placeholder:text-slate-500 focus:border-[#2563EB] focus:outline-none disabled:bg-[#F8FAFC] disabled:text-[#64748B]"
                   />
                   {closureError && (
                     <p

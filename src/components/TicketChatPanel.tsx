@@ -129,7 +129,7 @@ export function TicketChatPanel({
               ? 'Escribe un mensaje al técnico...'
               : 'Responder al cliente...'
           }
-          className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#2563EB] focus:outline-none disabled:bg-slate-100"
+          className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-900 placeholder:text-slate-500 focus:border-[#2563EB] focus:outline-none disabled:bg-slate-100"
         />
         <button
           type="submit"
