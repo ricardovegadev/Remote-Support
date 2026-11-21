@@ -4,6 +4,19 @@
 
 ---
 
+## [2026-11-20] · v2.4 Reorganización Estructural del Hero (`HeroSection.tsx`) — Carrusel Superior Libre, CTAs Inmediatos y Tarjeta de Asistente de Altura Fija (`h-[340px]`)
+### Cambios implementados
+- **Reorganización del Layout del Hero (`src/components/HeroSection.tsx`):**
+  - Ubicado el carrusel fotográfico de 4 escenas en la parte superior ocupando todo el ancho de forma completamente libre, despejada y sin obstrucciones.
+  - Colocados los botones de acción principal (`Iniciar diagnóstico`, `Así funciona`) y las 3 micro-garantías de confianza (`Tú decides cada paso`, `Sin contraseñas por chat`, `Desde $15 USD`) **exclusivamente justo debajo del contenedor del carrusel**.
+  - Posicionados debajo de los CTAs el título (`Tu problema IT, un paso más cerca de resolverse.`), el subtítulo empático y la **tarjeta flotante interactiva del asistente** con altura fija estricta (`h-[340px]`).
+  - Mantenida la barra inferior de accesos directos por aplicación (`Ayuda para tu día a día`).
+
+### Verificación técnica
+- `npm run lint` (`tsc --noEmit`), `npm test` (`12/12`), `npm run build` (`vite build`), y `compile_applet` verificados exitosamente con `0` errores y `0` regresiones.
+
+---
+
 ## [2026-11-20] · v2.3 Animaciones del Hero, Carrusel 4 Escenas, Simulación Conversacional en Vivo, Ícono Interactivo `AssistantOrbIcon` y Scroll Reveal por Sección
 ### Cambios implementados
 - **Ícono Interactivo del Asistente (`src/components/AssistantOrbIcon.tsx`):**

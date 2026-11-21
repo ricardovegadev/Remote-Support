@@ -200,6 +200,7 @@ export interface SupportTicket {
   claimed_at?: string | null;
   resolved_at?: string | null;
   created_at: string;
+  stripe_subscription_id?: string | null;
 }
 
 export interface UserAccountProfile {

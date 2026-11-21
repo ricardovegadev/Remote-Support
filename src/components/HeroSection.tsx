@@ -313,8 +313,8 @@ export function HeroSection({
       />
 
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 pb-10 sm:pt-14 sm:pb-12 lg:pt-16 lg:pb-14">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-10 items-center">
-          {/* Left Column: Staggered Luminous Entrance Choreography */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-start">
+          {/* Left Column: Title, Subtitle & Floating Assistant Card */}
           <div className="lg:col-span-5 space-y-6">
             <p
               className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#2563EB] animate-fade-up"
@@ -343,64 +343,152 @@ export function HeroSection({
               ticket a un especialista.
             </p>
 
-            {/* Primary & Secondary Warm CTAs */}
+            {/* Floating Animated Live Conversation Demo Card (Moved to the left under title & subtitle) */}
             <div
-              className="flex flex-wrap items-center gap-3 pt-1 animate-fade-up"
-              style={{ animationDelay: '240ms' }}
+              data-testid="hero-assistant-card"
+              onMouseEnter={() => setDemoPaused(true)}
+              onMouseLeave={() => setDemoPaused(false)}
+              onFocusCapture={() => setDemoPaused(true)}
+              onBlurCapture={() => setDemoPaused(false)}
+              className="w-full h-[340px] bg-white/95 backdrop-blur-md rounded-2xl shadow-xl shadow-slate-900/12 border border-slate-200/90 p-4 flex flex-col justify-between gap-3 z-10 transition-shadow duration-200 hover:shadow-2xl animate-fade-up"
+              style={{ animationDelay: '200ms' }}
             >
-              <button
-                type="button"
-                data-testid="hero-start-diagnostic"
-                onClick={onStartDiagnostic}
-                className="group inline-flex items-center justify-center gap-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white px-6 py-3.5 rounded-xl text-sm sm:text-base font-semibold shadow-lg shadow-blue-600/20 hover:shadow-xl hover:shadow-blue-600/25 hover:-translate-y-0.5 active:scale-[0.99] transition-all duration-150 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2563EB]"
-              >
-                <span>Iniciar diagnóstico</span>
-                <ArrowRight
-                  className="w-4 h-4 shrink-0 transition-transform duration-150 group-hover:translate-x-0.5"
-                  aria-hidden="true"
-                />
-              </button>
+              {/* Card Header with Custom Animated Interactive Assistant Orb */}
+              <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <AssistantOrbIcon
+                    size="sm"
+                    state={orbState}
+                    showOnlineBadge
+                  />
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-[#0B192C] leading-tight truncate">
+                      Asistente Remote 365
+                    </p>
+                    <p className="text-[11px] font-medium text-emerald-700 leading-tight mt-0.5 truncate">
+                      {simStage === 'typing'
+                        ? activeScenario.thinkingLabel
+                        : 'Disponible para ayudarte'}
+                    </p>
+                  </div>
+                </div>
 
-              <button
-                type="button"
-                onClick={handleScrollHowItWorks}
-                className="group inline-flex items-center justify-center gap-2 bg-white hover:bg-slate-50 text-[#0B192C] border border-slate-200 px-5 py-3.5 rounded-xl text-sm sm:text-base font-semibold shadow-xs hover:-translate-y-0.5 transition-all duration-150 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-400"
-              >
-                <span>Así funciona</span>
-                <ArrowDown
-                  className="w-4 h-4 text-slate-500 shrink-0 transition-transform duration-150 group-hover:translate-y-0.5"
-                  aria-hidden="true"
-                />
-              </button>
-            </div>
+                {/* Interactive Scenario Switcher Dots */}
+                <div
+                  role="tablist"
+                  aria-label="Escenarios de simulación de chat"
+                  className="flex items-center gap-1 shrink-0"
+                >
+                  {DEMO_SCENARIOS.map((sc, idx) => (
+                    <button
+                      key={sc.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={idx === scenarioIndex}
+                      aria-label={`Simular escenario ${sc.shortLabel}`}
+                      title={sc.shortLabel}
+                      onClick={() => handleSelectScenario(idx)}
+                      className={`h-1.5 rounded-full transition-all duration-300 ${
+                        idx === scenarioIndex
+                          ? 'w-4 bg-[#2563EB]'
+                          : 'w-1.5 bg-slate-300 hover:bg-slate-400'
+                      }`}
+                    />
+                  ))}
+                </div>
+              </div>
 
-            {/* Micro-guarantees of trust */}
-            <div
-              className="flex flex-wrap items-center gap-x-5 gap-y-2 pt-1 text-xs sm:text-[13px] font-medium text-slate-700 animate-fade-up"
-              style={{ animationDelay: '320ms' }}
-            >
-              <span className="inline-flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-[#10B981] shrink-0" aria-hidden="true" />
-                <span>Tú decides cada paso</span>
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-[#10B981] shrink-0" aria-hidden="true" />
-                <span>Sin contraseñas por chat</span>
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-[#10B981] shrink-0" aria-hidden="true" />
-                <span>Desde $15 USD · Si no lo resolvemos, no pagas</span>
-              </span>
+              {/* Live Animated Conversation Simulation Body */}
+              <div
+                key={activeScenario.id}
+                className="space-y-2.5 flex-1 flex flex-col justify-center py-1"
+              >
+                {/* Step 1: Client Message Bubble */}
+                <div className="flex justify-end animate-chat-pop">
+                  <div className="max-w-[92%] rounded-2xl rounded-tr-sm bg-[#2563EB] text-white px-3 py-2 text-xs leading-relaxed shadow-xs">
+                    {activeScenario.userMessage}
+                  </div>
+                </div>
+
+                {/* Step 2: Typing / Thinking Indicator */}
+                {simStage === 'typing' && (
+                  <div
+                    data-testid="hero-demo-typing"
+                    className="flex justify-start animate-chat-pop"
+                  >
+                    <div className="rounded-2xl rounded-tl-sm bg-[#F1F5F9] border border-slate-200/70 px-3.5 py-2.5 inline-flex items-center gap-1.5">
+                      <span
+                        className="w-1.5 h-1.5 rounded-full bg-[#2563EB] animate-typing-dot"
+                        style={{ animationDelay: '0ms' }}
+                      />
+                      <span
+                        className="w-1.5 h-1.5 rounded-full bg-[#2563EB] animate-typing-dot"
+                        style={{ animationDelay: '160ms' }}
+                      />
+                      <span
+                        className="w-1.5 h-1.5 rounded-full bg-[#2563EB] animate-typing-dot"
+                        style={{ animationDelay: '320ms' }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Step 3: Assistant Guided Reply Bubble */}
+                {(simStage === 'reply' || simStage === 'actions') && (
+                  <div className="flex justify-start animate-chat-pop">
+                    <div className="max-w-[96%] rounded-2xl rounded-tl-sm bg-[#F1F5F9] text-[#0B192C] px-3 py-2 text-xs leading-relaxed border border-slate-200/60">
+                      {activeScenario.assistantReply}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Step 4: Clickable 1-Click Quick-Reply Buttons */}
+              <div
+                className={`pt-1 space-y-1.5 transition-all duration-300 ${
+                  simStage === 'actions'
+                    ? 'opacity-100 translate-y-0'
+                    : 'opacity-40 translate-y-1'
+                }`}
+              >
+                <div className="grid grid-cols-2 gap-1.5">
+                  {activeScenario.replies.map((reply) => (
+                    <button
+                      key={reply.label}
+                      type="button"
+                      data-testid={reply.testId}
+                      onClick={() =>
+                        triggerSymptom(reply.symptom, activeScenario.category)
+                      }
+                      className="px-2.5 py-2 rounded-xl bg-white hover:bg-blue-50 border border-slate-200 hover:border-blue-300 text-[11px] font-semibold text-[#0B192C] hover:text-[#1D4ED8] transition-colors text-center truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+                    >
+                      {reply.label}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  data-testid="hero-chat-reply-custom"
+                  onClick={onStartDiagnostic}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 hover:bg-blue-50/70 border border-dashed border-slate-300 hover:border-blue-300 text-[11px] font-medium text-slate-600 hover:text-[#1D4ED8] transition-colors flex items-center justify-between focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+                >
+                  <span>Escribir mi problema...</span>
+                  <ArrowRight
+                    className="w-3.5 h-3.5 text-[#2563EB] shrink-0"
+                    aria-hidden="true"
+                  />
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* Right Column: Working 4-Slide Photo Carousel + Animated Floating Live Demo Card */}
+          {/* Right Column: 4-Slide Photo Carousel (Completely free and unobstructed) */}
           <div
             className="lg:col-span-7 relative animate-fade-up"
             style={{ animationDelay: '140ms' }}
           >
             <div
-              className="relative sm:pr-12 lg:pr-16"
+              className="relative"
               onMouseEnter={() => setCarouselPaused(true)}
               onMouseLeave={() => setCarouselPaused(false)}
             >
@@ -435,7 +523,7 @@ export function HeroSection({
                   className="pointer-events-none absolute inset-x-0 bottom-0 h-32 z-[2] bg-gradient-to-t from-slate-950/45 via-slate-900/10 to-transparent"
                 />
 
-                {/* Previous / Next Carousel Controls (top-left, clear of right floating demo card) */}
+                {/* Previous / Next Carousel Controls */}
                 <div className="absolute top-3.5 left-3.5 z-[4] flex items-center gap-1.5">
                   <button
                     type="button"
@@ -473,7 +561,7 @@ export function HeroSection({
                   </div>
                 </div>
 
-                {/* Carousel Progress Capsule Dots (previous carousel style, clean bottom-right of image) */}
+                {/* Carousel Progress Capsule Dots */}
                 <div
                   role="tablist"
                   aria-label="Seleccionar escena del carrusel"
@@ -499,150 +587,51 @@ export function HeroSection({
                   })}
                 </div>
               </div>
+            </div>
 
-              {/* Floating Animated Live Conversation Demo Card */}
-              <div
-                data-testid="hero-assistant-card"
-                onMouseEnter={() => setDemoPaused(true)}
-                onMouseLeave={() => setDemoPaused(false)}
-                onFocusCapture={() => setDemoPaused(true)}
-                onBlurCapture={() => setDemoPaused(false)}
-                className="mt-4 sm:mt-0 sm:absolute sm:top-5 sm:right-0 sm:w-[285px] lg:w-[305px] min-h-[272px] bg-white/95 backdrop-blur-md rounded-2xl shadow-xl shadow-slate-900/12 border border-slate-200/90 p-4 flex flex-col justify-between gap-3 z-10 transition-shadow duration-200 hover:shadow-2xl"
-              >
-                {/* Card Header with Custom Animated Interactive Assistant Orb */}
-                <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <AssistantOrbIcon
-                      size="sm"
-                      state={orbState}
-                      showOnlineBadge
-                    />
-                    <div className="min-w-0">
-                      <p className="text-xs font-bold text-[#0B192C] leading-tight truncate">
-                        Asistente Remote 365
-                      </p>
-                      <p className="text-[11px] font-medium text-emerald-700 leading-tight mt-0.5 truncate">
-                        {simStage === 'typing'
-                          ? activeScenario.thinkingLabel
-                          : 'Disponible para ayudarte'}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Interactive Scenario Switcher Dots */}
-                  <div
-                    role="tablist"
-                    aria-label="Escenarios de simulación de chat"
-                    className="flex items-center gap-1 shrink-0"
-                  >
-                    {DEMO_SCENARIOS.map((sc, idx) => (
-                      <button
-                        key={sc.id}
-                        type="button"
-                        role="tab"
-                        aria-selected={idx === scenarioIndex}
-                        aria-label={`Simular escenario ${sc.shortLabel}`}
-                        title={sc.shortLabel}
-                        onClick={() => handleSelectScenario(idx)}
-                        className={`h-1.5 rounded-full transition-all duration-300 ${
-                          idx === scenarioIndex
-                            ? 'w-4 bg-[#2563EB]'
-                            : 'w-1.5 bg-slate-300 hover:bg-slate-400'
-                        }`}
-                      />
-                    ))}
-                  </div>
-                </div>
-
-                {/* Live Animated Conversation Simulation Body */}
-                <div
-                  key={activeScenario.id}
-                  className="space-y-2.5 flex-1 flex flex-col justify-center"
+            {/* CTAs and Trust Badges placed exclusively below the Carousel container */}
+            <div className="pt-2 space-y-4">
+              {/* Primary & Secondary Warm CTAs */}
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  data-testid="hero-start-diagnostic"
+                  onClick={onStartDiagnostic}
+                  className="group inline-flex items-center justify-center gap-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white px-6 py-3.5 rounded-xl text-sm sm:text-base font-semibold shadow-lg shadow-blue-600/20 hover:shadow-xl hover:shadow-blue-600/25 hover:-translate-y-0.5 active:scale-[0.99] transition-all duration-150 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2563EB]"
                 >
-                  {/* Step 1: Client Message Bubble */}
-                  <div className="flex justify-end animate-chat-pop">
-                    <div className="max-w-[92%] rounded-2xl rounded-tr-sm bg-[#2563EB] text-white px-3 py-2 text-xs leading-relaxed shadow-xs">
-                      {activeScenario.userMessage}
-                    </div>
-                  </div>
+                  <span>Iniciar diagnóstico</span>
+                  <ArrowRight
+                    className="w-4 h-4 shrink-0 transition-transform duration-150 group-hover:translate-x-0.5"
+                    aria-hidden="true"
+                  />
+                </button>
 
-                  {/* Step 2: Typing / Thinking Indicator */}
-                  {simStage === 'typing' && (
-                    <div
-                      data-testid="hero-demo-typing"
-                      className="flex justify-start animate-chat-pop"
-                    >
-                      <div className="rounded-2xl rounded-tl-sm bg-[#F1F5F9] border border-slate-200/70 px-3.5 py-2.5 inline-flex items-center gap-1.5">
-                        <span
-                          className="w-1.5 h-1.5 rounded-full bg-[#2563EB] animate-typing-dot"
-                          style={{ animationDelay: '0ms' }}
-                        />
-                        <span
-                          className="w-1.5 h-1.5 rounded-full bg-[#2563EB] animate-typing-dot"
-                          style={{ animationDelay: '160ms' }}
-                        />
-                        <span
-                          className="w-1.5 h-1.5 rounded-full bg-[#2563EB] animate-typing-dot"
-                          style={{ animationDelay: '320ms' }}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Step 3: Assistant Guided Reply Bubble */}
-                  {(simStage === 'reply' || simStage === 'actions') && (
-                    <div className="flex justify-start animate-chat-pop">
-                      <div className="max-w-[96%] rounded-2xl rounded-tl-sm bg-[#F1F5F9] text-[#0B192C] px-3 py-2 text-xs leading-relaxed border border-slate-200/60">
-                        {activeScenario.assistantReply}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Step 4: Clickable 1-Click Quick-Reply Buttons */}
-                <div
-                  className={`pt-1 space-y-1.5 transition-all duration-300 ${
-                    simStage === 'actions'
-                      ? 'opacity-100 translate-y-0'
-                      : 'opacity-40 translate-y-1'
-                  }`}
+                <button
+                  type="button"
+                  onClick={handleScrollHowItWorks}
+                  className="group inline-flex items-center justify-center gap-2 bg-white hover:bg-slate-50 text-[#0B192C] border border-slate-200 px-5 py-3.5 rounded-xl text-sm sm:text-base font-semibold shadow-xs hover:-translate-y-0.5 transition-all duration-150 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-400"
                 >
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {activeScenario.replies.map((reply) => (
-                      <button
-                        key={reply.label}
-                        type="button"
-                        data-testid={reply.testId}
-                        onClick={() =>
-                          triggerSymptom(reply.symptom, activeScenario.category)
-                        }
-                        className="px-2.5 py-2 rounded-xl bg-white hover:bg-blue-50 border border-slate-200 hover:border-blue-300 text-[11px] font-semibold text-[#0B192C] hover:text-[#1D4ED8] transition-colors text-center truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
-                      >
-                        {reply.label}
-                      </button>
-                    ))}
-                  </div>
-                  <button
-                    type="button"
-                    data-testid="hero-chat-reply-custom"
-                    onClick={onStartDiagnostic}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 hover:bg-blue-50/70 border border-dashed border-slate-300 hover:border-blue-300 text-[11px] font-medium text-slate-600 hover:text-[#1D4ED8] transition-colors flex items-center justify-between focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
-                  >
-                    <span>Escribir mi problema...</span>
-                    <ArrowRight
-                      className="w-3.5 h-3.5 text-[#2563EB] shrink-0"
-                      aria-hidden="true"
-                    />
-                  </button>
-                </div>
+                  <span>Así funciona</span>
+                  <ArrowDown
+                    className="w-4 h-4 text-slate-500 shrink-0 transition-transform duration-150 group-hover:translate-y-0.5"
+                    aria-hidden="true"
+                  />
+                </button>
               </div>
 
-              {/* Mobile-only compact trust caption */}
-              <div className="sm:hidden mt-3 flex items-center gap-2 rounded-xl bg-white border border-slate-200 px-3.5 py-2.5 text-xs text-slate-700">
-                <ShieldCheck className="w-4 h-4 text-[#2563EB] shrink-0" aria-hidden="true" />
-                <span>
-                  <strong className="text-[#0B192C]">{activeSlide.statusTitle}.</strong>{' '}
-                  {activeSlide.statusSub}.
+              {/* Micro-guarantees of trust */}
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs sm:text-[13px] font-medium text-slate-700">
+                <span className="inline-flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-[#10B981] shrink-0" aria-hidden="true" />
+                  <span>Tú decides cada paso</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-[#10B981] shrink-0" aria-hidden="true" />
+                  <span>Sin contraseñas por chat</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-[#10B981] shrink-0" aria-hidden="true" />
+                  <span>Desde $15 USD · Si no lo resolvemos, no pagas</span>
                 </span>
               </div>
             </div>

@@ -2223,7 +2223,7 @@ export const supportAdapter = {
   }): string {
     const sanitizeTicket = (ticket?: SupportTicket | null) => {
       if (!ticket) return null;
-      const { client_session_token: _sessionToken, payment_reference: _paymentReference, stripe_subscription_id: _subscriptionId, ...safeTicket } = ticket;
+      const { client_session_token: _sessionToken, payment_reference: _paymentReference, ...safeTicket } = ticket;
       return safeTicket;
     };
     const sanitizeMessages = (messages: TicketMessage[] = []) => messages.map((message) => {

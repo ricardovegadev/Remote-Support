@@ -9,8 +9,27 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PORT = Number(process.env.PORT || 3000);
+function parseCliArg(flag: string): string | null {
+  const args = process.argv.slice(2);
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === flag && args[i + 1]) return args[i + 1];
+    if (arg.startsWith(`${flag}=`)) return arg.slice(flag.length + 1);
+  }
+  return null;
+}
+
 const isProduction = process.env.NODE_ENV === 'production';
+const cliPortRaw = parseCliArg('--port');
+const cliPort = cliPortRaw ? Number(cliPortRaw) : NaN;
+const envPort = process.env.PORT ? Number(process.env.PORT) : NaN;
+const PORT =
+  Number.isFinite(cliPort) && cliPort > 0
+    ? cliPort
+    : isProduction && Number.isFinite(envPort) && envPort > 0
+      ? envPort
+      : 3000;
+const HOST = parseCliArg('--host') || '0.0.0.0';
 const paymentMode = process.env.PAYMENTS_MODE?.trim().toLowerCase() ?? 'live';
 
 function isSandboxPaymentsEnabled(): boolean {
@@ -1498,7 +1517,7 @@ async function startServer() {
               description: `Remote Support 365 · ${ticket.service_tier}`,
               amount: {
                 currency_code: 'USD',
-                value: safeAmount.toFixed(2),
+                value: amountUsd.toFixed(2),
               },
             },
           ],
@@ -1689,8 +1708,8 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Remote Support 365 server running on http://0.0.0.0:${PORT}`);
+  app.listen(PORT, HOST, () => {
+    console.log(`Remote Support 365 server running on http://${HOST}:${PORT}`);
   });
 }
 

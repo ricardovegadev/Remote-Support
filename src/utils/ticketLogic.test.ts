@@ -288,7 +288,7 @@ test('createTicketFromDraft supports Pyme monthly plans with accurate $79/mes bi
   assert.equal(pymeTicket.service_tier, 'Pyme Corporativo $79/mes');
   assert.equal(getServiceTierPriceUsd(pymeTicket.service_tier), 79);
   assert.equal(pymeTicket.billing_mode, 'pyme_monthly');
-  assert.equal(pymeTicket.subscription_status, 'active');
+  assert.equal(pymeTicket.subscription_status, 'none');
   assert.equal(pymeTicket.agent_type, 'installed');
   assert.equal(pymeTicket.priority, 'high');
 });

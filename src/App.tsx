@@ -875,7 +875,7 @@ export default function App() {
         user_profile: currentUser,
         organization: activeOrg,
         tickets: matchingUserTickets.map((ticket) => {
-          const { client_session_token: _sessionToken, payment_reference: _paymentReference, stripe_subscription_id: _subscriptionId, ...safeTicket } = ticket;
+          const { client_session_token: _sessionToken, payment_reference: _paymentReference, ...safeTicket } = ticket;
           return safeTicket;
         }),
         cookie_preferences: readCookieConsent(),
