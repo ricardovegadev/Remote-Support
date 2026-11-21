@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { GoogleGenAI, Type } from '@google/genai';
 import Stripe from 'stripe';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
@@ -19,7 +20,7 @@ function parseCliArg(flag: string): string | null {
   return null;
 }
 
-const isProduction = process.env.NODE_ENV === 'production';
+const isProduction = process.env.NODE_ENV === 'production' || Boolean(process.env.K_SERVICE);
 const cliPortRaw = parseCliArg('--port');
 const cliPort = cliPortRaw ? Number(cliPortRaw) : NaN;
 const envPort = process.env.PORT ? Number(process.env.PORT) : NaN;
@@ -68,6 +69,35 @@ function isLocalSandboxOnly(): boolean {
 
 function isValidTicketCode(value: unknown): value is string {
   return typeof value === 'string' && /^RS-[A-Z0-9]{4,12}$/i.test(value.trim());
+}
+
+const PUBLIC_ORGANIZATION_ID = '00000000-0000-4000-8000-000000000001';
+const PUBLIC_SERVICE_TIERS = new Set([
+  'Express $15',
+  'Optimización $29',
+  'Avanzado $39',
+  'Pyme Esencial $39/mes',
+  'Pyme Corporativo $79/mes',
+]);
+const PUBLIC_OPERATING_SYSTEMS = new Set(['Windows', 'Mac', 'Linux', 'Mobile']);
+const PUBLIC_CATEGORIES = new Set([
+  'Windows lento o bajo rendimiento', 'Aplicaciones que no arrancan',
+  'Pantallazos azules (BSOD)', 'Problemas de Wi-Fi o red',
+  'Errores de Microsoft 365 y Outlook', 'Configuración de impresoras',
+  'Eliminación de malware y virus', 'Recuperación de archivos',
+  'Actualizaciones de Windows', 'VPN y acceso remoto', 'Otro',
+]);
+
+function isAdultBirthDate(value: string): boolean {
+  const birthDate = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(birthDate.valueOf()) || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const today = new Date();
+  const threshold = new Date(Date.UTC(today.getUTCFullYear() - 18, today.getUTCMonth(), today.getUTCDate()));
+  return birthDate <= threshold;
+}
+
+function createPublicTicketCode(): string {
+  return `RS-${randomBytes(5).toString('hex').toUpperCase()}`;
 }
 
 type PayableTicket = {
@@ -683,6 +713,13 @@ async function startServer() {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    res.setHeader(
+      'Content-Security-Policy',
+      "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: https://*.supabase.co https://api.github.com https://generativelanguage.googleapis.com; frame-src https://checkout.stripe.com https://www.paypal.com https://www.sandbox.paypal.com"
+    );
+    if (isProduction) {
+      res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
     next();
   });
   app.use('/api/payments/stripe/webhook', express.raw({ type: 'application/json', limit: '1mb' }));
@@ -703,12 +740,77 @@ async function startServer() {
   });
 
   app.get('/api/health', (_req, res) => {
-    const client = getGeminiClient();
-    res.json({
-      ok: true,
-      geminiConfigured: Boolean(client),
-      geminiStatus: geminiKeyStatus,
-    });
+    res.json({ ok: true });
+  });
+
+  app.post('/api/tickets', createRateLimiter(8, 60_000), async (req, res) => {
+    if (!hasConfiguredSupabaseServer()) {
+      res.status(503).json({ success: false, error: 'El registro seguro de tickets no está configurado.' });
+      return;
+    }
+
+    const body = req.body ?? {};
+    const clientName = String(body.clientName ?? '').trim().slice(0, 120);
+    const clientEmail = String(body.clientEmail ?? '').trim().toLowerCase().slice(0, 254);
+    const birthDate = String(body.birthDate ?? '').trim();
+    const termsAccepted = body.termsAccepted === true;
+    const category = String(body.category ?? '');
+    const osType = String(body.osType ?? '');
+    const serviceTier = String(body.serviceTier ?? '');
+    const billingMode = body.billingMode === 'pyme_monthly' ? 'pyme_monthly' : 'one_time';
+    const description = String(body.description ?? '').trim().slice(0, 4000);
+    const aiDiagnosis = body.aiDiagnosis && typeof body.aiDiagnosis === 'object' ? body.aiDiagnosis : {};
+    const aiSummary = String(body.aiSummary ?? '').trim().slice(0, 2000) || null;
+    const marketingOptIn = body.marketingOptIn === true;
+    const tierIsMonthly = serviceTier.startsWith('Pyme ');
+
+    if (
+      clientName.length < 2 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail) ||
+      !isAdultBirthDate(birthDate) || !termsAccepted || description.length < 8 ||
+      !PUBLIC_CATEGORIES.has(category) || !PUBLIC_OPERATING_SYSTEMS.has(osType) ||
+      !PUBLIC_SERVICE_TIERS.has(serviceTier) || tierIsMonthly !== (billingMode === 'pyme_monthly')
+    ) {
+      res.status(400).json({ success: false, error: 'Revisa los datos obligatorios, la mayoría de edad y las condiciones del servicio.' });
+      return;
+    }
+
+    const priority = serviceTier === 'Avanzado $39' || serviceTier === 'Pyme Corporativo $79/mes'
+      ? 'high' : serviceTier === 'Optimización $29' || serviceTier === 'Pyme Esencial $39/mes' ? 'medium' : 'low';
+    const supabase = getSupabaseAdmin();
+    const ticket = {
+      id: randomUUID(),
+      ticket_code: createPublicTicketCode(),
+      organization_id: PUBLIC_ORGANIZATION_ID,
+      organization_name: 'Remote Support 365',
+      category,
+      client_name: clientName,
+      client_email: clientEmail,
+      client_birth_date: birthDate,
+      is_adult_verified: true,
+      terms_accepted_at: new Date().toISOString(),
+      terms_version: 'v1.0-2026',
+      marketing_opt_in: marketingOptIn,
+      billing_mode: billingMode,
+      subscription_status: 'none',
+      os_type: osType,
+      service_tier: serviceTier,
+      priority,
+      problem_description: description,
+      ai_diagnosis: aiDiagnosis,
+      ai_diagnosis_summary: aiSummary,
+      client_session_token: randomBytes(32).toString('hex'),
+      payment_status: 'pending',
+      status: 'waiting_payment',
+      agent_type: billingMode === 'pyme_monthly' ? 'installed' : 'temporary',
+      agent_downloaded: false,
+      consent_accepted: false,
+    };
+    const { data, error } = await supabase!.from('tickets').insert(ticket).select().single();
+    if (error || !data) {
+      res.status(500).json({ success: false, error: 'No fue posible crear el ticket de forma segura.' });
+      return;
+    }
+    res.status(201).json({ success: true, ticket: data });
   });
 
   app.get('/api/rustdesk/official-download', async (req, res) => {

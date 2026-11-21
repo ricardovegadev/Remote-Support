@@ -872,8 +872,8 @@ export function DiagnosticWizard({
                                   <strong className="font-mono tabular-nums text-[#0B192C]">
                                     ${activePrice} USD
                                   </strong>{' '}
-                                  <span className="text-emerald-700 font-medium">
-                                    · Si no lo resolvemos, no pagas
+                                  <span className="text-slate-500 font-medium">
+                                    · Revisa el alcance antes de confirmar
                                   </span>
                                 </p>
                               </div>

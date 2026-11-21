@@ -254,6 +254,7 @@ begin
   alter table public.tickets add column if not exists ai_diagnosis_summary text;
   alter table public.tickets add column if not exists client_birth_date date;
   alter table public.tickets add column if not exists is_adult_verified boolean not null default false;
+  alter table public.tickets alter column is_adult_verified set default false;
   alter table public.tickets add column if not exists terms_accepted_at timestamptz;
   alter table public.tickets add column if not exists terms_version text;
   alter table public.tickets add column if not exists marketing_opt_in boolean not null default false;
@@ -388,7 +389,7 @@ create or replace function public.audit_ticket_security_changes()
 returns trigger
 language plpgsql
 security definer
-set search_path = public
+set search_path = pg_catalog, public
 as $$
 begin
   if new.payment_status is distinct from old.payment_status
@@ -449,7 +450,7 @@ create or replace function public.claim_ticket_atomically(
 returns jsonb
 language plpgsql
 security definer
-set search_path = public
+set search_path = pg_catalog, public
 as $$
 declare
   v_ticket public.tickets%rowtype;
@@ -530,7 +531,7 @@ create or replace function public.update_ticket_as_staff(
 returns boolean
 language plpgsql
 security definer
-set search_path = public
+set search_path = pg_catalog, public
 as $$
 declare
   v_org_id uuid;
@@ -594,7 +595,7 @@ create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
 security definer
-set search_path = public
+set search_path = pg_catalog, public
 as $$
 begin
   insert into public.profiles (
@@ -634,7 +635,7 @@ returns boolean
 language sql
 stable
 security definer
-set search_path = public
+set search_path = pg_catalog, public
 as $$
   select exists (
     select 1
@@ -698,9 +699,35 @@ alter table public.remote_sessions enable row level security;
 alter table public.ai_agents_config enable row level security;
 alter table public.audit_logs enable row level security;
 
+-- Remove legacy permissive policies before installing the reviewed policy set.
+-- Old deployments used localized policy names which a list of known names missed.
+do $$
+declare p record;
+begin
+  for p in
+    select schemaname, tablename, policyname
+    from pg_policies
+    where schemaname = 'public'
+      and tablename in (
+        'organizations', 'profiles', 'organization_members', 'technician_profiles',
+        'tickets', 'ticket_messages', 'client_devices', 'remote_sessions',
+        'ai_agents_config', 'audit_logs'
+      )
+  loop
+    execute format('drop policy if exists %I on %I.%I', p.policyname, p.schemaname, p.tablename);
+  end loop;
+end $$;
+
+-- Revoke inherited/default API access; explicit grants below form the allowlist.
+revoke all on public.organizations, public.profiles, public.organization_members,
+  public.technician_profiles, public.tickets, public.ticket_messages,
+  public.client_devices, public.remote_sessions, public.ai_agents_config,
+  public.audit_logs from public, anon, authenticated;
+
 drop policy if exists "orgs_select_members" on public.organizations;
 create policy "orgs_select_members" on public.organizations
   for select to authenticated using (public.is_org_member(id));
+grant select, update on public.organizations to authenticated;
 
 drop policy if exists "profiles_self_select_update" on public.profiles;
 drop policy if exists "profiles_self_select" on public.profiles;
@@ -721,7 +748,7 @@ drop policy if exists "org_members_org_scoped" on public.organization_members;
 drop policy if exists "org_members_select_scoped" on public.organization_members;
 drop policy if exists "org_members_manage_admins" on public.organization_members;
 create or replace function public.is_org_admin(p_org_id uuid)
-returns boolean language sql stable security definer set search_path = public
+returns boolean language sql stable security definer set search_path = pg_catalog, public
 as $$
   select auth.uid() is not null and exists (
     select 1 from public.organization_members om
@@ -747,6 +774,7 @@ create policy "org_members_manage_admins" on public.organization_members
   for all to authenticated
   using (public.is_org_admin(organization_id))
   with check (public.is_org_admin(organization_id));
+grant select, insert, update, delete on public.organization_members to authenticated;
 
 drop policy if exists "tech_profiles_org_scoped" on public.technician_profiles;
 drop policy if exists "tech_profiles_select_scoped" on public.technician_profiles;
@@ -837,6 +865,7 @@ grant update (
 )
   on public.tickets to anon;
 revoke update on public.tickets from authenticated;
+alter table public.tickets alter column is_adult_verified set default false;
 
 drop policy if exists "ticket_messages_org_member_all" on public.ticket_messages;
 drop policy if exists "ticket_messages_org_member_select" on public.ticket_messages;

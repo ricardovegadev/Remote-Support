@@ -301,17 +301,6 @@ export function HeroSection({
       aria-labelledby="hero-heading"
       className="relative overflow-x-clip bg-gradient-to-b from-[#F4F7FB] via-white to-[#F8FAFC] border-b border-slate-200/80"
     >
-      {/* Animated luminous ambient washes */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute -top-24 left-1/4 w-[480px] h-[360px] rounded-full bg-blue-100/60 blur-3xl animate-ambient-drift"
-      />
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute top-10 right-0 w-[420px] h-[340px] rounded-full bg-emerald-50/80 blur-3xl animate-ambient-drift"
-        style={{ animationDelay: '-5s' }}
-      />
-
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 pb-10 sm:pt-14 sm:pb-12 lg:pt-16 lg:pb-14">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-start">
           {/* Left Column: Title, Subtitle & Floating Assistant Card */}
@@ -350,7 +339,7 @@ export function HeroSection({
               onMouseLeave={() => setDemoPaused(false)}
               onFocusCapture={() => setDemoPaused(true)}
               onBlurCapture={() => setDemoPaused(false)}
-              className="w-full h-[340px] bg-white/95 backdrop-blur-md rounded-2xl shadow-xl shadow-slate-900/12 border border-slate-200/90 p-4 flex flex-col justify-between gap-3 z-10 transition-shadow duration-200 hover:shadow-2xl animate-fade-up"
+              className="w-full min-h-[300px] bg-white rounded-2xl shadow-lg shadow-slate-900/10 border border-slate-200/90 p-4 flex flex-col justify-between gap-3 z-10 transition-shadow duration-200 hover:shadow-xl animate-fade-up"
               style={{ animationDelay: '200ms' }}
             >
               {/* Card Header with Custom Animated Interactive Assistant Orb */}
@@ -631,38 +620,38 @@ export function HeroSection({
                 </span>
                 <span className="inline-flex items-center gap-1.5">
                   <CheckCircle2 className="w-4 h-4 text-[#10B981] shrink-0" aria-hidden="true" />
-                  <span>Desde $15 USD · Si no lo resolvemos, no pagas</span>
+                  <span>Tarifas claras desde $15 USD</span>
                 </span>
               </div>
             </div>
-          </div>
-        </div>
 
-        {/* Bottom Strip: Daily Application Shortcuts Bar */}
-        <div
-          className="mt-10 pt-6 border-t border-slate-200/80 flex flex-col md:flex-row md:items-center justify-between gap-4 animate-fade-up"
-          style={{ animationDelay: '360ms' }}
-        >
-          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 whitespace-nowrap">
-            <Printer className="w-3.5 h-3.5 text-slate-400 hidden sm:block" aria-hidden="true" />
-            <span>Ayuda para tu día a día</span>
-          </div>
+            {/* Bottom Strip: Daily Application Shortcuts Bar */}
+            <div
+              className="mt-10 pt-6 border-t border-slate-200/80 flex flex-col items-start gap-4 animate-fade-up"
+              style={{ animationDelay: '360ms' }}
+            >
+              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 whitespace-nowrap">
+                <Printer className="w-3.5 h-3.5 text-slate-400 hidden sm:block" aria-hidden="true" />
+                <span>Ayuda para tu día a día</span>
+              </div>
 
-          <div
-            role="group"
-            aria-label="Accesos directos por aplicación"
-            className="flex flex-wrap items-center gap-2"
-          >
-            {DAILY_APP_SHORTCUTS.map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                onClick={() => triggerSymptom(item.symptom, item.category)}
-                className="inline-flex items-center gap-1.5 bg-white hover:bg-blue-50/80 border border-slate-200/90 hover:border-blue-300 text-slate-700 hover:text-[#1D4ED8] hover:-translate-y-0.5 px-3.5 py-2 rounded-xl text-xs font-medium shadow-xs transition-all duration-150 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+              <div
+                role="group"
+                aria-label="Accesos directos por aplicación"
+                className="flex flex-wrap items-center gap-2"
               >
-                <span>{item.label}</span>
-              </button>
-            ))}
+                {DAILY_APP_SHORTCUTS.map((item) => (
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() => triggerSymptom(item.symptom, item.category)}
+                    className="inline-flex items-center gap-1.5 bg-white hover:bg-blue-50/80 border border-slate-200/90 hover:border-blue-300 text-slate-700 hover:text-[#1D4ED8] hover:-translate-y-0.5 px-3.5 py-2 rounded-xl text-xs font-medium shadow-xs transition-all duration-150 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+                  >
+                    <span>{item.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </div>

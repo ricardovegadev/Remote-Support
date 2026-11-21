@@ -427,12 +427,6 @@ export function LandingSections({
           </ScrollReveal>
 
           <div className="relative pt-4">
-            {/* Desktop connecting line across the 3 medallions */}
-            <div
-              aria-hidden="true"
-              className="hidden md:block absolute top-11 left-[14%] right-[14%] h-[2px] bg-gradient-to-r from-[#2563EB]/25 via-[#2563EB]/50 to-[#10B981]/40"
-            />
-
             <div className="relative grid grid-cols-1 md:grid-cols-3 gap-6 lg:gap-8">
               {PROCESS_STEPS.map((step, index) => {
                 const StepIcon = step.icon;

@@ -809,6 +809,19 @@ function saveRoomToken(ticketCode: string, token: string): void {
   }
 }
 
+function removeRoomToken(ticketCode: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const raw = window.localStorage.getItem(ROOM_TOKENS_STORAGE_KEY);
+    if (!raw) return;
+    const map: Record<string, string> = JSON.parse(raw);
+    delete map[ticketCode.toUpperCase()];
+    window.localStorage.setItem(ROOM_TOKENS_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    // Ignore storage restriction errors
+  }
+}
+
 function getRoomToken(ticketCode: string): string | null {
   if (typeof window === 'undefined') return null;
   try {
@@ -1509,6 +1522,7 @@ export const supportAdapter = {
     ticket: SupportTicket,
     existing: SupportTicket[]
   ): Promise<AdapterResult<SupportTicket[]>> {
+    const provisionalTicketCode = ticket.ticket_code;
     saveRoomToken(ticket.ticket_code, ticket.client_session_token);
     const next = sortTicketsDeterministically([
       ticket,
@@ -1517,82 +1531,49 @@ export const supportAdapter = {
     let fallbackWarning: string | undefined;
 
     if (isSupabaseConfigured()) {
-      const supabase = getSupabaseClient();
-      if (!supabase) {
-        console.warn(
-          '[Supabase persistTicket] Cliente Supabase no inicializado; guardando ticket en respaldo local.'
-        );
-        markLocalFallbackTicket(ticket.id);
-        fallbackWarning =
-          'El ticket se creó en modo respaldo local (pendiente de sincronizar con Supabase).';
-      } else {
-        try {
-          const insertPayload: Record<string, unknown> = {
-            id: ticket.id,
-            ticket_code: ticket.ticket_code,
-            organization_id: ticket.organization_id,
-            organization_name: ticket.organization_name,
+      try {
+        const response = await fetch('/api/tickets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            clientName: ticket.client_name,
+            clientEmail: ticket.client_email,
+            birthDate: ticket.client_birth_date,
+            termsAccepted: Boolean(ticket.terms_accepted_at),
+            marketingOptIn: ticket.marketing_opt_in,
             category: ticket.category,
-            client_name: ticket.client_name,
-            client_email: ticket.client_email,
-            client_birth_date: ticket.client_birth_date ?? null,
-            is_adult_verified: Boolean(ticket.is_adult_verified),
-            terms_accepted_at: ticket.terms_accepted_at ?? null,
-            terms_version: ticket.terms_version ?? null,
-            marketing_opt_in: Boolean(ticket.marketing_opt_in),
-            billing_mode: ticket.billing_mode ?? 'one_time',
-            os_type: ticket.os_type,
-            service_tier: ticket.service_tier,
-            priority: ticket.priority,
-            problem_description: ticket.problem_description,
-            ai_diagnosis: ticket.ai_diagnosis ?? {},
-            ai_diagnosis_summary: ticket.ai_diagnosis_summary,
-            client_session_token: ticket.client_session_token,
-            created_at: ticket.created_at,
+            osType: ticket.os_type,
+            serviceTier: ticket.service_tier,
+            billingMode: ticket.billing_mode,
+            description: ticket.problem_description,
+            aiDiagnosis: ticket.ai_diagnosis,
+            aiSummary: ticket.ai_diagnosis_summary,
+          }),
+        });
+        const payload = (await response.json().catch(() => null)) as {
+          success?: boolean;
+          error?: string;
+          ticket?: SupportTicket;
+        } | null;
+        if (!response.ok || !payload?.success || !payload.ticket) {
+          removeRoomToken(provisionalTicketCode);
+          return {
+            ok: false,
+            data: existing,
+            error: payload?.error ?? 'No se pudo emitir el ticket de forma segura.',
           };
-
-          let insertError: unknown = null;
-          const strippedColumns: string[] = [];
-
-          for (let attempt = 0; attempt < 20; attempt += 1) {
-            const { error } = await supabase.from('tickets').insert(insertPayload);
-            if (!error) {
-              insertError = null;
-              break;
-            }
-            const missingCol = extractMissingSchemaColumn(error);
-            if (missingCol && missingCol in insertPayload) {
-              delete insertPayload[missingCol];
-              strippedColumns.push(missingCol);
-              continue;
-            }
-            insertError = error;
-            break;
-          }
-
-          if (strippedColumns.length > 0 && !insertError) {
-            console.info(
-              '[Supabase persistTicket] Insertado en Supabase omitiendo columnas aún no presentes en caché de esquema:',
-              strippedColumns.join(', ')
-            );
-          }
-
-          if (insertError) {
-            console.warn(
-              '[Supabase persistTicket] Fallback local activado en public.tickets:',
-              insertError
-            );
-            markLocalFallbackTicket(ticket.id);
-            fallbackWarning = `Ticket generado en respaldo local (Supabase reportó: ${formatSupabaseError(insertError)}).`;
-          }
-        } catch (error) {
-          console.warn(
-            '[Supabase persistTicket] Excepción en Supabase; activando fallback local:',
-            error
-          );
-          markLocalFallbackTicket(ticket.id);
-          fallbackWarning = `Ticket generado en respaldo local (${formatSupabaseError(error)}).`;
         }
+        Object.assign(ticket, payload.ticket);
+        removeRoomToken(provisionalTicketCode);
+        next.splice(0, 1, ticket);
+        saveRoomToken(ticket.ticket_code, ticket.client_session_token);
+      } catch {
+        removeRoomToken(provisionalTicketCode);
+        return {
+          ok: false,
+          data: existing,
+          error: 'No se pudo conectar con el registro seguro. Intenta nuevamente.',
+        };
       }
     }
 

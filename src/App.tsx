@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { AuthModal } from './components/AuthModal';
-import { ConnectionRoom } from './components/ConnectionRoom';
 import { CookieConsentBanner } from './components/CookieConsentBanner';
 import {
   DiagnosticWizard,
@@ -11,7 +10,6 @@ import { Header } from './components/Header';
 import { HeroSection } from './components/HeroSection';
 import { LandingSections } from './components/LandingSections';
 import { LegalDocsModal, type LegalDocTab } from './components/LegalDocsModal';
-import { TechPortalView } from './components/TechPortalView';
 import { getSupabaseClient, isSupabaseConfigured } from './lib/supabaseClient';
 import {
   haveRecordsChanged,
@@ -45,6 +43,21 @@ import {
   INITIAL_WIZARD_DRAFT,
   parseAppRoute,
 } from './utils/ticketLogic';
+
+const ConnectionRoom = lazy(() =>
+  import('./components/ConnectionRoom').then((module) => ({ default: module.ConnectionRoom }))
+);
+const TechPortalView = lazy(() =>
+  import('./components/TechPortalView').then((module) => ({ default: module.TechPortalView }))
+);
+
+function ViewLoading() {
+  return (
+    <section className="min-h-[45vh] grid place-items-center bg-[#F8FAFC] px-4">
+      <p className="text-sm font-medium text-slate-600">Cargando tu espacio de trabajo…</p>
+    </section>
+  );
+}
 
 function triggerJsonDownload(filename: string, jsonText: string) {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -963,7 +976,8 @@ export default function App() {
   if (activeView === 'tech_portal') {
     return (
       <>
-        <TechPortalView
+        <Suspense fallback={<ViewLoading />}>
+          <TechPortalView
           organizations={organizations}
           activeOrgId={activeOrgId}
           onSelectOrg={setActiveOrgId}
@@ -1003,7 +1017,8 @@ export default function App() {
           onOpenLegalDoc={setLegalDocTab}
           onExportOrgData={handleExportUserOrOrgData}
           onDeletePersonalData={handleDeletePersonalData}
-        />
+          />
+        </Suspense>
         {sharedOverlays}
       </>
     );
@@ -1073,7 +1088,8 @@ export default function App() {
 
         {activeView === 'connection_room' && (
           activeTicket ? (
-            <ConnectionRoom
+            <Suspense fallback={<ViewLoading />}>
+              <ConnectionRoom
               ticket={activeTicket}
               messages={activeTicketMessages}
               relayDomain={
@@ -1092,7 +1108,8 @@ export default function App() {
               onOpenLegalDoc={setLegalDocTab}
               onExportClientData={handleExportClientData}
               onAnonymizeClientData={handleAnonymizeClientData}
-            />
+              />
+            </Suspense>
           ) : isHydratingSession ? (
             <section className="py-16 bg-[#F8FAFC] min-h-[calc(100vh-12rem)]">
               <div className="max-w-xl mx-auto px-4 text-center space-y-3 bg-white border border-slate-200 rounded-xl p-8">
