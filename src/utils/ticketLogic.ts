@@ -55,7 +55,7 @@ export const SERVICE_TIER_OPTIONS: Array<{
     regularPriceUsd: 25,
     discountLabel: '40% OFF',
     eyebrow: 'Sesión Única Temporal · Inicio Rápido',
-    summary: 'Asistencia puntual rápida para incidencias cotidianas en minutos.',
+    summary: 'Asistencia puntual para incidencias cotidianas, sujeta a disponibilidad.',
     features: [
       'Impresoras y escáneres',
       'Correo Outlook / Microsoft 365',
@@ -112,7 +112,7 @@ export const PYME_PLANS: Array<{
     features: [
       'Hasta 5 equipos protegidos en red',
       'Agente RustDesk instalado desatendido',
-      'Informes técnicos mensuales verificados',
+      'Acceso a la información técnica disponible en la plataforma',
     ],
   },
   {
@@ -121,12 +121,12 @@ export const PYME_PLANS: Array<{
     serviceTier: 'Pyme Corporativo $79/mes',
     priceUsd: 79,
     regularPriceUsd: 99,
-    devicesLimit: 'Hasta 15 equipos · SLA < 10 min',
-    summary: 'Cobertura continua 365 días con técnico asignado y SLA menor a 10 minutos.',
+    devicesLimit: 'Hasta 15 equipos',
+    summary: 'Plan mensual para equipos de una pequeña empresa; alcance sujeto a configuración.',
     features: [
-      'Sesiones remotas ilimitadas para hasta 15 equipos',
-      'Monitoreo preventivo y respaldos críticos',
-      'Consolidación de auditoría e historial IA',
+      'Atención de solicitudes según condiciones del plan',
+      'Herramientas disponibles según la configuración contratada',
+      'Consulta de registros disponibles en la plataforma',
     ],
   },
 ];
@@ -142,7 +142,7 @@ export const SAAS_PLANS = [
     features: [
       'Sala de conexión white-label (/sesion/RS-XXXX)',
       'Despacho manual y cola en tiempo real',
-      '1,500 créditos mensuales de AI Receptionist',
+      'Herramientas de mesa de ayuda disponibles en la plataforma',
     ],
   },
   {
@@ -151,12 +151,12 @@ export const SAAS_PLANS = [
     priceUsd: 49,
     regularPriceUsd: 79,
     seats: 'Hasta 10 técnicos + Freelancers',
-    summary: 'Escala con colaboradores externos y automatización AI Workforce 365.',
+    summary: 'Plan de crecimiento con funciones de soporte y automatización sujetas a disponibilidad.',
     highlighted: true,
     features: [
-      'Asignación atómica sin colisiones (RPC)',
-      'Gestión de Freelancers con tarifa por ticket',
-      '6 agentes AI Workforce 365 + 5,000 créditos',
+      'Asignación de tickets según las funciones disponibles',
+      'Gestión de miembros de la organización',
+      'Herramientas de automatización sujetas a disponibilidad',
     ],
   },
   {
@@ -164,12 +164,12 @@ export const SAAS_PLANS = [
     name: 'Scale Marketplace',
     priceUsd: 79,
     regularPriceUsd: 119,
-    seats: 'Ilimitado + Red Global de Desborde',
-    summary: 'Operación multiempresa con relay RustDesk dedicado y red global.',
+    seats: 'Capacidad y alcance por confirmar',
+    summary: 'Funciones avanzadas sujetas a configuración y acuerdo de servicio.',
     features: [
-      'Red Global de Desborde 24/7 bajo demanda',
-      'Relay RustDesk propio y auditoría inmutable',
-      '15,000 créditos AI Workforce + SLA corporativo',
+      'Funciones de gestión multiempresa sujetas a disponibilidad del producto',
+      'Integraciones remotas según configuración contratada',
+      'Volumen y tiempos de atención por definir en el acuerdo de servicio',
     ],
   },
 ];
@@ -555,9 +555,17 @@ export function deriveInitialDiagnosisSummary(
   }"`;
 }
 
-export function generateSessionToken(randomFn: () => number = Math.random): string {
-  const partA = generateUuid(randomFn).replace(/-/g, '');
-  const partB = Math.floor(randomFn() * 0xffffffff)
+export function generateSessionToken(randomFn?: () => number): string {
+  if (!randomFn) {
+    if (typeof globalThis.crypto?.getRandomValues !== 'function') {
+      throw new Error('No hay un generador criptográfico seguro para crear la sesión.');
+    }
+    const bytes = globalThis.crypto.getRandomValues(new Uint8Array(32));
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  }
+  const random = randomFn;
+  const partA = generateUuid(random).replace(/-/g, '');
+  const partB = Math.floor(random() * 0xffffffff)
     .toString(16)
     .padStart(8, '0');
   return `${partA}${partB}`;
@@ -617,7 +625,7 @@ export function createTicketFromDraft(
     terms_accepted_at: draft.termsAccepted ? created_at : null,
     terms_version: draft.termsAccepted ? LEGAL_TERMS_VERSION : null,
     marketing_opt_in: Boolean(draft.marketingOptIn),
-    subscription_status: billingMode === 'pyme_monthly' ? 'active' : 'none',
+    subscription_status: 'none',
     anonymized_at: null,
     rustdesk_id: null,
     agent_type: billingMode === 'pyme_monthly' ? 'installed' : 'temporary',

@@ -12,7 +12,6 @@ import {
   Loader2,
   Lock,
   MonitorCheck,
-  RotateCcw,
   Share2,
   ShieldCheck,
   Trash2,
@@ -26,11 +25,9 @@ import type {
 import {
   formatRustDeskId,
   getAgentDownloadMeta,
-  getDiscountPercent,
   getPaymentStatusLabel,
   getRustDeskInstallerUrl,
   getServiceTierPriceUsd,
-  getServiceTierRegularPriceUsd,
   getTicketStatusLabel,
   normalizeRustDeskId,
   validateRustDeskId,
@@ -62,7 +59,6 @@ interface ConnectionRoomProps {
   onOpenLegalDoc?: (tab: LegalDocTab) => void;
   onExportClientData?: (ticketId: string) => void;
   onAnonymizeClientData?: (ticketId: string) => Promise<void>;
-  onCancelTicketSubscription?: (ticketId: string) => Promise<void>;
 }
 
 function isEmbeddedInIframe(): boolean {
@@ -88,7 +84,6 @@ export function ConnectionRoom({
   onOpenLegalDoc,
   onExportClientData,
   onAnonymizeClientData,
-  onCancelTicketSubscription,
 }: ConnectionRoomProps) {
   const [rustdeskInput, setRustdeskInput] = useState(
     ticket.rustdesk_id ? formatRustDeskId(ticket.rustdesk_id) : ''
@@ -123,12 +118,10 @@ export function ConnectionRoom({
     installerEnv
   );
   const tierPrice = getServiceTierPriceUsd(ticket.service_tier);
-  const tierRegularPrice = getServiceTierRegularPriceUsd(ticket.service_tier);
-  const tierSavingsUsd = Math.max(0, tierRegularPrice - tierPrice);
-  const tierDiscountPct = getDiscountPercent(tierPrice, tierRegularPrice);
+  const isMonthlyPlan =
+    ticket.billing_mode === 'pyme_monthly' || ticket.service_tier.startsWith('Pyme ');
 
   const [addonPerformance, setAddonPerformance] = useState(false);
-  const [addonBackup, setAddonBackup] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [paymentSuccessNotice, setPaymentSuccessNotice] = useState<string | null>(null);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
@@ -185,7 +178,7 @@ export function ConnectionRoom({
         setProcessingMethod('stripe');
         setPaymentError(null);
         void fetch(
-          `/api/payments/stripe/verify-session?session_id=${encodeURIComponent(sessionId)}`
+          `/api/payments/stripe/verify-session?session_id=${encodeURIComponent(sessionId)}&ticket_code=${encodeURIComponent(ticket.ticket_code)}`
         )
           .then(async (res) => {
             const data = (await res.json()) as {
@@ -222,7 +215,7 @@ export function ConnectionRoom({
         void fetch('/api/payments/paypal/capture-order', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orderId: paypalToken }),
+          body: JSON.stringify({ orderId: paypalToken, ticketCode: ticket.ticket_code }),
         })
           .then(async (res) => {
             const data = (await res.json()) as {
@@ -266,8 +259,8 @@ export function ConnectionRoom({
     if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
         await navigator.share({
-          title: 'Remote Support 365 — $5 USD de descuento adicional',
-          text: 'Repara tu equipo en minutos por acceso remoto seguro desde $15 USD (antes $25).',
+          title: 'Remote Support 365 — soporte técnico remoto',
+          text: 'Conoce las tarifas vigentes y solicita soporte técnico remoto para tu equipo.',
           url: shareUrl,
         });
         setReferralCopied(true);
@@ -299,7 +292,7 @@ export function ConnectionRoom({
         const res = await fetch(
           `/api/payments/stripe/verify-session?session_id=${encodeURIComponent(
             pendingExternalCheckout.sessionId
-          )}`
+          )}&ticket_code=${encodeURIComponent(ticket.ticket_code)}`
         );
         const data = (await res.json()) as {
           verified?: boolean;
@@ -328,7 +321,7 @@ export function ConnectionRoom({
         const res = await fetch('/api/payments/paypal/capture-order', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orderId: pendingExternalCheckout.orderId }),
+          body: JSON.stringify({ orderId: pendingExternalCheckout.orderId, ticketCode: ticket.ticket_code }),
         });
         const data = (await res.json()) as {
           verified?: boolean;
@@ -365,18 +358,15 @@ export function ConnectionRoom({
     setProcessingMethod(isDirectCard ? 'card' : method);
     setPaymentError(null);
     try {
-      const totalAmount =
-        tierPrice + (addonPerformance ? 12 : 0) + (addonBackup ? 9 : 0);
-
       if (method === 'stripe' || method === 'google_pay') {
         const res = await fetch('/api/payments/stripe/create-session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            amountUsd: totalAmount,
             ticketCode: ticket.ticket_code,
-            customerEmail: ticket.client_email,
-            serviceLabel: `${ticket.service_tier} (${ticket.category})`,
+            sessionToken: ticket.client_session_token,
+            serviceTier: ticket.service_tier,
+            addonPerformance,
           }),
         });
         const data = (await res.json()) as {
@@ -440,9 +430,10 @@ export function ConnectionRoom({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            amountUsd: totalAmount,
             ticketCode: ticket.ticket_code,
-            serviceLabel: `${ticket.service_tier} (${ticket.category})`,
+            sessionToken: ticket.client_session_token,
+            serviceTier: ticket.service_tier,
+            addonPerformance,
           }),
         });
         const orderData = (await orderRes.json()) as {
@@ -486,7 +477,7 @@ export function ConnectionRoom({
         const captureRes = await fetch('/api/payments/paypal/capture-order', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orderId: orderData.orderId }),
+          body: JSON.stringify({ orderId: orderData.orderId, ticketCode: ticket.ticket_code }),
         });
         const captureData = (await captureRes.json()) as {
           success?: boolean;
@@ -640,16 +631,12 @@ export function ConnectionRoom({
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 shrink-0">
               <div className="bg-[#0F172A] border border-slate-700 rounded-lg px-5 py-3">
                 <p className="text-xs text-slate-400">
-                  Tarifa del servicio{' '}
-                  <span className="font-mono text-[#10B981]">(-{tierDiscountPct}%)</span>
+                  Tarifa vigente
                 </p>
                 <div className="flex items-baseline gap-2 mt-0.5">
                   <p className="font-mono tabular-nums text-xl font-bold text-[#10B981]">
                     ${tierPrice} USD
                   </p>
-                  <span className="font-mono tabular-nums text-xs text-slate-400 line-through">
-                    ${tierRegularPrice}
-                  </span>
                 </div>
               </div>
             </div>
@@ -671,7 +658,7 @@ export function ConnectionRoom({
                   {ticket.organization_name}
                 </p>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Operación auditada y sesión cifrada TLS 1.3
+                  Se registran eventos técnicos seleccionados de esta operación.
                 </p>
               </div>
             </div>
@@ -689,7 +676,7 @@ export function ConnectionRoom({
                 <p className="text-xs text-slate-400 mt-0.5">
                   {ticket.assigned_technician_name
                     ? `${ticket.assigned_technician_specialty ?? 'Especialista Verificado'} · Asignación atómica confirmada`
-                    : 'El primer especialista certificado disponible tomará tu ticket'}
+                    : 'El primer especialista disponible tomará tu ticket'}
                 </p>
               </div>
             </div>
@@ -717,7 +704,7 @@ export function ConnectionRoom({
               <div className="text-left md:text-right bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 shrink-0">
                 <p className="text-[11px] text-slate-600 font-medium">Total a pagar</p>
                 <p className="font-mono tabular-nums text-2xl font-bold text-emerald-700">
-                  USD ${(tierPrice + (addonPerformance ? 12 : 0) + (addonBackup ? 9 : 0)).toFixed(2)}
+                  USD ${(tierPrice + (addonPerformance ? 12 : 0)).toFixed(2)}
                 </p>
               </div>
             </div>
@@ -733,22 +720,11 @@ export function ConnectionRoom({
                     <div className="flex justify-between items-center py-1.5 border-b border-slate-200/70">
                       <span>{ticket.service_tier} ({ticket.category})</span>
                       <div className="flex items-baseline gap-2 font-mono tabular-nums">
-                        <span className="text-[11px] text-slate-400 line-through">
-                          ${tierRegularPrice}.00
-                        </span>
                         <span className="font-semibold text-[#0B192C]">
                           ${tierPrice}.00 USD
                         </span>
                       </div>
                     </div>
-                    {tierSavingsUsd > 0 && (
-                      <div className="flex justify-between items-center py-1 text-emerald-700">
-                        <span>Descuento de lanzamiento (-{tierDiscountPct}%)</span>
-                        <span className="font-mono tabular-nums font-semibold">
-                          -${tierSavingsUsd}.00 USD
-                        </span>
-                      </div>
-                    )}
                     {tierPrice === 15 && (
                       <div className="flex items-start gap-2.5 pt-2">
                         <input
@@ -764,38 +740,23 @@ export function ConnectionRoom({
                         </label>
                       </div>
                     )}
-                    <div className="flex items-start gap-2.5 pt-2">
-                      <input
-                        type="checkbox"
-                        id="addon-backup"
-                        checked={addonBackup}
-                        onChange={(e) => setAddonBackup(e.target.checked)}
-                        className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB]"
-                      />
-                      <label htmlFor="addon-backup" className="cursor-pointer text-xs text-slate-700 leading-snug">
-                        <strong>+ Respaldo preventivo en la nube</strong> (+ $9.00 USD)
-                        <span className="block text-[11px] text-slate-500">Copia cifrada de documentos críticos antes de la intervención.</span>
-                      </label>
-                    </div>
                   </div>
                 </div>
 
-                <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-950 space-y-1.5">
-                  <p className="font-semibold">Garantía de Satisfacción 100%</p>
-                  <p className="text-emerald-900 leading-relaxed">
-                    Si el técnico no logra resolver tu incidencia en la sesión remota, se emite un reembolso total inmediato a tu método de pago.
+                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 space-y-1.5">
+                  <p className="font-semibold">Revisa los términos antes de pagar</p>
+                  <p className="leading-relaxed">
+                    El pago se procesa antes de la asistencia. La elegibilidad y el procedimiento de reembolso se rigen por los términos aplicables; esta sala no emite reembolsos automáticamente.
                   </p>
                 </div>
 
                 {ticket.billing_mode === 'pyme_monthly' && (
                   <div className="p-4 rounded-xl bg-blue-50 border border-blue-200 text-xs text-blue-950 space-y-1">
                     <p className="font-semibold">
-                      Aviso de Renovación Automática Mensual
+                      Información de facturación mensual
                     </p>
                     <p className="leading-relaxed">
-                      Al confirmar este plan Pyme autorizas la renovación mensual automática.
-                      Puedes cancelarla en <strong>1 clic sin penalizaciones</strong> desde esta
-                      misma sala antes del siguiente ciclo.
+                      Este plan tiene facturación mensual recurrente. Para gestionar la renovación o cancelación, contacta a soporte antes del siguiente ciclo; la cancelación automática desde esta sala aún no está disponible.
                     </p>
                   </div>
                 )}
@@ -898,23 +859,24 @@ export function ConnectionRoom({
                           )}
                         </button>
 
-                        {/* 2. PayPal Button */}
-                        <button
-                          type="button"
-                          disabled={isProcessingPayment}
-                          onClick={() => void handleExecutePayment('paypal')}
-                          aria-label="Pagar con PayPal"
-                          className="w-full h-12 bg-[#FFC439] hover:bg-[#F5BA2E] text-[#003087] font-bold rounded-lg flex items-center justify-center gap-2 transition-all shadow-xs disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
-                        >
-                          {processingMethod === 'paypal' ? (
-                            <>
-                              <Loader2 className="w-4 h-4 animate-spin text-[#003087]" aria-hidden="true" />
-                              <span className="text-xs font-bold">Abriendo PayPal...</span>
-                            </>
-                          ) : (
-                            <PayPalLogo />
-                          )}
-                        </button>
+                        {!isMonthlyPlan && (
+                          <button
+                            type="button"
+                            disabled={isProcessingPayment}
+                            onClick={() => void handleExecutePayment('paypal')}
+                            aria-label="Pagar con PayPal"
+                            className="w-full h-12 bg-[#FFC439] hover:bg-[#F5BA2E] text-[#003087] font-bold rounded-lg flex items-center justify-center gap-2 transition-all shadow-xs disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+                          >
+                            {processingMethod === 'paypal' ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin text-[#003087]" aria-hidden="true" />
+                                <span className="text-xs font-bold">Abriendo PayPal...</span>
+                              </>
+                            ) : (
+                              <PayPalLogo />
+                            )}
+                          </button>
+                        )}
 
                         {/* 3. Stripe Express Button */}
                         <button
@@ -985,7 +947,7 @@ export function ConnectionRoom({
                           <>
                             <Lock className="w-4 h-4" aria-hidden="true" />
                             <span>
-                              {`Pagar con tarjeta · $${(tierPrice + (addonPerformance ? 12 : 0) + (addonBackup ? 9 : 0)).toFixed(2)} USD`}
+                              {`Pagar con tarjeta · $${(tierPrice + (addonPerformance ? 12 : 0)).toFixed(2)} USD`}
                             </span>
                           </>
                         )}
@@ -1301,16 +1263,15 @@ export function ConnectionRoom({
             <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs font-semibold text-emerald-700">
-                  Comparte y regala $5 USD de descuento
+                  Comparte Remote Support 365
                 </p>
                 <span className="font-mono text-[11px] text-slate-600">
                   ?ref={ticket.ticket_code}
                 </span>
               </div>
               <p className="text-xs text-slate-600 leading-relaxed">
-                ¿Tu equipo volvió a funcionar? Envía tu enlace de invitado a un colega o
-                familiar: recibe <strong>$5 USD adicionales</strong> sobre la tarifa de
-                lanzamiento y tú ganas crédito para tu próxima sesión.
+                ¿Necesitas soporte técnico? Comparte el enlace para que un colega o familiar
+                conozca el servicio y sus tarifas vigentes.
               </p>
               <button
                 type="button"
@@ -1350,8 +1311,9 @@ export function ConnectionRoom({
               </div>
 
               <p className="text-xs text-slate-600 leading-relaxed">
-                Retención estándar: 12 meses para tickets y chats (24 meses auditoría). Tus
-                datos no se usan para entrenar IA pública.
+                No hay una política automática de eliminación configurada en esta versión.
+                Algunas funciones de IA procesan texto del incidente mediante un proveedor
+                externo; evita incluir credenciales o datos innecesarios.
               </p>
 
               <div className="space-y-2">
@@ -1369,31 +1331,6 @@ export function ConnectionRoom({
                     <Download className="w-3.5 h-3.5 text-[#2563EB]" aria-hidden="true" />
                     <span>Descargar mis datos (JSON)</span>
                   </button>
-                )}
-
-                {ticket.subscription_status === 'active' &&
-                  onCancelTicketSubscription && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void onCancelTicketSubscription(ticket.id).then(() => {
-                          setPrivacyActionNotice(
-                            'Renovación automática cancelada en 1 clic sin penalizaciones.'
-                          );
-                        });
-                      }}
-                      className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-lg transition-colors"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-                      <span>Cancelar renovación automática</span>
-                    </button>
-                  )}
-
-                {ticket.subscription_status === 'canceled' && (
-                  <p className="text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
-                    Renovación automática cancelada. Conservas acceso hasta finalizar el
-                    periodo vigente.
-                  </p>
                 )}
 
                 {onAnonymizeClientData && !ticket.anonymized_at && (

@@ -34,9 +34,7 @@ import type {
 } from '../types/support';
 import {
   deriveInitialDiagnosisSummary,
-  getDiscountPercent,
   getServiceTierPriceUsd,
-  getServiceTierRegularPriceUsd,
   getSuggestedTierForCategory,
   PYME_PLANS,
   SERVICE_TIER_OPTIONS,
@@ -214,8 +212,6 @@ export function DiagnosticWizard({
   const isStage2 = draft.step === 3;
   const activeTier = draft.serviceTier;
   const activePrice = getServiceTierPriceUsd(activeTier);
-  const activeRegularPrice = getServiceTierRegularPriceUsd(activeTier);
-  const activeDiscount = getDiscountPercent(activePrice, activeRegularPrice);
   const isPymeMonthly = draft.billingMode === 'pyme_monthly';
   const currentOs: OperatingSystem = draft.operatingSystem ?? 'Windows';
 
@@ -267,7 +263,7 @@ export function DiagnosticWizard({
         {
           id: `a-${Date.now() + 1}`,
           sender: 'assistant',
-          text: 'Gracias por compartir el detalle. Puedes pasar directamente al siguiente paso para revisar la tarifa fija y conectar con un especialista certificado.',
+          text: 'Gracias por compartir el detalle. Puedes pasar directamente al siguiente paso para revisar la tarifa fija y solicitar atención especializada.',
         },
       ]);
       return;
@@ -1012,9 +1008,6 @@ export function DiagnosticWizard({
                         {isPymeMonthly ? 'Plan mensual Pyme' : activeTier}
                       </p>
                       <div className="flex items-baseline md:justify-end gap-2 mt-0.5">
-                        <span className="font-mono tabular-nums text-xs text-slate-400 line-through">
-                          ${activeRegularPrice}
-                        </span>
                         <span className="font-mono tabular-nums text-2xl font-bold text-[#0B192C]">
                           ${activePrice}
                           <span className="text-xs font-semibold text-slate-600">
@@ -1022,8 +1015,8 @@ export function DiagnosticWizard({
                           </span>
                         </span>
                       </div>
-                      <p className="text-[11px] font-semibold text-emerald-700 mt-0.5">
-                        {activeDiscount}% OFF · Si no lo resolvemos, no pagas
+                      <p className="text-[11px] font-semibold text-slate-600 mt-0.5">
+                        Pago seguro · consulta términos y política de reembolso
                       </p>
                     </div>
                   </div>
@@ -1032,8 +1025,8 @@ export function DiagnosticWizard({
                   <div className="pt-3 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-2">
                     <span className="text-xs text-slate-600">
                       {isPymeMonthly
-                        ? 'Renovación mensual con cancelación en 1 clic sin penalizaciones.'
-                        : 'Tarifa única por incidente resuelto. Pago seguro con Stripe, PayPal o G Pay.'}
+                        ? 'Facturación mensual recurrente según los términos del plan.'
+                        : 'Pago único por solicitud. Pago seguro con Stripe, PayPal o G Pay.'}
                     </span>
                     <button
                       type="button"

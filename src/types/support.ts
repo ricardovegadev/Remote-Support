@@ -179,7 +179,7 @@ export interface SupportTicket {
   terms_accepted_at?: string | null;
   terms_version?: string | null;
   marketing_opt_in?: boolean;
-  subscription_status?: 'none' | 'active' | 'canceled';
+  subscription_status?: 'none' | 'active' | 'past_due' | 'canceled';
   anonymized_at?: string | null;
   /** 9-digit RustDesk ID entered by the client inside `/sesion/[ticket_code]` */
   rustdesk_id: string | null;
@@ -188,6 +188,8 @@ export interface SupportTicket {
   consent_accepted: boolean;
   consent_accepted_at: string | null;
   payment_status: PaymentStatus;
+  payment_reference?: string | null;
+  paid_at?: string | null;
   status: TicketStatus;
   assigned_to: string | null;
   assigned_technician_id: string | null;
@@ -211,7 +213,7 @@ export interface UserAccountProfile {
   terms_version: string;
   marketing_opt_in: boolean;
   subscription_plan?: string | null;
-  subscription_status?: 'none' | 'active' | 'canceled';
+  subscription_status?: 'none' | 'active' | 'past_due' | 'canceled';
   created_at: string;
 }
 

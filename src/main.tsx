@@ -50,13 +50,13 @@ function renderGlobalErrorOverlay(details: ErrorDetails): void {
 
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.textContent = 'Limpiar caché local y recargar';
+  btn.textContent = 'Restablecer datos locales de Remote Support 365';
   btn.style.cssText =
     'background:#DC2626;color:#FFFFFF;border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:600;cursor:pointer;';
   btn.onclick = () => {
     try {
-      window.localStorage.clear();
-      window.sessionStorage.clear();
+      clearRemoteSupportLocalState();
+      // Non-Remote Support session data is preserved.
     } catch {
       // Ignore storage errors
     }
@@ -108,6 +108,17 @@ interface ErrorBoundaryState {
   errorMessage: string | null;
 }
 
+function clearRemoteSupportLocalState(): void {
+  for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+    const key = window.localStorage.key(index);
+    if (key?.startsWith('rs365_')) window.localStorage.removeItem(key);
+  }
+  for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
+    const key = window.sessionStorage.key(index);
+    if (key?.startsWith('rs365_')) window.sessionStorage.removeItem(key);
+  }
+}
+
 export class ErrorBoundary extends Component<
   ErrorBoundaryProps,
   ErrorBoundaryState
@@ -131,8 +142,8 @@ export class ErrorBoundary extends Component<
 
   handleClearAndReload = (): void => {
     try {
-      window.localStorage.clear();
-      window.sessionStorage.clear();
+      clearRemoteSupportLocalState();
+      // Non-Remote Support session data is preserved.
     } catch {
       // Ignore storage errors
     }

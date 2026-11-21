@@ -34,8 +34,6 @@ import {
 import type { IssueCategory, ServiceTier } from '../types/support';
 import {
   CATEGORY_OPTIONS,
-  FIXED_SERVICE_PRICE_USD,
-  getDiscountPercent,
   isValidEmail,
   PYME_PLANS,
   SAAS_PLANS,
@@ -126,7 +124,7 @@ const PROCESS_STEPS = [
     num: '01',
     eyebrow: '01. Triaje AI Receptionist',
     title: 'Pre-diagnóstico y Ticket único',
-    description: `Describe la falla en Windows, Mac, Linux o Mobile, responde 3 preguntas rápidas de IA y obtén tu código de sesión (ej. RS-1027) desde $${FIXED_SERVICE_PRICE_USD} USD (antes $25 USD).`,
+    description: `Describe la falla en Windows, Mac, Linux o Mobile, responde preguntas de triaje y revisa la tarifa del servicio antes de crear tu solicitud.`,
     icon: Bot,
   },
   {
@@ -156,9 +154,9 @@ const OPERATIONAL_PILLARS = [
     iconBg: 'bg-blue-50 text-[#2563EB] border-blue-200/70',
   },
   {
-    title: 'Especialistas Certificados',
+    title: 'Atención por especialidad',
     description:
-      'Atención por técnicos con competencias Microsoft, CompTIA e ITIL según tu categoría.',
+      'El caso se deriva según la categoría y la disponibilidad del equipo de soporte.',
     icon: ShieldCheck,
     iconBg: 'bg-emerald-50 text-emerald-700 border-emerald-200/70',
   },
@@ -170,16 +168,16 @@ const OPERATIONAL_PILLARS = [
     iconBg: 'bg-indigo-50 text-indigo-700 border-indigo-200/70',
   },
   {
-    title: 'Cobertura 24/7 Particulares y Pyme',
+    title: 'Solicitudes online 24/7',
     description:
-      'Atención continua bajo demanda por incidente o cobertura mensual para equipos de empresa.',
+      'Puedes iniciar una solicitud en cualquier momento. La asignación de técnico depende de la disponibilidad.',
     icon: Clock,
     iconBg: 'bg-amber-50 text-amber-700 border-amber-200/70',
   },
   {
-    title: 'Seguimiento y SLA Visible',
+    title: 'Seguimiento del ticket',
     description:
-      'Niveles Express $15, Optimización $29, Avanzado $39 y respuesta objetivo Pyme < 15 / < 10 min.',
+      'Consulta el estado disponible de tu solicitud y su información de servicio.',
     icon: Activity,
     iconBg: 'bg-cyan-50 text-cyan-700 border-cyan-200/70',
   },
@@ -208,8 +206,8 @@ export function LandingSections({
     if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
         await navigator.share({
-          title: 'Remote Support 365 — Hasta 40% OFF + $5 USD de crédito',
-          text: 'Soluciona tu PC o impresora en minutos por acceso remoto seguro desde $15 USD (antes $25 USD).',
+          title: 'Remote Support 365 — soporte técnico remoto',
+          text: 'Inicia una solicitud de soporte remoto y revisa el precio del servicio antes de continuar.',
           url: baseUrl,
         });
         setReferralCopied(true);
@@ -470,7 +468,7 @@ export function LandingSections({
           <div className="mt-12 pt-10 border-t border-slate-200">
             <ScrollReveal>
               <p className="text-xs font-semibold text-[#0B1528] uppercase tracking-wider mb-5">
-                Arquitectura Operativa y Garantías de Servicio
+                Información operativa
               </p>
             </ScrollReveal>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -607,14 +605,14 @@ export function LandingSections({
             <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
               <div className="max-w-2xl">
                 <p className="text-xs font-semibold text-emerald-700 tracking-wide">
-                  Tarifas de Lanzamiento · Hasta 40% de descuento vs. visita presencial
+                  Tarifas vigentes · precios visibles antes de contratar
                 </p>
                 <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#0B1528] mt-1">
-                  Precios claros sin letra chica: si no lo resolvemos, no pagas
+                  Precios y política de reembolso
                 </h2>
                 <p className="text-sm text-slate-600 mt-2 leading-relaxed">
-                  Compara el precio regular frente a nuestra tarifa promocional por
-                  incidente, cobertura mensual Pyme o plataforma SaaS para tu firma TI.
+                  Consulta el precio, alcance, renovación y condiciones del servicio puntual,
+                  los planes Pyme y la plataforma SaaS antes de contratar.
                 </p>
               </div>
 
@@ -667,21 +665,16 @@ export function LandingSections({
               <div>
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-6">
                   <p className="text-xs font-semibold text-slate-700">
-                    Asistencia Puntual Bajo Demanda (Pago único por incidente resuelto)
+                    Asistencia puntual bajo demanda (pago único por solicitud)
                   </p>
                   <p className="text-xs font-semibold text-emerald-700">
-                    Precios especiales de lanzamiento aplicados automáticamente hoy
+                    Tarifas vigentes; consulta condiciones antes de pagar
                   </p>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch pt-2">
                   {SERVICE_TIER_OPTIONS.map((tier) => {
                     const isFeatured = Boolean(tier.recommended);
-                    const savingsUsd = tier.regularPriceUsd - tier.priceUsd;
-                    const discountPct = getDiscountPercent(
-                      tier.priceUsd,
-                      tier.regularPriceUsd
-                    );
                     const tierName = tier.id.split(' $')[0];
                     const isExpress = tier.id === 'Express $15';
                     const TierIcon = isFeatured
@@ -706,7 +699,7 @@ export function LandingSections({
                               className="absolute inset-x-0 top-0 h-1.5 rounded-t-xl bg-gradient-to-r from-[#2563EB] via-blue-400 to-[#10B981]"
                             />
                             <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-3.5 py-1 rounded-full bg-gradient-to-r from-[#2563EB] to-[#1D4ED8] text-white text-[11px] font-bold tracking-wide whitespace-nowrap shadow-md shadow-blue-600/25">
-                              ★ MÁS ELEGIDO · AHORRA ${savingsUsd} USD
+                              ★ RECOMENDADO
                             </div>
                           </>
                         )}
@@ -737,20 +730,7 @@ export function LandingSections({
                             {tierName}
                           </h3>
 
-                          {/* Anchor pricing: strikethrough regular price + discount + big promotional price */}
                           <div className="mt-4 space-y-1">
-                            <div className="flex items-center gap-2 text-xs font-mono tabular-nums">
-                              <span className="line-through text-slate-500">
-                                Antes ${tier.regularPriceUsd} USD
-                              </span>
-                              <span aria-hidden="true" className="text-slate-400">
-                                ·
-                              </span>
-                              <span className="font-semibold text-emerald-700">
-                                Ahorras ${savingsUsd} (-{discountPct}%)
-                              </span>
-                            </div>
-
                             <p className="font-mono tabular-nums text-3xl font-bold tracking-tight text-[#0B1528]">
                               ${tier.priceUsd} USD{' '}
                               <span className="text-xs font-sans font-normal text-slate-600">
@@ -801,16 +781,11 @@ export function LandingSections({
               {/* Row 2: Pyme Monthly Plans ($39 / $79) */}
               <div>
                 <p className="text-xs font-semibold text-slate-600 mb-4">
-                  Planes Pyme Mensuales (Acceso desatendido y SLA garantizado)
+                  Planes Pyme Mensuales (acceso desatendido y tiempos objetivo)
                 </p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {PYME_PLANS.map((plan, index) => {
                     const isPrimary = index === 1;
-                    const savingsUsd = plan.regularPriceUsd - plan.priceUsd;
-                    const discountPct = getDiscountPercent(
-                      plan.priceUsd,
-                      plan.regularPriceUsd
-                    );
                     return (
                       <div
                         key={plan.id}
@@ -832,13 +807,6 @@ export function LandingSections({
                               <Building2 className="w-3.5 h-3.5" aria-hidden="true" />
                               <span>{plan.devicesLimit}</span>
                             </span>
-                            <span
-                              className={`font-mono tabular-nums text-[11px] font-semibold ${
-                                isPrimary ? 'text-[#10B981]' : 'text-emerald-700'
-                              }`}
-                            >
-                              Ahorras ${savingsUsd}/mes (-{discountPct}%)
-                            </span>
                           </div>
 
                           <h3 className="text-xl font-bold mt-3">{plan.name}</h3>
@@ -855,13 +823,6 @@ export function LandingSections({
                                 / mes
                               </span>
                             </p>
-                            <span
-                              className={`font-mono tabular-nums text-xs line-through ${
-                                isPrimary ? 'text-slate-300' : 'text-slate-500'
-                              }`}
-                            >
-                              Antes ${plan.regularPriceUsd} USD
-                            </span>
                           </div>
 
                           <p
@@ -876,8 +837,7 @@ export function LandingSections({
                               isPrimary ? 'text-emerald-300' : 'text-emerald-700'
                             }`}
                           >
-                            Renovación automática mensual · Cancelación en 1 clic sin
-                            penalizaciones
+                            Facturación mensual recurrente según los términos del plan
                           </p>
                           <ul
                             className={`mt-4 pt-4 border-t space-y-2 text-xs ${
@@ -958,7 +918,7 @@ export function LandingSections({
                       <strong className="text-[#0B1528]">
                         Métodos de pago seguros aceptados:
                       </strong>{' '}
-                      cifrado SSL + garantía de reembolso total e informe técnico IA.
+                      conexión cifrada mediante la plataforma de asistencia e informe técnico.
                     </span>
                   </div>
                   <div
@@ -989,38 +949,34 @@ export function LandingSections({
                         className="w-4 h-4 text-[#10B981] shrink-0"
                         aria-hidden="true"
                       />
-                      <span>Por qué cuesta hasta 75% menos que un técnico a domicilio</span>
+                      <span>Asistencia técnica a distancia</span>
                     </div>
                     <h3 className="text-base font-semibold text-[#0B1528]">
-                      Sin traslado, sin esperar 48 horas y garantía total de reembolso
+                      Solicita soporte remoto y consulta las condiciones antes de pagar
                     </h3>
                     <p className="text-xs text-slate-600 leading-relaxed">
-                      Una visita presencial tradicional cuesta entre $60 y $90 USD y tarda
-                      días. Aquí obtienes pre-diagnóstico IA gratuito y pagas desde{' '}
-                      <strong className="text-[#0B1528]">$15 USD</strong>{' '}
-                      <span className="line-through text-slate-400">($25)</span> solo si
-                      confirmas la conexión con el especialista.
+                      Describe el problema en el diagnóstico guiado. La tarifa del servicio se muestra antes de iniciar el checkout y el pago se procesa antes de la asistencia.
                     </p>
                   </div>
 
                   <div className="grid grid-cols-3 gap-4 pt-3 border-t border-slate-200 text-xs">
                     <div>
                       <p className="font-mono tabular-nums font-bold text-[#0B1528]">
-                        $60–$90
+                        Tarifa publicada
                       </p>
-                      <p className="text-slate-600 mt-0.5">Visita técnica tradicional</p>
+                      <p className="text-slate-600 mt-0.5">Consulta antes de contratar</p>
                     </div>
                     <div>
                       <p className="font-mono tabular-nums font-bold text-emerald-700">
                         $15 USD
                       </p>
-                      <p className="text-slate-600 mt-0.5">Soporte remoto inmediato</p>
+                      <p className="text-slate-600 mt-0.5">Tarifa Express publicada</p>
                     </div>
                     <div>
                       <p className="font-mono tabular-nums font-bold text-[#2563EB]">
-                        100%
+                        3 pasos
                       </p>
-                      <p className="text-slate-600 mt-0.5">Resuelto o reembolso total</p>
+                      <p className="text-slate-600 mt-0.5">Diagnóstico guiado</p>
                     </div>
                   </div>
                 </div>
@@ -1028,15 +984,14 @@ export function LandingSections({
                 <div className="lg:col-span-5 rounded-2xl border border-[#0B1528] bg-[#0B1528] text-white p-6 flex flex-col justify-between gap-4">
                   <div className="space-y-2">
                     <p className="text-xs font-semibold text-[#10B981]">
-                      Invita a un colega o familiar · Regala $5 USD
+                      Comparte el servicio
                     </p>
                     <h3 className="text-base font-semibold text-white">
                       ¿Conoces a alguien con el equipo lento o sin impresora?
                     </h3>
                     <p className="text-xs text-slate-300 leading-relaxed">
-                      Comparte tu enlace de invitado: recibe un descuento adicional de{' '}
-                      <strong className="text-white">$5 USD</strong> sobre la tarifa de
-                      lanzamiento y acumulas crédito para tu próxima asistencia.
+                      Comparte el enlace para que un colega o familiar conozca el servicio y
+                      las tarifas vigentes.
                     </p>
                   </div>
 
@@ -1054,7 +1009,7 @@ export function LandingSections({
                       ) : (
                         <>
                           <Share2 className="w-4 h-4" aria-hidden="true" />
-                          <span>Compartir descuento de $5 USD</span>
+                          <span>Compartir enlace</span>
                         </>
                       )}
                     </button>
@@ -1081,11 +1036,6 @@ export function LandingSections({
             >
               <div className="lg:col-span-8 grid grid-cols-1 md:grid-cols-3 gap-5">
                 {SAAS_PLANS.map((plan) => {
-                  const savingsUsd = plan.regularPriceUsd - plan.priceUsd;
-                  const discountPct = getDiscountPercent(
-                    plan.priceUsd,
-                    plan.regularPriceUsd
-                  );
                   return (
                     <div
                       key={plan.id}
@@ -1114,25 +1064,6 @@ export function LandingSections({
                         <h3 className="text-lg font-semibold mt-1">{plan.name}</h3>
 
                         <div className="mt-3 space-y-1">
-                          <div className="flex items-center gap-2 text-xs font-mono tabular-nums">
-                            <span
-                              className={`line-through ${
-                                plan.highlighted ? 'text-slate-300' : 'text-slate-500'
-                              }`}
-                            >
-                              Antes ${plan.regularPriceUsd} USD
-                            </span>
-                            <span aria-hidden="true" className="text-slate-500">
-                              ·
-                            </span>
-                            <span
-                              className={`font-semibold ${
-                                plan.highlighted ? 'text-[#10B981]' : 'text-emerald-700'
-                              }`}
-                            >
-                              -${savingsUsd} (-{discountPct}%)
-                            </span>
-                          </div>
 
                           <p className="font-mono tabular-nums text-2xl font-bold">
                             ${plan.priceUsd} USD{' '}
@@ -1158,7 +1089,7 @@ export function LandingSections({
                             plan.highlighted ? 'text-emerald-300' : 'text-emerald-700'
                           }`}
                         >
-                          Renovación automática mensual · Cancela en 1 clic
+                          Facturación mensual recurrente según los términos del plan
                         </p>
 
                         <ul

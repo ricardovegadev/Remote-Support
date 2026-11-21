@@ -4,12 +4,158 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GoogleGenAI, Type } from '@google/genai';
 import Stripe from 'stripe';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT || 3000);
 const isProduction = process.env.NODE_ENV === 'production';
+const paymentMode = process.env.PAYMENTS_MODE?.trim().toLowerCase() ?? 'live';
+
+function isSandboxPaymentsEnabled(): boolean {
+  return !isProduction && paymentMode === 'sandbox';
+}
+
+let adminSupabase: SupabaseClient | null | undefined;
+function getSupabaseAdmin(): SupabaseClient | null {
+  if (adminSupabase !== undefined) return adminSupabase;
+  const url = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (
+    !url || !serviceKey || url.includes('YOUR_PROJECT_ID') ||
+    serviceKey.includes('YOUR_')
+  ) {
+    adminSupabase = null;
+    return null;
+  }
+  adminSupabase = createClient(url, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  return adminSupabase;
+}
+
+function hasConfiguredSupabaseServer(): boolean {
+  const url = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  return Boolean(url && !url.includes('YOUR_PROJECT_ID') && serviceKey && !serviceKey.includes('YOUR_'));
+}
+
+function isLocalSandboxOnly(): boolean {
+  const url = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
+  const hasPublicUrl = Boolean(url && !url.includes('YOUR_PROJECT_ID'));
+  return isSandboxPaymentsEnabled() && !hasPublicUrl;
+}
+
+function isValidTicketCode(value: unknown): value is string {
+  return typeof value === 'string' && /^RS-[A-Z0-9]{4,12}$/i.test(value.trim());
+}
+
+type PayableTicket = {
+  id: string;
+  ticket_code: string;
+  client_email: string;
+  client_session_token: string;
+  service_tier: string;
+  billing_mode: 'one_time' | 'pyme_monthly';
+  payment_status: 'pending' | 'paid' | 'refunded';
+  status: 'waiting_payment' | 'ready_to_connect' | 'in_progress' | 'resolved';
+  payment_reference: string | null;
+  stripe_subscription_id: string | null;
+};
+
+async function loadPayableTicket(ticketCode: string): Promise<PayableTicket | null> {
+  const supabase = getSupabaseAdmin();
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from('tickets')
+    .select('id,ticket_code,client_email,client_session_token,service_tier,billing_mode,payment_status,status,payment_reference,stripe_subscription_id')
+    .eq('ticket_code', ticketCode)
+    .maybeSingle();
+  if (error) throw new Error('No se pudo validar el ticket en el servidor.');
+  return (data as PayableTicket | null) ?? null;
+}
+
+function getAuthoritativePrice(
+  ticket: Pick<PayableTicket, 'service_tier' | 'billing_mode'>,
+  addonPerformance = false,
+  addonBackup = false
+): number | null {
+  const basePrices: Record<string, number> = {
+    'Express $15': 15,
+    'Optimización $29': 29,
+    'Avanzado $39': 39,
+    'Pyme Esencial $39/mes': 39,
+    'Pyme Corporativo $79/mes': 79,
+  };
+  const base = basePrices[ticket.service_tier];
+  if (!base) return null;
+  if (addonBackup) return null;
+  const isMonthly = ticket.service_tier.startsWith('Pyme ');
+  if ((ticket.billing_mode === 'pyme_monthly') !== isMonthly) return null;
+  if (isMonthly && (addonPerformance || addonBackup)) return null;
+  return base + (addonPerformance ? 12 : 0) + (addonBackup ? 9 : 0);
+}
+
+async function markTicketPaid(
+  ticket: PayableTicket,
+  paymentReference: string,
+  stripeSubscriptionId: string | null = null
+): Promise<boolean> {
+  const supabase = getSupabaseAdmin();
+  if (!supabase) return false;
+  if (ticket.payment_status === 'paid') {
+    return ticket.payment_reference === paymentReference;
+  }
+  if (ticket.payment_status !== 'pending' || ticket.status === 'resolved') return false;
+  const nextStatus = ticket.status === 'in_progress' ? 'in_progress' : 'ready_to_connect';
+  const { data, error } = await supabase
+    .from('tickets')
+    .update({
+      payment_status: 'paid',
+      payment_reference: paymentReference,
+      paid_at: new Date().toISOString(),
+      subscription_status: ticket.billing_mode === 'pyme_monthly' ? 'active' : 'none',
+      stripe_subscription_id: stripeSubscriptionId,
+      status: nextStatus,
+    })
+    .eq('id', ticket.id)
+    .eq('payment_status', 'pending')
+    .select('id')
+    .maybeSingle();
+  if (!error && data) return true;
+  const { data: current } = await supabase
+    .from('tickets')
+    .select('payment_status,payment_reference')
+    .eq('id', ticket.id)
+    .maybeSingle();
+  return current?.payment_status === 'paid' &&
+    current.payment_reference === paymentReference;
+}
+
+function createRateLimiter(maxRequests: number, windowMs: number) {
+  const windows = new Map<string, { count: number; resetAt: number }>();
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const now = Date.now();
+    const key = req.ip || 'unknown';
+    let bucket = windows.get(key);
+    if (!bucket || now >= bucket.resetAt) {
+      bucket = { count: 0, resetAt: now + windowMs };
+      windows.set(key, bucket);
+    }
+    bucket.count += 1;
+    if (bucket.count > maxRequests) {
+      res.status(429).json({ error: 'Demasiadas solicitudes. Inténtalo más tarde.' });
+      return;
+    }
+    if (windows.size > 5_000) {
+      for (const [activeKey, activeBucket] of windows) {
+        if (now >= activeBucket.resetAt) windows.delete(activeKey);
+      }
+    }
+    next();
+  };
+}
 
 type GeminiHealthStatus = 'ready' | 'unconfigured' | 'invalid_key';
 let geminiKeyStatus: GeminiHealthStatus = 'unconfigured';
@@ -512,7 +658,30 @@ function buildFallbackAssistant(input: {
 
 async function startServer() {
   const app = express();
+  if (process.env.K_SERVICE) app.set('trust proxy', 1);
+  app.disable('x-powered-by');
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    next();
+  });
+  app.use('/api/payments/stripe/webhook', express.raw({ type: 'application/json', limit: '1mb' }));
   app.use(express.json({ limit: '1mb' }));
+  app.use('/api/ai', createRateLimiter(15, 60_000));
+  app.use('/api/payments', createRateLimiter(12, 60_000));
+  app.use('/api/payments', (req, res, next) => {
+    if ((isProduction && paymentMode !== 'live') ||
+        (isSandboxPaymentsEnabled() && !isLocalSandboxOnly())) {
+      res.status(503).json({ success: false, error: 'El modo de pago configurado no es válido para este entorno.' });
+      return;
+    }
+    if (isProduction && req.path.startsWith('/paypal') && process.env.PAYPAL_MODE?.trim().toLowerCase() !== 'live') {
+      res.status(503).json({ success: false, error: 'PayPal debe configurarse en modo live antes de aceptar pagos.' });
+      return;
+    }
+    next();
+  });
 
   app.get('/api/health', (_req, res) => {
     const client = getGeminiClient();
@@ -585,11 +754,25 @@ async function startServer() {
   });
 
   app.post('/api/ai/receptionist', async (req, res) => {
-    const category = String(req.body?.category ?? 'Otro');
-    const osType = String(req.body?.osType ?? 'Windows');
-    const description = String(req.body?.description ?? '');
+    const requestedCategory = String(req.body?.category ?? 'Otro');
+    const category = (LAUNCH_CATEGORIES as readonly string[]).includes(requestedCategory)
+      ? requestedCategory
+      : 'Otro';
+    const requestedOs = String(req.body?.osType ?? 'Windows');
+    const osType = ['Windows', 'Mac', 'Linux', 'Mobile'].includes(requestedOs)
+      ? requestedOs
+      : 'Windows';
+    const description = String(req.body?.description ?? '').slice(0, 4_000);
     const followUpAnswers = Array.isArray(req.body?.followUpAnswers)
-      ? req.body.followUpAnswers
+      ? req.body.followUpAnswers.slice(0, 8).map((item: unknown) => {
+          const value = item && typeof item === 'object'
+            ? item as { question?: unknown; answer?: unknown }
+            : {};
+          return {
+            question: String(value.question ?? '').slice(0, 300),
+            answer: String(value.answer ?? '').slice(0, 500),
+          };
+        })
       : [];
 
     const ai = getGeminiClient();
@@ -738,14 +921,14 @@ async function startServer() {
   });
 
   app.post('/api/ai/report', async (req, res) => {
-    const ticketCode = String(req.body?.ticketCode ?? 'RS-0000');
-    const clientName = String(req.body?.clientName ?? 'Cliente');
-    const category = String(req.body?.category ?? 'Otro');
-    const osType = String(req.body?.osType ?? 'Windows');
-    const serviceTier = String(req.body?.serviceTier ?? 'Express $15');
-    const problemDescription = String(req.body?.problemDescription ?? '');
-    const aiDiagnosis = String(req.body?.aiDiagnosis ?? '');
-    const rawNotes = String(req.body?.rawNotes ?? '');
+    const ticketCode = String(req.body?.ticketCode ?? 'RS-0000').slice(0, 32);
+    const clientName = String(req.body?.clientName ?? 'Cliente').slice(0, 120);
+    const category = String(req.body?.category ?? 'Otro').slice(0, 100);
+    const osType = String(req.body?.osType ?? 'Windows').slice(0, 30);
+    const serviceTier = String(req.body?.serviceTier ?? 'Express $15').slice(0, 40);
+    const problemDescription = String(req.body?.problemDescription ?? '').slice(0, 4_000);
+    const aiDiagnosis = String(req.body?.aiDiagnosis ?? '').slice(0, 2_000);
+    const rawNotes = String(req.body?.rawNotes ?? '').slice(0, 5_000);
     const includePreventive = req.body?.includePreventive !== false;
 
     const ai = getGeminiClient();
@@ -824,9 +1007,9 @@ async function startServer() {
   });
 
   app.post('/api/ai/assistant', async (req, res) => {
-    const category = String(req.body?.category ?? 'Otro');
-    const osType = String(req.body?.osType ?? 'Windows');
-    const problemDescription = String(req.body?.problemDescription ?? '');
+    const category = String(req.body?.category ?? 'Otro').slice(0, 100);
+    const osType = String(req.body?.osType ?? 'Windows').slice(0, 30);
+    const problemDescription = String(req.body?.problemDescription ?? '').slice(0, 4_000);
 
     const ai = getGeminiClient();
     if (!ai) {
@@ -879,29 +1062,19 @@ async function startServer() {
     }
   });
 
-  function getPublicBaseUrl(req: express.Request): string {
-    const originHeader = req.headers.origin;
-    if (
-      typeof originHeader === 'string' &&
-      /^https?:\/\/[^/\s]+$/i.test(originHeader.trim())
-    ) {
-      return originHeader.trim().replace(/\/+$/, '');
-    }
+  function getPublicBaseUrl(): string | null {
     const envUrl = process.env.APP_URL?.trim();
-    if (envUrl && envUrl !== 'MY_APP_URL' && /^https?:\/\//i.test(envUrl)) {
-      return envUrl.replace(/\/+$/, '');
+    if (envUrl && envUrl !== 'MY_APP_URL') {
+      try {
+        const parsed = new URL(envUrl);
+        if (parsed.protocol === 'https:' || (!isProduction && parsed.protocol === 'http:')) {
+          return parsed.origin;
+        }
+      } catch {
+        return null;
+      }
     }
-    const protoHeader = req.headers['x-forwarded-proto'];
-    const proto =
-      typeof protoHeader === 'string' && protoHeader.length > 0
-        ? protoHeader.split(',')[0].trim()
-        : req.protocol || 'http';
-    const forwardedHost = req.headers['x-forwarded-host'];
-    const host =
-      (typeof forwardedHost === 'string' && forwardedHost.split(',')[0].trim()) ||
-      req.get('host') ||
-      `localhost:${PORT}`;
-    return `${proto}://${host}`;
+    return isProduction ? null : `http://localhost:${PORT}`;
   }
 
   function normalizeSecret(raw: string | undefined): string | null {
@@ -941,63 +1114,204 @@ async function startServer() {
     return tokenJson.access_token;
   }
 
-  app.post('/api/payments/stripe/create-session', async (req, res) => {
-    const { amountUsd, ticketCode, customerEmail, serviceLabel } = req.body ?? {};
-    const parsedAmount = Number(amountUsd ?? 15);
-    const safeAmount =
-      Number.isFinite(parsedAmount) && parsedAmount > 0
-        ? Math.round(parsedAmount * 100) / 100
-        : 15;
-    const cleanTicketCode = String(ticketCode ?? 'RS-0000')
-      .trim()
-      .toUpperCase()
-      .slice(0, 32);
-
+  app.post('/api/payments/stripe/webhook', async (req, res) => {
     const stripeKey = normalizeSecret(process.env.STRIPE_SECRET_KEY);
-    if (!stripeKey) {
+    const webhookSecret = normalizeSecret(process.env.STRIPE_WEBHOOK_SECRET);
+    const signature = req.headers['stripe-signature'];
+    if (!stripeKey || !webhookSecret || typeof signature !== 'string' || !Buffer.isBuffer(req.body)) {
+      res.status(503).json({ success: false, error: 'El webhook de Stripe no está configurado correctamente.' });
+      return;
+    }
+
+    let event: Stripe.Event;
+    try {
+      event = new Stripe(stripeKey).webhooks.constructEvent(req.body, signature, webhookSecret);
+    } catch {
+      res.status(400).json({ success: false, error: 'Firma de webhook de Stripe inválida.' });
+      return;
+    }
+
+    try {
+      if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
+        const session = event.data.object as Stripe.Checkout.Session;
+        if (session.status !== 'complete' || session.payment_status !== 'paid') {
+          res.json({ received: true, pending: true });
+          return;
+        }
+        const metadata = session.metadata ?? {};
+        const ticketCode = String(metadata.ticketCode ?? '').trim().toUpperCase();
+        if (!isValidTicketCode(ticketCode) || !hasConfiguredSupabaseServer()) {
+          res.status(503).json({ received: false, error: 'No se pudo validar ticket o Supabase.' });
+          return;
+        }
+        const ticket = await loadPayableTicket(ticketCode);
+        const addonPerformance = metadata.addonPerformance === 'true';
+        const addonBackup = metadata.addonBackup === 'true';
+        const expectedAmount = ticket
+          ? getAuthoritativePrice(ticket, addonPerformance, addonBackup)
+          : null;
+        const expectedMode = ticket?.billing_mode === 'pyme_monthly' ? 'subscription' : 'payment';
+        const subscriptionId = typeof session.subscription === 'string'
+          ? session.subscription
+          : session.subscription?.id ?? null;
+        const validSession = Boolean(
+          ticket && expectedAmount !== null &&
+          metadata.ticketCode === ticketCode &&
+          metadata.serviceTier === ticket.service_tier &&
+          metadata.billingMode === ticket.billing_mode &&
+          session.currency === 'usd' &&
+          session.amount_total === Math.round(expectedAmount * 100) &&
+          session.mode === expectedMode &&
+          (expectedMode !== 'subscription' || subscriptionId)
+        );
+        if (!validSession || !ticket) {
+          res.status(400).json({ received: false, error: 'Los datos de pago no coinciden con el ticket esperado.' });
+          return;
+        }
+        const updated = await markTicketPaid(ticket, session.id, subscriptionId);
+        if (!updated) {
+          res.status(409).json({ received: false, error: 'No se pudo guardar el pago verificado.' });
+          return;
+        }
+      } else if (
+        event.type === 'customer.subscription.updated' ||
+        event.type === 'customer.subscription.deleted' ||
+        event.type === 'invoice.payment_failed'
+      ) {
+        const supabase = getSupabaseAdmin();
+        if (!supabase) {
+          res.status(503).json({ received: false, error: 'No está configurada la escritura segura de suscripciones.' });
+          return;
+        }
+        const subscription = event.data.object as Stripe.Subscription;
+        const invoice = event.data.object as Stripe.Invoice;
+        const invoiceSubscription = invoice.parent?.subscription_details?.subscription;
+        const subscriptionId = event.type === 'invoice.payment_failed'
+          ? typeof invoiceSubscription === 'string'
+            ? invoiceSubscription
+            : invoiceSubscription?.id ?? null
+          : subscription.id;
+        const latestSubscription = subscriptionId
+          ? await new Stripe(stripeKey).subscriptions.retrieve(subscriptionId)
+          : null;
+        const status = latestSubscription?.status === 'canceled'
+          ? 'canceled'
+          : ['past_due', 'unpaid'].includes(latestSubscription?.status ?? '')
+            ? 'past_due'
+            : ['active', 'trialing'].includes(latestSubscription?.status ?? '')
+              ? 'active'
+              : null;
+        if (subscriptionId && status) {
+          const { error } = await supabase
+            .from('tickets')
+            .update({ subscription_status: status })
+            .eq('stripe_subscription_id', subscriptionId);
+          if (error) {
+            res.status(503).json({ received: false, error: 'No se pudo sincronizar el estado de suscripción.' });
+            return;
+          }
+        }
+      }
+      res.json({ received: true });
+    } catch {
+      res.status(500).json({ received: false, error: 'No se pudo procesar el evento de Stripe.' });
+    }
+  });
+
+  app.post('/api/payments/stripe/create-session', async (req, res) => {
+    const rawTicketCode = req.body?.ticketCode;
+    const cleanTicketCode = isValidTicketCode(rawTicketCode)
+      ? rawTicketCode.trim().toUpperCase()
+      : '';
+    const stripeKey = normalizeSecret(process.env.STRIPE_SECRET_KEY);
+    if (!stripeKey || isSandboxPaymentsEnabled()) {
+      if (!isLocalSandboxOnly()) {
+        res.status(503).json({ success: false, error: 'Stripe no está configurado para cobros reales.' });
+        return;
+      }
+      const serviceTier = String(req.body?.serviceTier ?? '');
+      const amountUsd = getAuthoritativePrice(
+        { service_tier: serviceTier, billing_mode: serviceTier.startsWith('Pyme ') ? 'pyme_monthly' : 'one_time' },
+        req.body?.addonPerformance === true,
+        req.body?.addonBackup === true
+      );
+      if (!cleanTicketCode || amountUsd === null) {
+        res.status(400).json({ success: false, error: 'Ticket o servicio inválido.' });
+        return;
+      }
       res.json({
         success: true,
         mode: 'sandbox',
         verified: true,
-        message: 'Stripe simulated successfully in sandbox preview.',
+        simulated: true,
+        message: 'Pago ficticio de desarrollo; no se realizó ningún cobro.',
         chargeId: `ch_sandbox_${Math.random().toString(36).slice(2, 10)}`,
-        amountUsd: safeAmount,
+        amountUsd,
       });
       return;
     }
 
     try {
+      if (!cleanTicketCode || !hasConfiguredSupabaseServer()) {
+        res.status(503).json({ success: false, error: 'No se pudo validar el ticket o configurar el registro de pagos.' });
+        return;
+      }
+      const ticket = await loadPayableTicket(cleanTicketCode);
+      if (!ticket) {
+        res.status(404).json({ success: false, error: 'Ticket no encontrado.' });
+        return;
+      }
+      if (req.body?.sessionToken !== ticket.client_session_token) {
+        res.status(403).json({ success: false, error: 'No se pudo autorizar el pago para este ticket.' });
+        return;
+      }
+      if (ticket.payment_status !== 'pending' || ticket.status === 'resolved') {
+        res.status(409).json({ success: false, error: 'Este ticket ya fue pagado o cerrado.' });
+        return;
+      }
+      const addonPerformance = req.body?.addonPerformance === true;
+      const addonBackup = req.body?.addonBackup === true;
+      const amountUsd = getAuthoritativePrice(ticket, addonPerformance, addonBackup);
+      if (amountUsd === null) {
+        res.status(400).json({ success: false, error: 'La configuración del servicio no es válida.' });
+        return;
+      }
+      const baseUrl = getPublicBaseUrl();
+      if (!baseUrl) {
+        res.status(503).json({ success: false, error: 'Falta configurar la URL pública segura de la aplicación.' });
+        return;
+      }
       const stripe = new Stripe(stripeKey);
-      const baseUrl = getPublicBaseUrl(req);
       const encodedCode = encodeURIComponent(cleanTicketCode);
-      const unitAmountCents = Math.max(50, Math.round(safeAmount * 100));
-      const cleanEmail =
-        typeof customerEmail === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(customerEmail.trim())
-          ? customerEmail.trim()
-          : undefined;
-
+      const isMonthly = ticket.billing_mode === 'pyme_monthly';
+      const amountCents = Math.round(amountUsd * 100);
+      const metadata = {
+        ticketCode: cleanTicketCode,
+        serviceTier: ticket.service_tier,
+        billingMode: ticket.billing_mode,
+        amountUsd: amountUsd.toFixed(2),
+        addonPerformance: String(addonPerformance),
+        addonBackup: String(addonBackup),
+      };
       const session = await stripe.checkout.sessions.create({
-        mode: 'payment',
-        customer_email: cleanEmail,
+        mode: isMonthly ? 'subscription' : 'payment',
+        customer_email: ticket.client_email,
         line_items: [
           {
             price_data: {
               currency: 'usd',
               product_data: {
                 name: `Remote Support 365 · Ticket ${cleanTicketCode}`,
-                description:
-                  typeof serviceLabel === 'string' && serviceLabel.trim()
-                    ? serviceLabel.trim()
-                    : 'Asistencia técnica IT remota supervisada',
+                description: ticket.service_tier,
               },
-              unit_amount: unitAmountCents,
+              unit_amount: amountCents,
+              ...(isMonthly ? { recurring: { interval: 'month' as const } } : {}),
             },
             quantity: 1,
           },
         ],
-        metadata: {
-          ticketCode: cleanTicketCode,
-        },
+        metadata,
+        ...(isMonthly ? { subscription_data: { metadata } } : {}),
         success_url: `${baseUrl}/sesion/${encodedCode}?payment=success&gateway=stripe&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${baseUrl}/sesion/${encodedCode}?payment=canceled&gateway=stripe`,
       });
@@ -1008,98 +1322,167 @@ async function startServer() {
         verified: false,
         sessionId: session.id,
         url: session.url,
-        amountUsd: safeAmount,
+        amountUsd,
       });
     } catch (error) {
       res.status(500).json({
         success: false,
-        error:
-          error instanceof Error
-            ? `Error al crear sesión en Stripe: ${error.message}`
-            : 'Error al crear sesión en Stripe.',
+        error: 'No se pudo crear la sesión segura de Stripe.',
       });
     }
   });
 
   app.get('/api/payments/stripe/verify-session', async (req, res) => {
     const sessionId = String(req.query.session_id ?? '').trim();
-    if (!sessionId) {
+    const ticketCode = String(req.query.ticket_code ?? '').trim().toUpperCase();
+    if (!sessionId || !isValidTicketCode(ticketCode)) {
       res.status(400).json({
         success: false,
         verified: false,
-        error: 'Falta el parámetro session_id.',
+        error: 'Falta el identificador de pago o ticket válido.',
       });
       return;
     }
 
     const stripeKey = normalizeSecret(process.env.STRIPE_SECRET_KEY);
     if (!stripeKey) {
-      res.status(400).json({
-        success: false,
-        verified: false,
-        error: 'Stripe no está configurado en el servidor.',
-      });
+      if (isLocalSandboxOnly() && sessionId.startsWith('cs_sandbox_')) {
+        res.json({ success: true, verified: true, simulated: true, ticketCode });
+      } else {
+        res.status(503).json({ success: false, verified: false, error: 'Stripe no está configurado para producción.' });
+      }
       return;
     }
 
     try {
+      if (!hasConfiguredSupabaseServer()) {
+        res.status(503).json({ success: false, verified: false, error: 'No está configurado el registro seguro de pagos.' });
+        return;
+      }
       const stripe = new Stripe(stripeKey);
       const session = await stripe.checkout.sessions.retrieve(sessionId);
-      const verified = session.payment_status === 'paid';
+      const metadata = session.metadata ?? {};
+      const ticket = await loadPayableTicket(ticketCode);
+      const addonPerformance = metadata.addonPerformance === 'true';
+      const addonBackup = metadata.addonBackup === 'true';
+      const expectedAmount = ticket
+        ? getAuthoritativePrice(ticket, addonPerformance, addonBackup)
+        : null;
+      const subscriptionId = typeof session.subscription === 'string'
+        ? session.subscription
+        : session.subscription?.id ?? null;
+      const amountMatches = expectedAmount !== null &&
+        session.currency === 'usd' &&
+        session.amount_total === Math.round(expectedAmount * 100) &&
+        session.mode === (ticket?.billing_mode === 'pyme_monthly' ? 'subscription' : 'payment') &&
+        Number(metadata.amountUsd) === expectedAmount &&
+        metadata.serviceTier === ticket?.service_tier &&
+        metadata.billingMode === ticket?.billing_mode &&
+        (ticket?.billing_mode !== 'pyme_monthly' || Boolean(subscriptionId));
+      const verified = Boolean(
+        ticket && metadata.ticketCode === ticketCode && amountMatches &&
+        session.payment_status === 'paid' && session.status === 'complete'
+      );
+      if (!verified || !ticket) {
+        res.status(402).json({ success: false, verified: false, error: 'El pago no coincide con el ticket o el importe esperado.' });
+        return;
+      }
+      const updated = await markTicketPaid(ticket, session.id, subscriptionId);
+      if (!updated) {
+        res.status(409).json({ success: false, verified: false, error: 'El ticket ya está pagado con otra transacción o no se pudo guardar el pago.' });
+        return;
+      }
       res.json({
-        success: verified,
-        verified,
+        success: true,
+        verified: true,
         payment_status: session.payment_status,
         sessionId: session.id,
-        ticketCode: session.metadata?.ticketCode ?? null,
-        amountUsd:
-          typeof session.amount_total === 'number'
-            ? session.amount_total / 100
-            : null,
+        ticketCode,
+        amountUsd: expectedAmount,
       });
     } catch (error) {
       res.status(500).json({
         success: false,
         verified: false,
-        error:
-          error instanceof Error
-            ? `No se pudo verificar la sesión de Stripe: ${error.message}`
-            : 'No se pudo verificar la sesión de Stripe.',
+        error: 'No se pudo verificar o registrar el pago de Stripe.',
       });
     }
   });
 
   app.post('/api/payments/paypal/create-order', async (req, res) => {
-    const { amountUsd, ticketCode, serviceLabel } = req.body ?? {};
-    const parsedAmount = Number(amountUsd ?? 15);
-    const safeAmount =
-      Number.isFinite(parsedAmount) && parsedAmount > 0
-        ? Math.round(parsedAmount * 100) / 100
-        : 15;
-    const cleanTicketCode = String(ticketCode ?? 'RS-0000')
-      .trim()
-      .toUpperCase()
-      .slice(0, 32);
-
+    const rawTicketCode = req.body?.ticketCode;
+    const cleanTicketCode = isValidTicketCode(rawTicketCode)
+      ? rawTicketCode.trim().toUpperCase()
+      : '';
     const paypalClientId = normalizeSecret(process.env.PAYPAL_CLIENT_ID);
     const paypalClientSecret = normalizeSecret(process.env.PAYPAL_CLIENT_SECRET);
-    if (!paypalClientId || !paypalClientSecret) {
+    if (!paypalClientId || !paypalClientSecret || isSandboxPaymentsEnabled()) {
+      if (!isLocalSandboxOnly() || !cleanTicketCode) {
+        res.status(503).json({ success: false, error: 'PayPal no está configurado para cobros reales.' });
+        return;
+      }
+      const serviceTier = String(req.body?.serviceTier ?? '');
+      const amountUsd = getAuthoritativePrice(
+        { service_tier: serviceTier, billing_mode: serviceTier.startsWith('Pyme ') ? 'pyme_monthly' : 'one_time' },
+        req.body?.addonPerformance === true,
+        req.body?.addonBackup === true
+      );
+      if (amountUsd === null || serviceTier.startsWith('Pyme ')) {
+        res.status(400).json({ success: false, error: 'Este plan o importe no está disponible en PayPal.' });
+        return;
+      }
       res.json({
         success: true,
         mode: 'sandbox',
-        orderId: `PAYPAL_SANDBOX_${Math.random().toString(36).slice(2, 10).toUpperCase()}`,
-        amountUsd: safeAmount,
+        orderId: `PAYPAL_SANDBOX_${cleanTicketCode}_${Math.random().toString(36).slice(2, 10).toUpperCase()}`,
+        amountUsd,
       });
       return;
     }
 
     try {
+      if (!cleanTicketCode || !hasConfiguredSupabaseServer()) {
+        res.status(503).json({ success: false, error: 'No se pudo validar el ticket o configurar el registro de pagos.' });
+        return;
+      }
+      const ticket = await loadPayableTicket(cleanTicketCode);
+      if (!ticket) {
+        res.status(404).json({ success: false, error: 'Ticket no encontrado.' });
+        return;
+      }
+      if (req.body?.sessionToken !== ticket.client_session_token) {
+        res.status(403).json({ success: false, error: 'No se pudo autorizar el pago para este ticket.' });
+        return;
+      }
+      if (ticket.payment_status !== 'pending' || ticket.status === 'resolved') {
+        res.status(409).json({ success: false, error: 'Este ticket ya fue pagado o cerrado.' });
+        return;
+      }
+      if (ticket.billing_mode === 'pyme_monthly') {
+        res.status(400).json({ success: false, error: 'Los planes mensuales requieren Stripe; PayPal recurrente aún no está habilitado.' });
+        return;
+      }
+      const amountUsd = getAuthoritativePrice(
+        ticket,
+        req.body?.addonPerformance === true,
+        req.body?.addonBackup === true
+      );
+      if (amountUsd === null) {
+        res.status(400).json({ success: false, error: 'La configuración del servicio no es válida.' });
+        return;
+      }
+      const baseUrl = getPublicBaseUrl();
+      if (!baseUrl) {
+        res.status(503).json({ success: false, error: 'Falta configurar la URL pública segura de la aplicación.' });
+        return;
+      }
       const accessToken = await fetchPayPalAccessToken(
         paypalClientId,
         paypalClientSecret
       );
-      const baseUrl = getPublicBaseUrl(req);
       const encodedCode = encodeURIComponent(cleanTicketCode);
+      const addonPerformance = req.body?.addonPerformance === true;
+      const addonBackup = req.body?.addonBackup === true;
       const orderRes = await fetch(`${getPayPalBaseUrl()}/v2/checkout/orders`, {
         method: 'POST',
         headers: {
@@ -1111,10 +1494,8 @@ async function startServer() {
           purchase_units: [
             {
               reference_id: cleanTicketCode,
-              description:
-                typeof serviceLabel === 'string' && serviceLabel.trim()
-                  ? `Remote Support 365 · ${serviceLabel.trim()}`
-                  : `Remote Support 365 · Ticket ${cleanTicketCode}`,
+              custom_id: `${ticket.service_tier}|${addonPerformance ? '1' : '0'}|${addonBackup ? '1' : '0'}`,
+              description: `Remote Support 365 · ${ticket.service_tier}`,
               amount: {
                 currency_code: 'USD',
                 value: safeAmount.toFixed(2),
@@ -1152,26 +1533,27 @@ async function startServer() {
         verified: false,
         orderId: orderData.id,
         approvalUrl,
-        amountUsd: safeAmount,
+        amountUsd,
       });
     } catch (error) {
       res.status(500).json({
         success: false,
-        error:
-          error instanceof Error
-            ? `Error al crear orden PayPal: ${error.message}`
-            : 'Error al crear orden PayPal.',
+        error: 'No se pudo crear la orden segura de PayPal.',
       });
     }
   });
 
   app.post('/api/payments/paypal/capture-order', async (req, res) => {
     const orderId = String(req.body?.orderId ?? '').trim();
-    if (!orderId) {
+    const rawTicketCode = req.body?.ticketCode;
+    const ticketCode = isValidTicketCode(rawTicketCode)
+      ? rawTicketCode.trim().toUpperCase()
+      : '';
+    if (!orderId || !ticketCode) {
       res.status(400).json({
         success: false,
         verified: false,
-        error: 'Falta el parámetro orderId.',
+        error: 'Falta una orden o un código de ticket válido.',
       });
       return;
     }
@@ -1179,8 +1561,8 @@ async function startServer() {
     const paypalClientId = normalizeSecret(process.env.PAYPAL_CLIENT_ID);
     const paypalClientSecret = normalizeSecret(process.env.PAYPAL_CLIENT_SECRET);
 
-    if (!paypalClientId || !paypalClientSecret) {
-      if (!orderId.startsWith('PAYPAL_SANDBOX_')) {
+    if (!paypalClientId || !paypalClientSecret || isSandboxPaymentsEnabled()) {
+      if (!isLocalSandboxOnly() || !orderId.startsWith(`PAYPAL_SANDBOX_${ticketCode}_`)) {
         res.status(400).json({
           success: false,
           verified: false,
@@ -1192,6 +1574,7 @@ async function startServer() {
         success: true,
         mode: 'sandbox',
         verified: true,
+        simulated: true,
         status: 'COMPLETED',
         captureId: `cap_sandbox_${Math.random().toString(36).slice(2, 10)}`,
         orderId,
@@ -1200,45 +1583,75 @@ async function startServer() {
     }
 
     try {
+      if (!hasConfiguredSupabaseServer()) {
+        res.status(503).json({ success: false, verified: false, error: 'No está configurado el registro seguro de pagos.' });
+        return;
+      }
+      const ticket = await loadPayableTicket(ticketCode);
+      if (!ticket || ticket.billing_mode !== 'one_time') {
+        res.status(404).json({ success: false, verified: false, error: 'Ticket no encontrado o plan incompatible.' });
+        return;
+      }
       const accessToken = await fetchPayPalAccessToken(
         paypalClientId,
         paypalClientSecret
       );
-      const captureRes = await fetch(
-        `${getPayPalBaseUrl()}/v2/checkout/orders/${encodeURIComponent(orderId)}/capture`,
-        {
+      const orderUrl = `${getPayPalBaseUrl()}/v2/checkout/orders/${encodeURIComponent(orderId)}`;
+      const orderRes = await fetch(orderUrl, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const orderData = (await orderRes.json()) as {
+        id?: string;
+        status?: string;
+        message?: string;
+        purchase_units?: Array<{
+          reference_id?: string;
+          custom_id?: string;
+          amount?: { currency_code?: string; value?: string };
+          payments?: {
+            captures?: Array<{ id?: string; status?: string; amount?: { currency_code?: string; value?: string } }>;
+          };
+        }>;
+      };
+      const unit = orderData.purchase_units?.[0];
+      const custom = String(unit?.custom_id ?? '').split('|');
+      const expectedAmount = custom.length === 3 && ticket.service_tier === custom[0]
+        ? getAuthoritativePrice(ticket, custom[1] === '1', custom[2] === '1')
+        : null;
+      const amountMatches = expectedAmount !== null && unit?.amount?.currency_code === 'USD' &&
+        Number(unit.amount.value) === expectedAmount;
+      if (!orderRes.ok || orderData.id !== orderId || unit?.reference_id !== ticketCode || !amountMatches) {
+        res.status(402).json({ success: false, verified: false, error: 'La orden no coincide con el ticket, plan o importe esperado.' });
+        return;
+      }
+
+      let captureData = orderData;
+      if (orderData.status !== 'COMPLETED') {
+        if (orderData.status !== 'APPROVED') {
+          res.status(402).json({ success: false, verified: false, error: 'La orden de PayPal todavía no está aprobada.' });
+          return;
+        }
+        const captureRes = await fetch(`${orderUrl}/capture`, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
           },
-        }
-      );
-
-      const captureData = (await captureRes.json()) as {
-        id?: string;
-        status?: string;
-        message?: string;
-        purchase_units?: Array<{
-          payments?: {
-            captures?: Array<{ id?: string; status?: string }>;
-          };
-        }>;
-      };
-
-      const completed = captureData.status === 'COMPLETED';
-      const captureId =
-        captureData.purchase_units?.[0]?.payments?.captures?.[0]?.id ?? null;
-
-      if (!captureRes.ok || !completed) {
-        res.status(402).json({
-          success: false,
-          verified: false,
-          status: captureData.status ?? 'FAILED',
-          error:
-            captureData.message ??
-            'La captura de PayPal no fue completada.',
         });
+        captureData = (await captureRes.json()) as typeof orderData;
+        if (!captureRes.ok || captureData.status !== 'COMPLETED') {
+          res.status(402).json({ success: false, verified: false, error: 'PayPal no completó la captura.' });
+          return;
+        }
+      }
+      const capture = captureData.purchase_units?.[0]?.payments?.captures?.[0];
+      if (!capture || capture.status !== 'COMPLETED' || capture.amount?.currency_code !== 'USD' || Number(capture.amount.value) !== expectedAmount) {
+        res.status(402).json({ success: false, verified: false, error: 'La captura no coincide con el importe esperado.' });
+        return;
+      }
+      const updated = await markTicketPaid(ticket, orderId);
+      if (!updated) {
+        res.status(409).json({ success: false, verified: false, error: 'El ticket ya está pagado con otra transacción o no se pudo guardar el pago.' });
         return;
       }
 
@@ -1246,18 +1659,17 @@ async function startServer() {
         success: true,
         mode: 'live',
         verified: true,
-        status: captureData.status,
-        captureId,
+        status: 'COMPLETED',
+        captureId: capture.id ?? null,
         orderId: captureData.id ?? orderId,
+        ticketCode,
+        amountUsd: expectedAmount,
       });
     } catch (error) {
       res.status(500).json({
         success: false,
         verified: false,
-        error:
-          error instanceof Error
-            ? `Error al capturar orden PayPal: ${error.message}`
-            : 'Error al capturar orden PayPal.',
+        error: 'No se pudo verificar o capturar la orden de PayPal.',
       });
     }
   });

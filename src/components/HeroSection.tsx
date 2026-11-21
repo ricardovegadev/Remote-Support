@@ -340,7 +340,7 @@ export function HeroSection({
             >
               Cuéntanos qué ocurre. La IA te guía con preguntas sencillas y pasos
               seguros. Si el caso necesita ayuda humana, transfiere el resumen y tu
-              ticket a un especialista certificado.
+              ticket a un especialista.
             </p>
 
             {/* Primary & Secondary Warm CTAs */}

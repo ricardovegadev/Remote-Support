@@ -42,6 +42,25 @@ import {
   LEGAL_TERMS_VERSION,
   SERVICE_TIER_OPTIONS,
 } from '../utils/ticketLogic';
+
+async function hasOperatorAccess(
+  supabase: NonNullable<ReturnType<typeof getSupabaseClient>>,
+  userId: string
+): Promise<boolean> {
+  const [memberResult, profileResult] = await Promise.all([
+    supabase
+      .from('organization_members')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .limit(1),
+    supabase.from('profiles').select('role').eq('id', userId).maybeSingle(),
+  ]);
+  return Boolean(
+    (!memberResult.error && memberResult.data?.length) ||
+    (!profileResult.error && profileResult.data?.role === 'admin')
+  );
+}
 import type { LegalDocTab } from './LegalDocsModal';
 import { DashboardSidebar } from './DashboardSidebar';
 import { AiWorkforceView } from './dashboard/AiWorkforceView';
@@ -112,7 +131,6 @@ interface TechPortalViewProps {
   onCreateQuickTicket: (draft: WizardDraft) => Promise<SupportTicket | null>;
   onOpenPublicPortal: () => void;
   onOpenLegalDoc?: (tab: LegalDocTab) => void;
-  onCancelOrgAutoRenew?: () => void;
   onExportOrgData?: () => void;
   onDeletePersonalData?: () => void;
 }
@@ -161,16 +179,17 @@ export function TechPortalView({
   onCreateQuickTicket,
   onOpenPublicPortal,
   onOpenLegalDoc,
-  onCancelOrgAutoRenew,
   onExportOrgData,
   onDeletePersonalData,
 }: TechPortalViewProps) {
   const supabaseConfigured = isSupabaseConfigured();
+  const demoModeEnabled = import.meta.env.DEV && !supabaseConfigured;
 
   const [authStatus, setAuthStatus] = useState<
     'checking' | 'unauthenticated' | 'authenticated'
   >(() => {
     if (supabaseConfigured) return 'checking';
+    if (!import.meta.env.DEV) return 'unauthenticated';
     if (typeof window !== 'undefined') {
       try {
         const signedOut =
@@ -268,15 +287,26 @@ export function TechPortalView({
 
     let mounted = true;
 
+    const acceptSession = async (user: { id: string; email?: string }) => {
+      const allowed = await hasOperatorAccess(supabase, user.id);
+      if (!mounted) return;
+      if (!allowed) {
+        setAuthError('Tu cuenta no tiene una membresía técnica activa. Solicita una invitación al administrador.');
+        setAuthStatus('unauthenticated');
+        void supabase.auth.signOut();
+        return;
+      }
+      setOperatorEmail(user.email ?? 'tecnico@remotesupport365.com');
+      setAuthError(null);
+      setAuthStatus('authenticated');
+    };
+
     void supabase.auth.getSession().then(({ data, error }) => {
       if (!mounted) return;
       if (error || !data.session) {
         setAuthStatus('unauthenticated');
       } else {
-        setOperatorEmail(
-          data.session.user.email ?? 'tecnico@remotesupport365.com'
-        );
-        setAuthStatus('authenticated');
+        void acceptSession(data.session.user);
       }
     });
 
@@ -284,8 +314,8 @@ export function TechPortalView({
       (_event, session) => {
         if (!mounted) return;
         if (session?.user) {
-          setOperatorEmail(session.user.email ?? 'tecnico@remotesupport365.com');
-          setAuthStatus('authenticated');
+          setAuthStatus('checking');
+          queueMicrotask(() => void acceptSession(session.user));
         } else {
           setAuthStatus('unauthenticated');
         }
@@ -344,6 +374,10 @@ export function TechPortalView({
 
   const handleSupabaseSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!supabaseConfigured && !demoModeEnabled) {
+      setAuthError('El portal no está disponible hasta configurar Supabase Auth.');
+      return;
+    }
     if (!isValidEmail(loginEmail) || loginPassword.trim().length < 6) {
       setAuthError(
         'Ingresa un correo técnico válido y una contraseña de al menos 6 caracteres.'
@@ -369,6 +403,12 @@ export function TechPortalView({
           return;
         }
         if (data.user) {
+          const allowed = await hasOperatorAccess(supabase, data.user.id);
+          if (!allowed) {
+            await supabase.auth.signOut();
+            setAuthError('Cuenta creada. Un administrador debe invitarte a una organización antes de acceder al portal técnico.');
+            return;
+          }
           setOperatorEmail(data.user.email ?? loginEmail.trim());
           setAuthStatus('authenticated');
         }
@@ -395,6 +435,10 @@ export function TechPortalView({
 
   const handleSupabaseSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!supabaseConfigured && !demoModeEnabled) {
+      setAuthError('El registro técnico está deshabilitado hasta configurar Supabase Auth.');
+      return;
+    }
     if (signupFullName.trim().length < 2) {
       setAuthError('Ingresa tu nombre completo.');
       return;
@@ -441,7 +485,6 @@ export function TechPortalView({
           options: {
             data: {
               full_name: signupFullName.trim(),
-              role: 'technician',
               birth_date: signupBirthDate,
               is_adult_verified: true,
               terms_accepted_at: nowIso,
@@ -452,6 +495,15 @@ export function TechPortalView({
         });
         if (error) {
           setAuthError(`Registro rechazado: ${error.message}`);
+          return;
+        }
+        const { data: currentUser } = await supabase.auth.getUser();
+        const allowed = currentUser.user
+          ? await hasOperatorAccess(supabase, currentUser.user.id)
+          : false;
+        if (!allowed) {
+          await supabase.auth.signOut();
+          setAuthError('Cuenta creada. Un administrador debe invitarte a una organización antes de acceder al portal técnico.');
           return;
         }
         setOperatorEmail(cleanEmail);
@@ -477,7 +529,7 @@ export function TechPortalView({
   };
 
   const handleEnterLocalDemoMode = () => {
-    if (supabaseConfigured) return;
+    if (!demoModeEnabled) return;
     const demoEmail = 'cmendoza@remotesupport365.com';
     if (typeof window !== 'undefined') {
       try {
@@ -816,13 +868,13 @@ export function TechPortalView({
 
                 {!supabaseConfigured && (
                   <div className="pt-4 border-t border-[#E5E9F2] space-y-2.5">
-                    <button
+                  {demoModeEnabled && <button
                       type="button"
                       onClick={handleEnterLocalDemoMode}
                       className="w-full px-4 py-2.5 text-xs font-semibold text-[#0F172A] bg-[#F8FAFC] hover:bg-slate-100 border border-[#E5E9F2] rounded-xl transition-colors"
                     >
                       Entrar con Cuenta de demostración
-                    </button>
+                  </button>}
                   </div>
                 )}
               </>
@@ -972,6 +1024,16 @@ export function TechPortalView({
 
         {/* Main Viewport */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 space-y-6 max-w-[1400px] w-full mx-auto">
+          {demoModeEnabled && (
+            <div role="status" className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-950">
+              DEMO LOCAL · No autentica operadores ni sincroniza cambios con Supabase.
+            </div>
+          )}
+          {!demoModeEnabled && supabaseConfigured && (
+            <div role="status" className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-950">
+              <strong>Persistencia parcial:</strong> tickets, mensajes y pagos usan servicios remotos. La configuración de organización, invitaciones, disponibilidad, dispositivos, sesiones, agentes IA y parte de la bitácora todavía no se sincronizan de forma completa con Supabase; esos cambios pueden quedar solo en este navegador.
+            </div>
+          )}
           {persistenceError && (
             <div
               role="alert"
@@ -1078,7 +1140,6 @@ export function TechPortalView({
               onSaveSettings={onSaveOrgSettings}
               onOpenSqlModal={() => setSqlModalOpen(true)}
               onSignOut={() => void handleSignOut()}
-              onCancelOrgAutoRenew={onCancelOrgAutoRenew}
               onExportOrgData={onExportOrgData}
               onDeletePersonalData={() => {
                 onDeletePersonalData?.();

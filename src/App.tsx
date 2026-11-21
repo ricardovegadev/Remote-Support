@@ -460,18 +460,12 @@ export default function App() {
     consentAccepted: boolean
   ) => {
     const target = tickets.find((t) => t.id === ticketId);
-    const nextStatus =
-      target && target.status === 'waiting_payment'
-        ? 'ready_to_connect'
-        : target?.status ?? 'ready_to_connect';
-
     const result = await supportAdapter.updateTicket(
       ticketId,
       {
         rustdesk_id: rustdeskId,
         consent_accepted: consentAccepted,
         consent_accepted_at: consentAccepted ? new Date().toISOString() : null,
-        status: nextStatus,
       },
       tickets,
       getTicketScope(ticketId)
@@ -500,6 +494,30 @@ export default function App() {
   };
 
   const handleConfirmPayment = async (ticketId: string) => {
+    if (isSupabaseConfigured()) {
+      const target = tickets.find((ticket) => ticket.id === ticketId);
+      if (!target) {
+        setPersistenceError('No se encontró el ticket después de verificar el pago.');
+        return;
+      }
+      const refreshed = await supportAdapter.syncFromSupabaseIfConfigured({
+        ticketCode: target.ticket_code,
+      });
+      const paidTicket = refreshed.data.tickets?.find(
+        (ticket) => ticket.ticket_code === target.ticket_code
+      );
+      if (!refreshed.ok || !paidTicket || paidTicket.payment_status !== 'paid') {
+        setPersistenceError(
+          refreshed.error ?? 'El servidor verificó el pago, pero el ticket aún no está sincronizado.'
+        );
+        return;
+      }
+      setTickets(refreshed.data.tickets ?? tickets);
+      if (refreshed.data.messages) setMessages(refreshed.data.messages);
+      setPersistenceError(null);
+      return;
+    }
+
     const result = await supportAdapter.confirmPaymentAndReady(
       ticketId,
       tickets,
@@ -514,34 +532,74 @@ export default function App() {
   };
 
   const handleStartSession = async (ticketId: string) => {
-    const target = tickets.find((t) => t.id === ticketId);
-    const nowIso = new Date().toISOString();
-    const orgMember =
-      members.find((m) => m.organization_id === (target?.organization_id ?? activeOrgId)) ??
-      members[0];
-    const techId =
-      target?.assigned_to ??
-      orgMember?.user_id ??
-      '30000000-0000-4000-8000-000000000001';
-    const techName =
-      target?.assigned_technician_name ?? orgMember?.full_name ?? 'Carlos Mendoza';
-    const techSpecialty =
-      target?.assigned_technician_specialty ??
-      (orgMember && Array.isArray(orgMember.specialties)
-        ? orgMember.specialties.join(' · ')
-        : 'Windows & BSOD · Microsoft 365 & Outlook · Redes & VPN');
+    let target = tickets.find((t) => t.id === ticketId);
+    let baseTickets = tickets;
+    if (!target) {
+      setPersistenceError('No se encontró el ticket seleccionado.');
+      return;
+    }
 
+    if (isSupabaseConfigured()) {
+      if (target.payment_status !== 'paid') {
+        setPersistenceError('No se puede iniciar una sesión antes de verificar el pago.');
+        return;
+      }
+      const supabase = getSupabaseClient();
+      const { data: userData, error: userError } = supabase
+        ? await supabase.auth.getUser()
+        : { data: { user: null }, error: new Error('Cliente Supabase no disponible.') };
+      const user = userData.user;
+      if (userError || !user) {
+        setPersistenceError('Inicia sesión con una cuenta técnica para comenzar.');
+        return;
+      }
+      if (target.assigned_to && target.assigned_to !== user.id) {
+        setPersistenceError('Este ticket ya está asignado a otro técnico.');
+        return;
+      }
+      if (!target.assigned_to) {
+        const member = members.find(
+          (item) => item.user_id === user.id && item.organization_id === target?.organization_id
+        );
+        if (!member) {
+          setPersistenceError('Tu cuenta no tiene una membresía activa para este ticket.');
+          return;
+        }
+        const claim = await supportAdapter.claimTicketAtomically(
+          ticketId,
+          user.id,
+          member.full_name,
+          member.specialties.join(' · '),
+          tickets
+        );
+        if (!claim.ok) {
+          setPersistenceError(claim.error ?? 'No se pudo reclamar el ticket.');
+          return;
+        }
+        setTickets(claim.data);
+        baseTickets = claim.data;
+        target = claim.data.find((item) => item.id === ticketId) ?? target;
+      }
+    }
+
+    const patch: Partial<SupportTicket> = { status: 'in_progress' };
+    if (!isSupabaseConfigured()) {
+      const orgMember =
+        members.find((m) => m.organization_id === (target?.organization_id ?? activeOrgId)) ??
+        members[0];
+      patch.assigned_to = target.assigned_to ?? orgMember?.user_id ?? '30000000-0000-4000-8000-000000000001';
+      patch.assigned_technician_id = patch.assigned_to;
+      patch.assigned_technician_name = target.assigned_technician_name ?? orgMember?.full_name ?? 'Carlos Mendoza';
+      patch.assigned_technician_specialty = target.assigned_technician_specialty ??
+        (orgMember && Array.isArray(orgMember.specialties)
+          ? orgMember.specialties.join(' · ')
+          : 'Windows & BSOD · Microsoft 365 & Outlook · Redes & VPN');
+      patch.claimed_at = target.claimed_at ?? new Date().toISOString();
+    }
     const result = await supportAdapter.updateTicket(
       ticketId,
-      {
-        status: 'in_progress',
-        assigned_to: techId,
-        assigned_technician_id: techId,
-        assigned_technician_name: techName,
-        assigned_technician_specialty: techSpecialty,
-        claimed_at: target?.claimed_at ?? nowIso,
-      },
-      tickets
+      patch,
+      baseTickets
     );
     if (!result.ok) {
       setPersistenceError(result.error ?? 'Error al iniciar la sesión.');
@@ -596,7 +654,6 @@ export default function App() {
       ticketId,
       {
         status: 'resolved',
-        payment_status: 'paid',
         resolution_notes: resolutionNotes,
         resolved_at: new Date().toISOString(),
       },
@@ -817,7 +874,10 @@ export default function App() {
         legal_framework: 'GDPR / LOPDP - Portabilidad de Datos (JSON)',
         user_profile: currentUser,
         organization: activeOrg,
-        tickets: matchingUserTickets,
+        tickets: matchingUserTickets.map((ticket) => {
+          const { client_session_token: _sessionToken, payment_reference: _paymentReference, stripe_subscription_id: _subscriptionId, ...safeTicket } = ticket;
+          return safeTicket;
+        }),
         cookie_preferences: readCookieConsent(),
         audit_logs: auditLogs.filter((l) => l.organization_id === activeOrgId),
       },
@@ -844,33 +904,6 @@ export default function App() {
     }
     setPersistenceError(null);
     setTickets(result.data);
-    setAuditLogs(supportAdapter.loadAuditLogs());
-  };
-
-  const handleCancelTicketSubscription = async (ticketId: string) => {
-    const result = await supportAdapter.cancelTicketSubscription(
-      ticketId,
-      tickets,
-      getTicketScope(ticketId)
-    );
-    if (!result.ok) {
-      setPersistenceError(
-        result.error ?? 'No se pudo cancelar la renovación automática.'
-      );
-      return;
-    }
-    setPersistenceError(null);
-    setTickets(result.data);
-    setAuditLogs(supportAdapter.loadAuditLogs());
-  };
-
-  const handleCancelOrgAutoRenew = () => {
-    const next = supportAdapter.cancelOrganizationAutoRenew(
-      activeOrgId,
-      organizations,
-      currentUser?.full_name ?? 'Administrador Org'
-    );
-    setOrganizations(next);
     setAuditLogs(supportAdapter.loadAuditLogs());
   };
 
@@ -923,7 +956,6 @@ export default function App() {
         onOpenLegalDoc={setLegalDocTab}
         onExportUserData={handleExportUserOrOrgData}
         onDeleteUserData={handleDeletePersonalData}
-        onCancelUserSubscription={handleCancelOrgAutoRenew}
       />
     </>
   );
@@ -969,7 +1001,6 @@ export default function App() {
           onCreateQuickTicket={handleCreateQuickTicket}
           onOpenPublicPortal={handleReturnHome}
           onOpenLegalDoc={setLegalDocTab}
-          onCancelOrgAutoRenew={handleCancelOrgAutoRenew}
           onExportOrgData={handleExportUserOrOrgData}
           onDeletePersonalData={handleDeletePersonalData}
         />
@@ -1061,7 +1092,6 @@ export default function App() {
               onOpenLegalDoc={setLegalDocTab}
               onExportClientData={handleExportClientData}
               onAnonymizeClientData={handleAnonymizeClientData}
-              onCancelTicketSubscription={handleCancelTicketSubscription}
             />
           ) : isHydratingSession ? (
             <section className="py-16 bg-[#F8FAFC] min-h-[calc(100vh-12rem)]">

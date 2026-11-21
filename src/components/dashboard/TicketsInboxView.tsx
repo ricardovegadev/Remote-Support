@@ -561,7 +561,7 @@ export function TicketsInboxView({
                       onClick={() => void onMarkPaymentPaid(activeTicket.id)}
                       className="px-3 py-1.5 text-xs font-semibold text-[#0F172A] bg-white border border-[#BFDBFE] hover:bg-blue-50 rounded-lg transition-colors"
                     >
-                      Confirmar Pago Recibido
+                      Verificar estado de pago
                     </button>
                   )}
                   {activeTicket.status !== 'in_progress' &&

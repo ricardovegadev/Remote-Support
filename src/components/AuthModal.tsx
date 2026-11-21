@@ -10,7 +10,7 @@ import {
   X,
 } from 'lucide-react';
 import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabaseClient';
-import type { UserAccountProfile, UserRole } from '../types/support';
+import type { UserAccountProfile } from '../types/support';
 import {
   ADULT_RESTRICTION_ERROR,
   calculateAgeFromBirthDate,
@@ -29,7 +29,6 @@ interface AuthModalProps {
   onOpenLegalDoc: (tab: LegalDocTab) => void;
   onExportUserData: () => void;
   onDeleteUserData: () => void;
-  onCancelUserSubscription: () => void;
 }
 
 export function AuthModal({
@@ -41,10 +40,8 @@ export function AuthModal({
   onOpenLegalDoc,
   onExportUserData,
   onDeleteUserData,
-  onCancelUserSubscription,
 }: AuthModalProps) {
   const [mode, setMode] = useState<'login' | 'signup'>('login');
-  const [role, setRole] = useState<UserRole>('client');
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -72,6 +69,10 @@ export function AuthModal({
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!supabaseConfigured && !import.meta.env.DEV) {
+      setAuthError('El acceso está deshabilitado: falta configurar el servicio de autenticación.');
+      return;
+    }
     if (!isValidEmail(email) || password.trim().length < 6) {
       setAuthError('Ingresa un correo válido y una contraseña de al menos 6 caracteres.');
       return;
@@ -104,8 +105,7 @@ export function AuthModal({
               ? meta.full_name
               : cleanEmail.split('@')[0],
           email: data.user.email ?? cleanEmail,
-          role:
-            meta.role === 'technician' || meta.role === 'admin' ? meta.role : 'client',
+          role: 'client',
           birth_date: typeof meta.birth_date === 'string' ? meta.birth_date : '1990-01-01',
           is_adult_verified: true,
           terms_accepted_at:
@@ -130,7 +130,7 @@ export function AuthModal({
         id: generateUuid(),
         full_name: cleanEmail.split('@')[0],
         email: cleanEmail,
-        role,
+        role: 'client',
         birth_date: '1990-01-01',
         is_adult_verified: true,
         terms_accepted_at: nowIso,
@@ -147,6 +147,10 @@ export function AuthModal({
 
   const handleSignUpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!supabaseConfigured && !import.meta.env.DEV) {
+      setAuthError('El registro está deshabilitado: falta configurar el servicio de autenticación.');
+      return;
+    }
     if (fullName.trim().length < 2) {
       setAuthError('Ingresa tu nombre completo.');
       return;
@@ -196,7 +200,6 @@ export function AuthModal({
           options: {
             data: {
               full_name: fullName.trim(),
-              role,
               birth_date: birthDate,
               is_adult_verified: true,
               terms_accepted_at: nowIso,
@@ -213,7 +216,7 @@ export function AuthModal({
           id: data.user?.id ?? generateUuid(),
           full_name: fullName.trim(),
           email: cleanEmail,
-          role,
+          role: 'client',
           birth_date: birthDate,
           is_adult_verified: true,
           terms_accepted_at: nowIso,
@@ -230,7 +233,7 @@ export function AuthModal({
         id: generateUuid(),
         full_name: fullName.trim(),
         email: cleanEmail,
-        role,
+        role: 'client',
         birth_date: birthDate,
         is_adult_verified: true,
         terms_accepted_at: nowIso,
@@ -321,16 +324,6 @@ export function AuthModal({
                 <Download className="w-4 h-4 text-[#2563EB]" aria-hidden="true" />
                 <span>Descargar mis datos (JSON)</span>
               </button>
-
-              {currentUser.subscription_status === 'active' && (
-                <button
-                  type="button"
-                  onClick={onCancelUserSubscription}
-                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-lg transition-colors"
-                >
-                  <span>Cancelar renovación automática (1 clic)</span>
-                </button>
-              )}
 
               {confirmDeleteOpen ? (
                 <div className="p-3.5 rounded-lg bg-red-50 border border-red-200 space-y-2.5 text-xs">
@@ -485,23 +478,9 @@ export function AuthModal({
               </form>
             ) : (
               <form onSubmit={handleSignUpSubmit} noValidate className="space-y-3.5">
-                <div>
-                  <label
-                    htmlFor="auth-signup-role"
-                    className="block text-xs font-semibold text-[#0B192C] mb-1"
-                  >
-                    Tipo de cuenta
-                  </label>
-                  <select
-                    id="auth-signup-role"
-                    value={role}
-                    onChange={(e) => setRole(e.target.value as UserRole)}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-[#0B192C] focus:border-[#2563EB] focus:outline-none"
-                  >
-                    <option value="client">Cliente / Pyme</option>
-                    <option value="technician">Técnico / Empresa de Soporte</option>
-                  </select>
-                </div>
+                <p className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-900">
+                  Las cuentas de técnico requieren invitación y permisos asignados por un administrador.
+                </p>
 
                 <div>
                   <label

@@ -6,12 +6,12 @@
     <title>Remote Support 365 — Soporte Técnico IT Remoto Bajo Demanda</title>
     <meta
       name="description"
-      content="Soporte técnico IT remoto en minutos para Windows y macOS. Diagnóstico guiado en 3 pasos, tarifas transparentes desde $15 USD (antes $25 USD) y sala de conexión cifrada."
+      content="Soporte técnico IT remoto para Windows y macOS. Diagnóstico guiado, tarifas publicadas desde $15 USD y una sala de conexión para coordinar la asistencia."
     />
     <meta property="og:title" content="Remote Support 365 — Soporte Técnico IT Remoto Bajo Demanda" />
     <meta
       property="og:description"
-      content="Resuelve fallas de impresoras, correo, lentitud del sistema o redes Wi-Fi de forma remota con técnicos certificados."
+      content="Solicita ayuda remota para fallas de impresoras, correo, lentitud del sistema o redes Wi-Fi. Revisa las tarifas y condiciones antes de pagar."
     />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
@@ -70,13 +70,19 @@
 
             var btn = document.createElement('button');
             btn.type = 'button';
-            btn.textContent = 'Limpiar datos locales y reiniciar';
+            btn.textContent = 'Restablecer datos locales de Remote Support 365';
             btn.style.cssText =
               'background:#DC2626;color:#FFFFFF;border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:600;cursor:pointer;';
             btn.onclick = function () {
               try {
-                window.localStorage.clear();
-                window.sessionStorage.clear();
+                for (var i = window.localStorage.length - 1; i >= 0; i--) {
+                  var key = window.localStorage.key(i);
+                  if (key && key.indexOf('rs365_') === 0) window.localStorage.removeItem(key);
+                }
+                for (var j = window.sessionStorage.length - 1; j >= 0; j--) {
+                  var sessionKey = window.sessionStorage.key(j);
+                  if (sessionKey && sessionKey.indexOf('rs365_') === 0) window.sessionStorage.removeItem(sessionKey);
+                }
               } catch (e) {}
               window.location.reload();
             };

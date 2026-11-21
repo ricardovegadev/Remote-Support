@@ -44,14 +44,14 @@ const TODAY_ISO = new Date().toISOString().slice(0, 10);
 export const SEED_ORGANIZATIONS: Organization[] = [
   {
     id: '00000000-0000-4000-8000-000000000001',
-    name: 'Mi organización',
-    slug: 'mi-organizacion',
+    name: 'Remote Support 365',
+    slug: 'remote-support-365',
     plan_tier: 'internal_hq',
     dispatch_mode: 'smart',
     rustdesk_relay_domain: 'relay.remotesupport365.com',
     payment_gateway: 'stripe_paypal',
-    ai_credits_monthly: 10000,
-    ai_credits_used: 1840,
+    ai_credits_monthly: 5000,
+    ai_credits_used: 0,
     subscription_auto_renew: true,
     subscription_canceled_at: null,
     created_at: `${TODAY_ISO}T06:00:00.000Z`,
@@ -769,6 +769,12 @@ function isNonEmptyStr(val: unknown): val is string {
   return typeof val === 'string' && val.trim().length > 0;
 }
 
+function excludeSeedRecords<T extends { id: string }>(records: T[], seeds: T[]): T[] {
+  if (!isSupabaseConfigured()) return records;
+  const seedIds = new Set(seeds.map((record) => record.id));
+  return records.filter((record) => !seedIds.has(record.id));
+}
+
 function writeLocal<T>(key: string, value: T): void {
   if (typeof window === 'undefined') return;
   try {
@@ -944,7 +950,7 @@ export const supportAdapter = {
         );
       }
     );
-    return sortTicketsDeterministically(valid);
+    return sortTicketsDeterministically(excludeSeedRecords(valid, SEED_TICKETS));
   },
 
   saveTickets(tickets: SupportTicket[]): SupportTicket[] {
@@ -954,7 +960,7 @@ export const supportAdapter = {
   },
 
   loadMessages(): TicketMessage[] {
-    return loadSanitizedCollection<TicketMessage>(
+    return excludeSeedRecords(loadSanitizedCollection<TicketMessage>(
       MESSAGES_STORAGE_KEY,
       SEED_MESSAGES,
       (item): item is TicketMessage => {
@@ -970,11 +976,11 @@ export const supportAdapter = {
       },
       undefined,
       true
-    );
+    ), SEED_MESSAGES);
   },
 
   loadOrganizations(): Organization[] {
-    return loadSanitizedCollection<Organization>(
+    return excludeSeedRecords(loadSanitizedCollection<Organization>(
       ORGS_STORAGE_KEY,
       SEED_ORGANIZATIONS,
       (item): item is Organization => {
@@ -992,7 +998,9 @@ export const supportAdapter = {
         rustdesk_relay_domain:
           item.rustdesk_relay_domain ?? 'relay.remotesupport365.com',
       })
-    );
+    ), SEED_ORGANIZATIONS.filter(
+      (organization) => organization.id !== '00000000-0000-4000-8000-000000000001'
+    ));
   },
 
   loadMembers(): OrganizationMember[] {
@@ -1019,7 +1027,7 @@ export const supportAdapter = {
       return mapped.length > 0 ? mapped : ['Windows & BSOD'];
     };
 
-    return loadSanitizedCollection<OrganizationMember>(
+    return excludeSeedRecords(loadSanitizedCollection<OrganizationMember>(
       MEMBERS_STORAGE_KEY,
       SEED_MEMBERS,
       (item): item is OrganizationMember => {
@@ -1036,11 +1044,11 @@ export const supportAdapter = {
         ...item,
         specialties: normalizeSpecialties(item.specialties),
       })
-    );
+    ), SEED_MEMBERS);
   },
 
   loadDevices(): ClientDevice[] {
-    return loadSanitizedCollection<ClientDevice>(
+    return excludeSeedRecords(loadSanitizedCollection<ClientDevice>(
       DEVICES_STORAGE_KEY,
       SEED_DEVICES,
       (item): item is ClientDevice => {
@@ -1055,11 +1063,11 @@ export const supportAdapter = {
       },
       undefined,
       true
-    );
+    ), SEED_DEVICES);
   },
 
   loadSessions(): RemoteSessionRecord[] {
-    return loadSanitizedCollection<RemoteSessionRecord>(
+    return excludeSeedRecords(loadSanitizedCollection<RemoteSessionRecord>(
       SESSIONS_STORAGE_KEY,
       SEED_SESSIONS,
       (item): item is RemoteSessionRecord => {
@@ -1075,11 +1083,11 @@ export const supportAdapter = {
       },
       undefined,
       true
-    );
+    ), SEED_SESSIONS);
   },
 
   loadAiAgents(): AiAgentConfig[] {
-    return loadSanitizedCollection<AiAgentConfig>(
+    return excludeSeedRecords(loadSanitizedCollection<AiAgentConfig>(
       AI_AGENTS_STORAGE_KEY,
       SEED_AI_AGENTS,
       (item): item is AiAgentConfig => {
@@ -1093,11 +1101,11 @@ export const supportAdapter = {
           Array.isArray(a.governance_rules)
         );
       }
-    );
+    ), SEED_AI_AGENTS);
   },
 
   loadAuditLogs(): AuditLogEntry[] {
-    return loadSanitizedCollection<AuditLogEntry>(
+    return excludeSeedRecords(loadSanitizedCollection<AuditLogEntry>(
       AUDIT_STORAGE_KEY,
       SEED_AUDIT_LOGS,
       (item): item is AuditLogEntry => {
@@ -1113,7 +1121,7 @@ export const supportAdapter = {
       },
       undefined,
       true
-    );
+    ), SEED_AUDIT_LOGS);
   },
 
   saveOrganizations(orgs: Organization[]): void {
@@ -1308,10 +1316,12 @@ export const supportAdapter = {
       const hasTechSession = Boolean(sessionRes?.data?.session);
 
       let client = staffClient;
-      if (!hasTechSession && options?.ticketCode) {
+      let hasOperatorSession = hasTechSession;
+      if (options?.ticketCode) {
         const token = getRoomToken(options.ticketCode);
         if (token) {
           client = getRoomScopedSupabaseClient(options.ticketCode, token);
+          hasOperatorSession = false;
         }
       }
 
@@ -1332,13 +1342,13 @@ export const supportAdapter = {
           .order('created_at', { ascending: false })
           .order('ticket_code', { ascending: false }),
         client.from('ticket_messages').select('*').order('created_at', { ascending: true }),
-        hasTechSession
+        hasOperatorSession
           ? client.from('organizations').select('*').order('created_at', { ascending: true })
           : Promise.resolve({ data: null, error: null }),
-        hasTechSession
+        hasOperatorSession
           ? client.from('organization_members').select('*').order('created_at', { ascending: true })
           : Promise.resolve({ data: null, error: null }),
-        hasTechSession
+        hasOperatorSession
           ? client.from('technician_profiles').select('*')
           : Promise.resolve({ data: null, error: null }),
       ]);
@@ -1531,23 +1541,12 @@ export const supportAdapter = {
             terms_version: ticket.terms_version ?? null,
             marketing_opt_in: Boolean(ticket.marketing_opt_in),
             billing_mode: ticket.billing_mode ?? 'one_time',
-            subscription_status: ticket.subscription_status ?? 'none',
             os_type: ticket.os_type,
             service_tier: ticket.service_tier,
             priority: ticket.priority,
             problem_description: ticket.problem_description,
             ai_diagnosis: ticket.ai_diagnosis ?? {},
             ai_diagnosis_summary: ticket.ai_diagnosis_summary,
-            rustdesk_id: ticket.rustdesk_id,
-            agent_type: ticket.agent_type,
-            agent_downloaded: ticket.agent_downloaded,
-            consent_accepted: ticket.consent_accepted,
-            payment_status: ticket.payment_status,
-            status: ticket.status,
-            assigned_to: ticket.assigned_to,
-            assigned_technician_id: ticket.assigned_technician_id,
-            assigned_technician_name: ticket.assigned_technician_name,
-            resolution_notes: ticket.resolution_notes,
             client_session_token: ticket.client_session_token,
             created_at: ticket.created_at,
           };
@@ -1585,21 +1584,6 @@ export const supportAdapter = {
             );
             markLocalFallbackTicket(ticket.id);
             fallbackWarning = `Ticket generado en respaldo local (Supabase reportó: ${formatSupabaseError(insertError)}).`;
-          } else if (ticket.terms_accepted_at) {
-            try {
-              await supabase.from('audit_logs').insert({
-                organization_id: ticket.organization_id,
-                actor_type: 'client',
-                actor_label: ticket.client_name,
-                action: `Verificó +18 años y aceptó Términos ${ticket.terms_version ?? 'v1.0-2026'}`,
-                target_ref: ticket.ticket_code,
-              });
-            } catch (auditErr) {
-              console.warn(
-                '[Supabase persistTicket] No se pudo registrar audit_log remoto (no bloqueante):',
-                auditErr
-              );
-            }
           }
         } catch (error) {
           console.warn(
@@ -1772,12 +1756,15 @@ export const supportAdapter = {
     existing: SupportTicket[],
     scope?: { ticketCode?: string; sessionToken?: string }
   ): Promise<AdapterResult<SupportTicket[]>> {
+    const isLocalFallback = getLocalFallbackTicketIds().has(ticketId);
+    const safePatch = isSupabaseConfigured() && !isLocalFallback
+      ? Object.fromEntries(Object.entries(patch).filter(([key]) => key !== 'payment_status')) as typeof patch
+      : patch;
     const next = sortTicketsDeterministically(
       existing.map((ticket) =>
-        ticket.id === ticketId ? { ...ticket, ...patch } : ticket
+        ticket.id === ticketId ? { ...ticket, ...safePatch } : ticket
       )
     );
-    const isLocalFallback = getLocalFallbackTicketIds().has(ticketId);
 
     if (isSupabaseConfigured() && !isLocalFallback) {
       try {
@@ -1792,10 +1779,28 @@ export const supportAdapter = {
           (ticketCode ? getRoomToken(ticketCode) : null) ??
           targetTicket?.client_session_token;
 
-        const client =
-          !hasTechSession && ticketCode && token
-            ? getRoomScopedSupabaseClient(ticketCode, token)
-            : staffClient;
+        let isStaffForTicket = false;
+        const operatorId = sessionRes?.data.session?.user.id;
+        if (hasTechSession && operatorId && targetTicket?.organization_id && staffClient) {
+          const [memberResult, profileResult] = await Promise.all([
+            staffClient
+              .from('organization_members')
+              .select('id')
+              .eq('organization_id', targetTicket.organization_id)
+              .eq('user_id', operatorId)
+              .eq('status', 'active')
+              .limit(1),
+            staffClient.from('profiles').select('role').eq('id', operatorId).maybeSingle(),
+          ]);
+          isStaffForTicket = Boolean(
+            (!memberResult.error && memberResult.data?.length) ||
+            (!profileResult.error && profileResult.data?.role === 'admin')
+          );
+        }
+
+        const client = ticketCode && token
+          ? getRoomScopedSupabaseClient(ticketCode, token)
+          : staffClient;
 
         if (!client) {
           return {
@@ -1811,7 +1816,7 @@ export const supportAdapter = {
         if ('consent_accepted' in patch) dbPatch.consent_accepted = patch.consent_accepted;
         if ('consent_accepted_at' in patch)
           dbPatch.consent_accepted_at = patch.consent_accepted_at;
-        if ('payment_status' in patch) dbPatch.payment_status = patch.payment_status;
+        // payment_status is server-owned and never accepted from a browser update.
         if ('status' in patch) dbPatch.status = patch.status;
         if ('assigned_to' in patch) dbPatch.assigned_to = patch.assigned_to;
         if ('assigned_technician_id' in patch)
@@ -1833,18 +1838,54 @@ export const supportAdapter = {
         if ('anonymized_at' in patch) dbPatch.anonymized_at = patch.anonymized_at;
 
         let updateError: unknown = null;
+        if ('status' in dbPatch) {
+          if (!isStaffForTicket || !staffClient) {
+            return {
+              ok: false,
+              data: existing,
+              error: 'Solo un técnico asignado o administrador puede cambiar el estado del ticket.',
+            };
+          }
+          const { data, error } = await staffClient.rpc('update_ticket_as_staff', {
+            p_ticket_id: ticketId,
+            p_status: dbPatch.status,
+            p_resolution_notes: typeof dbPatch.resolution_notes === 'string'
+              ? dbPatch.resolution_notes
+              : null,
+            p_resolved_at: typeof dbPatch.resolved_at === 'string'
+              ? dbPatch.resolved_at
+              : null,
+          });
+          if (error || data !== true) {
+            return {
+              ok: false,
+              data: existing,
+              error: error
+                ? `Fallo al guardar el estado del ticket: ${formatSupabaseError(error)}`
+                : 'El servidor rechazó el cambio de estado por permisos, pago o transición inválida.',
+            };
+          }
+          delete dbPatch.status;
+          delete dbPatch.resolution_notes;
+          delete dbPatch.resolved_at;
+        }
+
         for (let attempt = 0; attempt < 20; attempt += 1) {
           if (Object.keys(dbPatch).length === 0) {
             updateError = null;
             break;
           }
-          const { error } = await client
+          const { data, error } = await client
             .from('tickets')
             .update(dbPatch)
-            .eq('id', ticketId);
+            .eq('id', ticketId)
+            .select('id')
+            .maybeSingle();
 
           if (!error) {
-            updateError = null;
+            updateError = data
+              ? null
+              : new Error('Supabase no actualizó el ticket; revisa la sesión, la política RLS y la versión del esquema.');
             break;
           }
           const missingCol = extractMissingSchemaColumn(error);
@@ -1909,15 +1950,13 @@ export const supportAdapter = {
     if (isSupabaseConfigured() && !isLocalFallback) {
       try {
         const staffClient = getSupabaseClient();
-        const sessionRes = staffClient ? await staffClient.auth.getSession() : null;
-        const hasTechSession = Boolean(sessionRes?.data?.session);
 
         const token =
           scope?.sessionToken ??
           (scope?.ticketCode ? getRoomToken(scope.ticketCode) : null);
 
         const client =
-          senderRole === 'client' && !hasTechSession && scope?.ticketCode && token
+          senderRole === 'client' && scope?.ticketCode && token
             ? getRoomScopedSupabaseClient(scope.ticketCode, token)
             : staffClient;
 
@@ -1929,13 +1968,14 @@ export const supportAdapter = {
           };
         }
 
-        const { error } = await client.from('ticket_messages').insert({
+        const messagePayload: Record<string, unknown> = {
           id: newMessage.id,
           ticket_id: newMessage.ticket_id,
           sender_role: newMessage.sender_role,
           message: newMessage.message,
-          created_at: newMessage.created_at,
-        });
+        };
+        if (senderRole !== 'client') messagePayload.created_at = newMessage.created_at;
+        const { error } = await client.from('ticket_messages').insert(messagePayload);
 
         if (error) {
           return {
@@ -2181,19 +2221,23 @@ export const supportAdapter = {
     userProfile?: UserAccountProfile | null;
     organization?: Organization | null;
   }): string {
+    const sanitizeTicket = (ticket?: SupportTicket | null) => {
+      if (!ticket) return null;
+      const { client_session_token: _sessionToken, payment_reference: _paymentReference, stripe_subscription_id: _subscriptionId, ...safeTicket } = ticket;
+      return safeTicket;
+    };
+    const sanitizeMessages = (messages: TicketMessage[] = []) => messages.map((message) => {
+      const { client_session_token: _sessionToken, payment_reference: _paymentReference, ...safeMessage } = message as TicketMessage & Record<string, unknown>;
+      return safeMessage;
+    });
     const payload = {
       exported_at: new Date().toISOString(),
       controller: 'Remote Support 365',
       contact_privacy: 'privacidad@remotesupport365.com',
-      legal_retention_policy: {
-        tickets_and_messages_months: 12,
-        audit_logs_months: 24,
-        ai_public_training_opt_out: true,
-      },
       user_profile: input.userProfile ?? null,
       organization: input.organization ?? null,
-      ticket: input.ticket ?? null,
-      messages: input.messages ?? [],
+      ticket: sanitizeTicket(input.ticket),
+      messages: sanitizeMessages(input.messages),
       audit_logs: input.auditLogs ?? [],
     };
     return JSON.stringify(payload, null, 2);
@@ -2231,56 +2275,4 @@ export const supportAdapter = {
     return res;
   },
 
-  async cancelTicketSubscription(
-    ticketId: string,
-    existing: SupportTicket[],
-    scope?: { ticketCode?: string; sessionToken?: string }
-  ): Promise<AdapterResult<SupportTicket[]>> {
-    const target = existing.find((t) => t.id === ticketId);
-    const res = await this.updateTicket(
-      ticketId,
-      {
-        subscription_status: 'canceled',
-      },
-      existing,
-      scope
-    );
-    if (res.ok && target) {
-      this.appendAuditLog({
-        organization_id: target.organization_id,
-        actor_type: 'client',
-        actor_label: target.client_name,
-        action: 'Canceló renovación automática en 1 clic sin penalizaciones',
-        target_ref: target.ticket_code,
-      });
-    }
-    return res;
-  },
-
-  cancelOrganizationAutoRenew(
-    orgId: string,
-    orgs: Organization[],
-    actorLabel: string = 'Administrador Org'
-  ): Organization[] {
-    const nowIso = new Date().toISOString();
-    const next = orgs.map((o) =>
-      o.id === orgId
-        ? {
-            ...o,
-            subscription_auto_renew: false,
-            subscription_canceled_at: nowIso,
-          }
-        : o
-    );
-    this.saveOrganizations(next);
-    const target = orgs.find((o) => o.id === orgId);
-    this.appendAuditLog({
-      organization_id: orgId,
-      actor_type: 'technician',
-      actor_label: actorLabel,
-      action: 'Canceló renovación automática de suscripción mensual en 1 clic',
-      target_ref: target?.slug ?? orgId,
-    });
-    return next;
-  },
 };

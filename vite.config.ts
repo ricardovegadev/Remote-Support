@@ -12,6 +12,26 @@ export default defineConfig(() => {
         process.env.K_CONFIGURATION ||
         process.env.CLOUD_RUN_TIMEOUT_SECONDS
     );
+  const previewHosts = new Set(
+    (process.env.PREVIEW_HOSTS ?? '')
+      .split(',')
+      .map((host) => host.trim().toLowerCase())
+      .filter(Boolean)
+  );
+  try {
+    const appUrl = process.env.APP_URL?.trim();
+    if (appUrl && appUrl !== 'MY_APP_URL') {
+      previewHosts.add(new URL(appUrl).hostname.toLowerCase());
+    }
+  } catch {
+    // Ignore placeholder or malformed APP_URL values; explicit preview hosts
+    // and the Cloud Run suffix remain available as appropriate.
+  }
+  const allowedHosts = new Set(previewHosts);
+  if (isPreviewEnv) allowedHosts.add('.run.app');
+  if (process.env.ALLOW_QUICK_TUNNEL === 'true') {
+    allowedHosts.add('.trycloudflare.com');
+  }
 
   return {
     plugins: [react(), tailwindcss()],
@@ -21,8 +41,10 @@ export default defineConfig(() => {
       },
     },
     server: {
-      // Allow AI Studio / Cloud Run proxy hostnames (*.run.app) in dev & preview.
-      allowedHosts: true as const,
+      // Keep host checking enabled while allowing explicitly configured preview
+      // proxy hosts and Cloud Run's generated hostname.
+      // Avoid `true`, which disables Vite's DNS-rebinding protection.
+      allowedHosts: [...allowedHosts],
       // Disable HMR WebSocket in AI Studio / Cloud Run preview proxy to avoid
       // `@vite/client` "WebSocket closed without opened" errors.
       hmr: isPreviewEnv ? false : true,

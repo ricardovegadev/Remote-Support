@@ -5,7 +5,6 @@ import {
   Database,
   Download,
   Globe,
-  RotateCcw,
   ShieldAlert,
   Trash2,
 } from 'lucide-react';
@@ -186,7 +185,6 @@ interface OrganizationSettingsViewProps {
   ) => void;
   onOpenSqlModal: () => void;
   onSignOut: () => void;
-  onCancelOrgAutoRenew?: () => void;
   onExportOrgData?: () => void;
   onDeletePersonalData?: () => void;
 }
@@ -198,7 +196,6 @@ export function OrganizationSettingsView({
   onSaveSettings,
   onOpenSqlModal,
   onSignOut,
-  onCancelOrgAutoRenew,
   onExportOrgData,
   onDeletePersonalData,
 }: OrganizationSettingsViewProps) {
@@ -350,7 +347,7 @@ export function OrganizationSettingsView({
         </div>
       </form>
 
-      {/* 1-Click SaaS Auto-Renewal Cancellation & GDPR Data Portability */}
+      {/* SaaS billing status & data portability */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div
           data-testid="org-subscription-card"
@@ -358,47 +355,23 @@ export function OrganizationSettingsView({
         >
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#2563EB]">
-              SUSCRIPCIÓN Y TRANSPARENCIA
+              PLAN DE ORGANIZACIÓN
             </p>
             <h3 className="text-base font-bold text-[#0F172A] mt-0.5">
-              Renovación mensual y cancelación en 1 clic
+              Plan de la organización
             </h3>
             <p className="text-xs text-[#64748B] mt-1 leading-relaxed">
               Plan activo:{' '}
               <strong className="text-[#0F172A] font-mono">
                 {organization.plan_tier}
               </strong>
-              . Sin permanencia ni penalizaciones.
+              . El estado de cobro no está sincronizado con una pasarela en esta versión.
             </p>
           </div>
 
-          {organization.subscription_auto_renew === false ? (
-            <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900">
-              Renovación automática cancelada
-              {organization.subscription_canceled_at
-                ? ` el ${new Date(
-                    organization.subscription_canceled_at
-                  ).toLocaleDateString('es-ES')}`
-                : ''}
-              . El espacio continúa activo hasta el final del periodo actual.
-            </div>
-          ) : (
-            onCancelOrgAutoRenew && (
-              <button
-                type="button"
-                onClick={() => {
-                  onCancelOrgAutoRenew();
-                  setPrivacyNotice(
-                    'Renovación automática cancelada en 1 clic y registrada en auditoría.'
-                  );
-                }}
-                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-xl transition-colors"
-              >
-                <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>Cancelar renovación automática</span>
-              </button>
-            )
-          )}
+          <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-950">
+            La etiqueta del plan es informativa. Todavía no hay portal de facturación para consultar cargos o cancelar una renovación.
+          </div>
         </div>
 
         <div

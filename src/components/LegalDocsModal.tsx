@@ -117,13 +117,12 @@ export function LegalDocsModal({
                 Política de Privacidad y Protección de Datos
               </h3>
 
-              <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-950 text-xs leading-relaxed">
-                <strong>Compromiso explícito sobre Inteligencia Artificial:</strong> Los
-                datos personales, descripciones de incidentes y conversaciones de chat de
-                los clientes <strong>NO se utilizan para entrenar modelos públicos de IA</strong>.
-                Los textos generados por AI Receptionist y AI Report Generator se procesan
-                únicamente para asistir tu ticket específico y son revisados por el
-                especialista asignado.
+              <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 text-amber-950 text-xs leading-relaxed">
+                <strong>Uso de herramientas de IA:</strong> algunas funciones pueden enviar
+                el texto del incidente a Google Gemini API para generar asistencia. No
+                incluyas contraseñas, códigos de acceso ni datos innecesarios. Revisa las
+                condiciones del proveedor; esta aplicación no configura ni acredita por sí
+                sola sus políticas de retención o entrenamiento.
               </div>
 
               <div className="space-y-2">
@@ -133,7 +132,8 @@ export function LegalDocsModal({
                 <p className="text-xs text-slate-600">
                   Recopilamos estrictamente los datos necesarios para prestar soporte
                   técnico remoto: nombre completo, correo electrónico, fecha de nacimiento
-                  (exclusivamente para verificar la mayoría de edad +18), sistema
+                  (para una declaración de mayoría de edad +18; el formulario no verifica
+                  identidad ni edad mediante documentos), sistema
                   operativo, descripción técnica del incidente e identificador temporal de
                   9 dígitos de RustDesk. No realizamos grabaciones de pantalla ni acceso
                   en segundo plano sin tu consentimiento explícito en la sala de sesión.
@@ -142,23 +142,23 @@ export function LegalDocsModal({
 
               <div className="space-y-2">
                 <h4 className="font-semibold text-[#0B192C]">
-                  2. Plazos exactos de retención
+                  2. Conservación y solicitudes de privacidad
                 </h4>
                 <ul className="list-disc pl-5 space-y-1 text-xs text-slate-600">
                   <li>
-                    <strong>Tickets y mensajes de chat:</strong> conservados durante{' '}
-                    <strong>12 meses</strong> para seguimiento de garantías e historial de
-                    incidencias.
+                    <strong>Tickets y mensajes:</strong> el producto no aplica actualmente
+                    un plazo automático de eliminación verificable. La conservación puede
+                    depender de la operación y obligaciones aplicables.
                   </li>
                   <li>
-                    <strong>Registros de auditoría y consentimientos (audit_logs):</strong>{' '}
-                    conservados durante <strong>24 meses</strong> por trazabilidad legal y
-                    seguridad operativa.
+                    <strong>Registros de auditoría:</strong> no existe una purga automática
+                    por antigüedad implementada en esta versión.
                   </li>
                   <li>
-                    <strong>Supresión inmediata a solicitud:</strong> puedes exportar tus
-                    datos en formato JSON o solicitar la anonimización inmediata de tus
-                    datos personales desde tu Sala de Conexión o Cuenta.
+                    <strong>Solicitudes:</strong> puedes pedir acceso, corrección o
+                    anonimización en los canales de contacto. La exportación disponible
+                    cubre los datos mostrados por la aplicación y la anonimización del
+                    ticket no elimina automáticamente todos los registros o cuentas.
                   </li>
                 </ul>
               </div>
@@ -183,13 +183,15 @@ export function LegalDocsModal({
                   <div className="p-3 rounded-lg bg-[#F8FAFC] border border-slate-200">
                     <p className="font-semibold text-[#0B192C]">Google Gemini API</p>
                     <p className="text-slate-600">
-                      Asistencia técnica de triaje y redacción de informes sin entrenamiento.
+                      Puede procesar texto de incidencias para generar asistencia; revisa
+                      las condiciones vigentes del proveedor.
                     </p>
                   </div>
                   <div className="p-3 rounded-lg bg-[#F8FAFC] border border-slate-200">
                     <p className="font-semibold text-[#0B192C]">RustDesk</p>
                     <p className="text-slate-600">
-                      Infraestructura de túnel cifrado TLS 1.3 para conexión remota supervisada.
+                      Herramienta de conexión remota. El cifrado y la retención dependen
+                      de la configuración e infraestructura utilizadas.
                     </p>
                   </div>
                 </div>
@@ -255,40 +257,38 @@ export function LegalDocsModal({
           {activeTab === 'refunds' && (
             <div className="space-y-4">
               <h3 className="text-base font-bold text-[#0B192C]">
-                Política de Reembolsos y Cancelación en 1 Clic
+                Información de Reembolsos y Cancelación
               </h3>
 
               <div className="p-4 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-950 space-y-1.5">
                 <p className="font-semibold">
-                  Garantía de Satisfacción en Asistencias Puntuales ($15 / $29 / $39 USD)
+                  Solicitudes de reembolso
                 </p>
                 <p>
-                  Si el especialista técnico asignado determina que la falla no puede
-                  resolverse de forma remota o no logra restablecer la operación esperada
-                  durante la sesión, emitimos un <strong>reembolso total del 100%</strong>{' '}
-                  al método de pago utilizado en un plazo de 3 a 5 días hábiles.
+                  El pago se procesa antes de prestar la asistencia. Esta aplicación no
+                  emite reembolsos automáticamente. Para solicitar una revisión, escribe
+                  a soporte con el código del ticket y el comprobante; la elegibilidad,
+                  decisión y plazos dependen de los términos aplicables y del procesador.
                 </p>
               </div>
 
               <div className="space-y-2">
                 <h4 className="font-semibold text-[#0B192C]">
-                  Cancelación inmediata en Planes Mensuales Pyme y SaaS
+                  Planes de suscripción
                 </h4>
                 <ul className="list-disc pl-5 space-y-1 text-xs text-slate-600">
                   <li>
-                    <strong>Sin permanencia ni penalizaciones:</strong> puedes cancelar la
-                    renovación automática en <strong>1 solo clic</strong> desde tu Sala de
-                    Conexión, Cuenta o Configuración de la Organización.
+                    La aplicación no ofrece actualmente un portal de autoservicio para
+                    cancelar. Contacta a soporte para solicitar la cancelación de futuras
+                    renovaciones y conservar el comprobante de la solicitud.
                   </li>
                   <li>
-                    <strong>Transparencia de renovación:</strong> antes de procesar el
-                    primer cargo de un plan mensual se muestra explícitamente la
-                    periodicidad de renovación automática y la forma de cancelarla.
+                    Revisa la periodicidad y condiciones que muestra el procesador de pago
+                    antes de confirmar la suscripción.
                   </li>
                   <li>
-                    <strong>Efecto de la cancelación:</strong> detiene de inmediato futuros
-                    cobros manteniendo la cobertura activa hasta el final del periodo ya
-                    abonado.
+                    La fecha efectiva y el estado de acceso deben confirmarse con soporte;
+                    el panel actual no sincroniza el ciclo de suscripción.
                   </li>
                 </ul>
               </div>
