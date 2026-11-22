@@ -255,6 +255,13 @@ export function AuthModal({
           setAuthError(`No se pudo completar el registro: ${error.message}`);
           return;
         }
+        if (!data.session) {
+          setAuthError(
+            'Cuenta creada. Revisa tu correo electrónico para confirmar tu cuenta antes de iniciar sesión.'
+          );
+          setMode('login');
+          return;
+        }
         onAuthenticated({
           id: data.user?.id ?? generateUuid(),
           full_name: fullName.trim(),

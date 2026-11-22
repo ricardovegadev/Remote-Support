@@ -165,11 +165,11 @@
             showDiagCard(
               capturedError
                 ? capturedError.message
-                : 'Timeout de arranque (2s): el módulo /src/main.tsx no montó contenido en #root.',
+                : 'Timeout de arranque (8s): el módulo /src/main.tsx no montó contenido en #root.',
               capturedError ? capturedError.file : '/src/main.tsx'
             );
           }
-        }, 2000);
+        }, 8000);
 
         window.__RS365_CLEAR_BOOT_TIMER__ = function () {
           if (timerId !== null) {

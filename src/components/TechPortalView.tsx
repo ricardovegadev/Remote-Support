@@ -13,8 +13,22 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
-import schemaSql from '../../supabase/schema.sql?raw';
 import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabaseClient';
+
+const SCHEMA_DEPLOYMENT_GUIDE = `-- Remote Support 365 · Guía de despliegue de base de datos Supabase
+-- Por seguridad, el esquema completo y las políticas RLS no se empaquetan en el bundle público del navegador.
+-- Aplica el esquema y las migraciones directamente desde el repositorio del proyecto:
+--
+-- 1. Instalación inicial (base vacía):
+--    Ejecuta supabase/schema.sql en el SQL Editor de Supabase o mediante CLI.
+--
+-- 2. Actualización y endurecimiento RLS en proyecto existente:
+--    supabase db push
+--    (Aplica supabase/migrations/20261121000000_security_and_schema_alignment.sql)
+--
+-- 3. Variables requeridas en el servidor (nunca con prefijo VITE_):
+--    SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
+`;
 import type {
   AiAgentConfig,
   AuditLogEntry,
@@ -293,9 +307,8 @@ export function TechPortalView({
       const allowed = await hasOperatorAccess(supabase, user.id);
       if (!mounted) return;
       if (!allowed) {
-        setAuthError('Tu cuenta no tiene una membresía técnica activa. Solicita una invitación al administrador.');
+        setAuthError('Tu cuenta actual no tiene una membresía técnica activa. Inicia sesión con una cuenta de operador o solicita una invitación al administrador.');
         setAuthStatus('unauthenticated');
-        void supabase.auth.signOut();
         return;
       }
       setOperatorEmail(user.email ?? 'tecnico@remotesupport365.com');
@@ -570,7 +583,7 @@ export function TechPortalView({
 
   const handleCopySql = async () => {
     try {
-      await navigator.clipboard.writeText(schemaSql);
+      await navigator.clipboard.writeText(SCHEMA_DEPLOYMENT_GUIDE);
       setCopiedSql(true);
       window.setTimeout(() => setCopiedSql(false), 2000);
     } catch {
@@ -806,10 +819,8 @@ export function TechPortalView({
                           onChange={(e) => setSignupTermsAccepted(e.target.checked)}
                           className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#2563EB] cursor-pointer"
                         />
-                        <span>
-                          <label htmlFor="tech-signup-terms" className="cursor-pointer">
-                            He leído y acepto los{' '}
-                          </label>
+                        <label htmlFor="tech-signup-terms" className="cursor-pointer">
+                          He leído y acepto los{' '}
                           <button
                             type="button"
                             onClick={() => onOpenLegalDoc?.('terms')}
@@ -817,9 +828,7 @@ export function TechPortalView({
                           >
                             Términos y Condiciones
                           </button>
-                          <label htmlFor="tech-signup-terms" className="cursor-pointer">
-                            , la{' '}
-                          </label>
+                          , la{' '}
                           <button
                             type="button"
                             onClick={() => onOpenLegalDoc?.('privacy')}
@@ -827,9 +836,7 @@ export function TechPortalView({
                           >
                             Política de Privacidad
                           </button>
-                          <label htmlFor="tech-signup-terms" className="cursor-pointer">
-                            {' '}y la{' '}
-                          </label>
+                          {' '}y la{' '}
                           <button
                             type="button"
                             onClick={() => onOpenLegalDoc?.('refunds')}
@@ -838,7 +845,7 @@ export function TechPortalView({
                             Política de Reembolsos
                           </button>
                           .
-                        </span>
+                        </label>
                       </div>
 
                       <div className="flex items-start gap-2 text-[#475569]">
@@ -1011,16 +1018,22 @@ export function TechPortalView({
                     </span>
                   </div>
                   <div className="divide-y divide-[#E5E9F2] max-h-60 overflow-y-auto">
-                    {orgAuditLogs.slice(0, 4).map((log) => (
-                      <div key={log.id} className="py-2 text-xs">
-                        <p className="font-semibold text-[#0F172A]">
-                          {log.actor_label}
-                        </p>
-                        <p className="text-[#64748B] text-[11px] leading-snug">
-                          {log.action} ({log.target_ref})
-                        </p>
-                      </div>
-                    ))}
+                    {orgAuditLogs.length === 0 ? (
+                      <p className="py-4 text-center text-[11px] text-[#64748B]">
+                        Sin actividad reciente registrada.
+                      </p>
+                    ) : (
+                      orgAuditLogs.slice(0, 4).map((log) => (
+                        <div key={log.id} className="py-2 text-xs">
+                          <p className="font-semibold text-[#0F172A]">
+                            {log.actor_label}
+                          </p>
+                          <p className="text-[#64748B] text-[11px] leading-snug">
+                            {log.action} ({log.target_ref})
+                          </p>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
               )}
@@ -1153,8 +1166,10 @@ export function TechPortalView({
               onSignOut={() => void handleSignOut()}
               onExportOrgData={onExportOrgData}
               onDeletePersonalData={() => {
-                onDeletePersonalData?.();
-                void handleSignOut();
+                void (async () => {
+                  await onDeletePersonalData?.();
+                  await handleSignOut();
+                })();
               }}
             />
           )}
@@ -1167,6 +1182,9 @@ export function TechPortalView({
           role="dialog"
           aria-modal="true"
           aria-labelledby="new-ticket-modal-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setNewTicketModalOpen(false);
+          }}
           className="fixed inset-0 z-50 bg-[#0B1528]/55 backdrop-blur-[1px] flex items-center justify-center p-4"
         >
           <div className="bg-white border border-[#E5E9F2] rounded-xl max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-xl">
@@ -1279,6 +1297,8 @@ export function TechPortalView({
                   >
                     <option value="Windows">Windows</option>
                     <option value="Mac">Mac</option>
+                    <option value="Linux">Linux</option>
+                    <option value="Mobile">Mobile</option>
                   </select>
                 </div>
 
@@ -1365,6 +1385,9 @@ export function TechPortalView({
           role="dialog"
           aria-modal="true"
           aria-labelledby="sql-modal-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSqlModalOpen(false);
+          }}
           className="fixed inset-0 z-50 bg-[#0B1528]/60 flex items-center justify-center p-4"
         >
           <div className="bg-white border border-[#E5E9F2] rounded-xl max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-xl">
@@ -1374,11 +1397,10 @@ export function TechPortalView({
                   id="sql-modal-title"
                   className="text-base font-bold text-[#0F172A]"
                 >
-                  Esquema SQL Multiempresa para Supabase (schema.sql)
+                  Guía de Despliegue SQL para Supabase
                 </h2>
                 <p className="text-xs text-[#64748B]">
-                  organizations, organization_members, technician_profiles,
-                  tickets, claim_ticket_atomically RPC y RLS
+                  Aplica supabase/schema.sql y supabase/migrations/ directamente desde el repositorio
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -1388,11 +1410,11 @@ export function TechPortalView({
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-lg transition-colors"
                 >
                   <Copy className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>{copiedSql ? 'SQL Copiado' : 'Copiar SQL'}</span>
+                  <span>{copiedSql ? 'Guía Copiada' : 'Copiar Guía'}</span>
                 </button>
                 <button
                   type="button"
-                  aria-label="Cerrar visor de esquema SQL"
+                  aria-label="Cerrar visor de despliegue SQL"
                   onClick={() => setSqlModalOpen(false)}
                   className="p-1.5 text-[#64748B] hover:text-[#0F172A] rounded-lg"
                 >
@@ -1402,7 +1424,7 @@ export function TechPortalView({
             </div>
 
             <pre className="p-5 overflow-auto text-xs font-mono leading-relaxed text-[#0F172A] bg-[#F8FAFC] flex-1">
-              {schemaSql}
+              {SCHEMA_DEPLOYMENT_GUIDE}
             </pre>
           </div>
         </div>

@@ -522,6 +522,7 @@ begin
       where om.user_id = v_caller_id
         and om.organization_id = tickets.organization_id
         and om.status = 'active'
+        and om.role in ('owner', 'admin', 'technician')
     )
   returning * into v_ticket;
 
@@ -541,6 +542,52 @@ $$;
 
 revoke all on function public.claim_ticket_atomically(uuid, uuid) from public, anon;
 grant execute on function public.claim_ticket_atomically(uuid, uuid) to authenticated;
+
+create or replace function public.is_org_member(p_org_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = pg_catalog, public
+as $$
+  select exists (
+    select 1
+    from public.organization_members om
+    where om.organization_id = p_org_id
+      and om.user_id = auth.uid()
+      and om.status = 'active'
+  ) or exists (
+    select 1
+    from public.profiles p
+    where p.id = auth.uid()
+      and p.role = 'admin'
+  );
+$$;
+
+revoke all on function public.is_org_member(uuid) from public, anon;
+grant execute on function public.is_org_member(uuid) to authenticated;
+
+create or replace function public.is_org_admin(p_org_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = pg_catalog, public
+as $$
+  select auth.uid() is not null and exists (
+    select 1 from public.organization_members om
+    where om.organization_id = p_org_id
+      and om.user_id = auth.uid()
+      and om.status = 'active'
+      and om.role in ('owner', 'admin')
+  ) or exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.role = 'admin'
+  );
+$$;
+
+revoke all on function public.is_org_admin(uuid) from public, anon;
+grant execute on function public.is_org_admin(uuid) to authenticated;
 
 create or replace function public.update_ticket_as_staff(
   p_ticket_id uuid,
@@ -678,6 +725,7 @@ create or replace function public.request_header(header_name text)
 returns text
 language plpgsql
 stable
+set search_path = pg_catalog, public
 as $$
 declare
   headers_raw text;
@@ -697,6 +745,7 @@ create or replace function public.is_client_room_authorized(row_ticket_code text
 returns boolean
 language sql
 stable
+set search_path = pg_catalog, public
 as $$
   select
     row_ticket_code is not null
@@ -762,7 +811,7 @@ create policy "profiles_authenticated_update_self" on public.profiles
   with check (id = (select auth.uid()));
 revoke insert, update, delete on public.profiles from anon, authenticated;
 grant select on public.profiles to authenticated;
-grant update (full_name, specialty, birth_date, is_adult_verified, terms_accepted_at, terms_version, marketing_opt_in)
+grant update (full_name, specialty, birth_date, terms_accepted_at, terms_version, marketing_opt_in)
   on public.profiles to authenticated;
 
 drop policy if exists "org_members_org_scoped" on public.organization_members;
@@ -826,23 +875,8 @@ create policy "tickets_select_org_members" on public.tickets
 
 drop policy if exists "tickets_update_assigned_staff" on public.tickets;
 
+-- Public ticket creation must go through POST /api/tickets (server-side age/tier/rate-limit enforcement).
 drop policy if exists "tickets_insert_public" on public.tickets;
-create policy "tickets_insert_public" on public.tickets
-  for insert to anon, authenticated with check (
-    organization_id = '00000000-0000-4000-8000-000000000001'::uuid
-    and ticket_code ~* '^RS-[A-Z0-9]{4,12}$'
-    and char_length(trim(client_email)) >= 5
-    and client_session_token ~ '^[A-Fa-f0-9]{64}$'
-    and payment_status = 'pending'
-    and status = 'waiting_payment'
-    and is_adult_verified = true
-    and client_birth_date <= (current_date - interval '18 years')::date
-    and terms_accepted_at is not null
-    and nullif(trim(terms_version), '') is not null
-    and assigned_to is null
-    and assigned_technician_id is null
-    and consent_accepted = false
-  );
 
 drop policy if exists "tickets_insert_org_member" on public.tickets;
 create policy "tickets_insert_org_member" on public.tickets
@@ -883,8 +917,8 @@ create policy "tickets_client_room_privacy_update" on public.tickets
     and anonymized_at is not null
   );
 
--- La app pública solo puede crear tickets iniciales y actualizar los campos
--- que el cliente necesita durante la sala. Un pago nunca se confirma desde el navegador.
+-- La app pública crea tickets a través de POST /api/tickets (service_role) y solo puede actualizar
+-- los campos que el cliente necesita durante la sala. Un pago nunca se confirma desde el navegador.
 revoke insert, update, delete on public.tickets from anon, authenticated;
 grant insert (
   id, ticket_code, organization_id, organization_name, category, client_name,
@@ -892,7 +926,7 @@ grant insert (
   terms_version, marketing_opt_in, billing_mode, os_type,
   service_tier, priority, problem_description, ai_diagnosis, ai_diagnosis_summary,
   client_session_token, created_at
-) on public.tickets to anon, authenticated;
+) on public.tickets to authenticated;
 grant select on public.tickets to anon, authenticated;
 grant update (
   rustdesk_id, agent_type, consent_accepted, consent_accepted_at,
@@ -917,7 +951,7 @@ create or replace function public.update_own_ticket_as_authenticated(
 returns boolean
 language plpgsql
 security definer
-set search_path = public
+set search_path = pg_catalog, public
 as $$
 declare
   v_uid uuid;
@@ -1096,7 +1130,7 @@ create policy "audit_logs_insert_org_member" on public.audit_logs
   with check (
     organization_id is not null
     and public.is_org_member(organization_id)
-    and actor_type in ('technician', 'ai_agent', 'system')
+    and actor_type in ('technician', 'ai_agent')
   );
 revoke all on public.audit_logs from public, anon, authenticated;
 grant select on public.audit_logs to authenticated;
@@ -1135,6 +1169,12 @@ revoke all on public.enterprise_leads from public, anon, authenticated;
 grant insert (company_name, contact_email, team_size, plan_interest)
   on public.enterprise_leads to anon, authenticated;
 grant select on public.enterprise_leads to authenticated;
+
+create index if not exists idx_client_devices_organization_id on public.client_devices (organization_id);
+create index if not exists idx_audit_logs_organization_id on public.audit_logs (organization_id);
+create index if not exists idx_remote_sessions_organization_id on public.remote_sessions (organization_id);
+create index if not exists idx_remote_sessions_ticket_id on public.remote_sessions (ticket_id);
+create index if not exists idx_tickets_assigned_technician_id on public.tickets (assigned_technician_id);
 
 -- ----------------------------------------------------------------------------
 -- 14. Publicación Supabase Realtime

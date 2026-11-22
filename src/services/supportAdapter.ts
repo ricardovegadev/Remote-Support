@@ -821,13 +821,16 @@ function saveRoomToken(ticketCode: string, token: string): void {
 }
 
 function removeRoomToken(ticketCode: string): void {
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined' || !ticketCode) return;
   try {
-    const raw = window.localStorage.getItem(ROOM_TOKENS_STORAGE_KEY);
+    if (window.localStorage.getItem(ROOM_TOKENS_STORAGE_KEY) !== null) {
+      window.localStorage.removeItem(ROOM_TOKENS_STORAGE_KEY);
+    }
+    const raw = window.sessionStorage.getItem(ROOM_TOKENS_STORAGE_KEY);
     if (!raw) return;
     const map: Record<string, string> = JSON.parse(raw);
     delete map[ticketCode.toUpperCase()];
-    window.localStorage.setItem(ROOM_TOKENS_STORAGE_KEY, JSON.stringify(map));
+    window.sessionStorage.setItem(ROOM_TOKENS_STORAGE_KEY, JSON.stringify(map));
   } catch {
     // Ignore storage restriction errors
   }
@@ -1870,11 +1873,13 @@ export const supportAdapter = {
 
   async persistTicket(
     ticket: SupportTicket,
-    existing: SupportTicket[]
+    existing: SupportTicket[],
+    options?: { operatorCreated?: boolean }
   ): Promise<AdapterResult<SupportTicket[]>> {
+    const provisionalTicketId = ticket.id;
     const provisionalTicketCode = ticket.ticket_code;
     saveRoomToken(ticket.ticket_code, ticket.client_session_token);
-    const next = sortTicketsDeterministically([
+    let next = sortTicketsDeterministically([
       ticket,
       ...existing.filter((item) => item.id !== ticket.id),
     ]);
@@ -1882,10 +1887,22 @@ export const supportAdapter = {
 
     if (isSupabaseConfigured()) {
       try {
-        const response = await fetch('/api/tickets', {
+        const isOperatorCreated = Boolean(options?.operatorCreated);
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (isOperatorCreated) {
+          const supabase = getSupabaseClient();
+          const sessionRes = supabase ? await supabase.auth.getSession() : null;
+          const accessToken = sessionRes?.data.session?.access_token;
+          if (accessToken) {
+            headers.Authorization = `Bearer ${accessToken}`;
+          }
+        }
+        const endpoint = isOperatorCreated ? '/api/operator/tickets' : '/api/tickets';
+        const response = await fetch(endpoint, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({
+            organizationId: ticket.organization_id,
             clientName: ticket.client_name,
             clientEmail: ticket.client_email,
             birthDate: ticket.client_birth_date,
@@ -1915,7 +1932,12 @@ export const supportAdapter = {
         }
         Object.assign(ticket, payload.ticket);
         removeRoomToken(provisionalTicketCode);
-        next.splice(0, 1, ticket);
+        next = sortTicketsDeterministically([
+          ticket,
+          ...existing.filter(
+            (item) => item.id !== provisionalTicketId && item.id !== ticket.id
+          ),
+        ]);
         saveRoomToken(ticket.ticket_code, ticket.client_session_token);
       } catch {
         removeRoomToken(provisionalTicketCode);
@@ -2474,7 +2496,7 @@ export const supportAdapter = {
     }
     this.appendAuditLog({
       organization_id: input.organization_id,
-      actor_type: 'system',
+      actor_type: 'technician',
       actor_label: 'Administrador Org',
       action: `Invitó colaborador (${input.member_type}) con tarifa $${input.agreed_ticket_rate_usd} USD/ticket`,
       target_ref: created.email,

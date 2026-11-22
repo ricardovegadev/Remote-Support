@@ -300,6 +300,7 @@ export function TicketsInboxView({
           />
           <input
             type="search"
+            aria-label="Filtrar solicitudes por código, cliente o falla"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Filtrar RS-XXXX, cliente o falla..."

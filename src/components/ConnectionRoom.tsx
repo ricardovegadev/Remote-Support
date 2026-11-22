@@ -51,13 +51,13 @@ interface ConnectionRoomProps {
     ticketId: string,
     rustdeskId: string,
     consentAccepted: boolean
-  ) => Promise<void>;
+  ) => Promise<boolean | void>;
   onConfirmPayment: (ticketId: string) => Promise<void>;
   onSendClientMessage: (ticketId: string, messageText: string) => Promise<void>;
   onResetToNewTicket: () => void;
   onOpenLegalDoc?: (tab: LegalDocTab) => void;
   onExportClientData?: (ticketId: string) => void;
-  onAnonymizeClientData?: (ticketId: string) => Promise<void>;
+  onAnonymizeClientData?: (ticketId: string) => Promise<boolean | void>;
 }
 
 function isEmbeddedInIframe(): boolean {
@@ -91,6 +91,7 @@ export function ConnectionRoom({
   );
   const [idError, setIdError] = useState<string | null>(null);
   const [idSavedNotice, setIdSavedNotice] = useState(false);
+  const [isSavingRustDeskId, setIsSavingRustDeskId] = useState(false);
 
   useEffect(() => {
     if (ticket.rustdesk_id) {
@@ -590,6 +591,7 @@ export function ConnectionRoom({
 
   const handleSaveRustDeskId = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSavingRustDeskId) return;
     const validation = validateRustDeskId(rustdeskInput);
     if (!validation.valid) {
       setIdError(validation.error ?? 'ID inválido.');
@@ -602,8 +604,13 @@ export function ConnectionRoom({
       return;
     }
     setIdError(null);
-    await onSaveRustDeskId(ticket.id, validation.normalized, true);
-    setIdSavedNotice(true);
+    setIsSavingRustDeskId(true);
+    try {
+      const saved = await onSaveRustDeskId(ticket.id, validation.normalized, true);
+      setIdSavedNotice(saved !== false);
+    } finally {
+      setIsSavingRustDeskId(false);
+    }
   };
 
   return (
@@ -1294,10 +1301,13 @@ export function ConnectionRoom({
 
                 <button
                   type="submit"
-                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg transition-colors whitespace-nowrap"
+                  disabled={isSavingRustDeskId}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 disabled:cursor-not-allowed rounded-lg transition-colors whitespace-nowrap"
                 >
                   <ShieldCheck className="w-4 h-4" aria-hidden="true" />
-                  <span>Vincular ID y Autorizar Acceso</span>
+                  <span>
+                    {isSavingRustDeskId ? 'Vinculando...' : 'Vincular ID y Autorizar Acceso'}
+                  </span>
                 </button>
               </form>
 
@@ -1428,11 +1438,13 @@ export function ConnectionRoom({
                         <button
                           type="button"
                           onClick={() => {
-                            void onAnonymizeClientData(ticket.id).then(() => {
+                            void onAnonymizeClientData(ticket.id).then((ok) => {
                               setConfirmAnonymizeOpen(false);
-                              setPrivacyActionNotice(
-                                'Tus datos personales fueron anonimizados y registrados en auditoría.'
-                              );
+                              if (ok !== false) {
+                                setPrivacyActionNotice(
+                                  'Tus datos personales fueron anonimizados y registrados en auditoría.'
+                                );
+                              }
                             });
                           }}
                           className="px-3 py-1 font-semibold text-white bg-red-700 hover:bg-red-800 rounded-md"

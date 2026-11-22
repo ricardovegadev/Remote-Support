@@ -6,7 +6,7 @@ interface TicketChatPanelProps {
   ticketCode: string;
   messages: TicketMessage[];
   currentRole: MessageSenderRole;
-  onSendMessage: (messageText: string) => void;
+  onSendMessage: (messageText: string) => Promise<boolean | void> | void;
   disabled?: boolean;
 }
 
@@ -18,18 +18,26 @@ export function TicketChatPanel({
   disabled = false,
 }: TicketChatPanelProps) {
   const [draftMessage, setDraftMessage] = useState('');
+  const [isSending, setIsSending] = useState(false);
   const listEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     listEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [messages.length]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = draftMessage.trim();
-    if (!trimmed || disabled) return;
-    onSendMessage(trimmed);
-    setDraftMessage('');
+    if (!trimmed || disabled || isSending) return;
+    setIsSending(true);
+    try {
+      const result = await onSendMessage(trimmed);
+      if (result !== false) {
+        setDraftMessage('');
+      }
+    } finally {
+      setIsSending(false);
+    }
   };
 
   return (
@@ -110,7 +118,7 @@ export function TicketChatPanel({
 
       {/* Composer */}
       <form
-        onSubmit={handleSubmit}
+        onSubmit={(e) => void handleSubmit(e)}
         className="p-3 border-t border-slate-200 bg-white flex items-center gap-2"
       >
         <label htmlFor={`chat-input-${currentRole}`} className="sr-only">
@@ -119,7 +127,7 @@ export function TicketChatPanel({
         <input
           id={`chat-input-${currentRole}`}
           type="text"
-          disabled={disabled}
+          disabled={disabled || isSending}
           value={draftMessage}
           onChange={(e) => setDraftMessage(e.target.value)}
           placeholder={
@@ -133,12 +141,12 @@ export function TicketChatPanel({
         />
         <button
           type="submit"
-          disabled={disabled || draftMessage.trim().length === 0}
+          disabled={disabled || isSending || draftMessage.trim().length === 0}
           aria-label="Enviar mensaje"
           className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#2563EB] hover:bg-blue-500 disabled:bg-slate-300 rounded-lg transition-colors whitespace-nowrap shrink-0"
         >
           <Send className="w-3.5 h-3.5" aria-hidden="true" />
-          <span>Enviar</span>
+          <span>{isSending ? 'Enviando...' : 'Enviar'}</span>
         </button>
       </form>
     </div>

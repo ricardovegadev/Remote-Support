@@ -54,13 +54,13 @@ export function AnalyticsView({ tickets }: { tickets: SupportTicket[] }) {
 
         <div className="bg-white border border-[#E5E9F2] rounded-xl p-5 shadow-[0_1px_3px_rgba(15,23,42,0.03)]">
           <p className="text-xs font-medium text-[#64748B]">
-            Satisfacción CSAT
+            Tickets pagados
           </p>
           <p className="font-mono tabular-nums text-2xl font-bold text-[#2563EB] mt-1.5">
-            4.93 / 5.0
+            {tickets.filter((t) => t.payment_status === 'paid').length} / {tickets.length}
           </p>
           <p className="text-[11px] text-[#64748B] mt-1">
-            Evaluación promedio post-sesión
+            Confirmados en pasarela o periodo actual
           </p>
         </div>
       </div>
@@ -69,34 +69,40 @@ export function AnalyticsView({ tickets }: { tickets: SupportTicket[] }) {
         <h3 className="text-base font-bold text-[#0F172A]">
           Rendimiento e ingresos por categoría
         </h3>
-        <div className="space-y-3.5">
-          {categories.map((cat) => {
-            const catTickets = tickets.filter((t) => t.category === cat);
-            const catRev = catTickets
-              .filter((t) => t.payment_status === 'paid')
-              .reduce((s, t) => s + getServiceTierPriceUsd(t.service_tier), 0);
-            const pct =
-              tickets.length > 0
-                ? Math.round((catTickets.length / tickets.length) * 100)
-                : 0;
-            return (
-              <div key={cat} className="space-y-1.5">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-[#0F172A]">{cat}</span>
-                  <span className="font-mono tabular-nums text-[#64748B]">
-                    {catTickets.length} tickets · ${catRev} USD
-                  </span>
+        {categories.length === 0 ? (
+          <p className="text-xs text-[#64748B] py-4 text-center">
+            Aún no hay tickets registrados en esta organización para mostrar métricas por categoría.
+          </p>
+        ) : (
+          <div className="space-y-3.5">
+            {categories.map((cat) => {
+              const catTickets = tickets.filter((t) => t.category === cat);
+              const catRev = catTickets
+                .filter((t) => t.payment_status === 'paid')
+                .reduce((s, t) => s + getServiceTierPriceUsd(t.service_tier), 0);
+              const pct =
+                tickets.length > 0
+                  ? Math.round((catTickets.length / tickets.length) * 100)
+                  : 0;
+              return (
+                <div key={cat} className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-[#0F172A]">{cat}</span>
+                    <span className="font-mono tabular-nums text-[#64748B]">
+                      {catTickets.length} tickets · ${catRev} USD
+                    </span>
+                  </div>
+                  <div className="w-full h-2.5 bg-[#EFF6FF] rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-[#2563EB] rounded-full"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="w-full h-2.5 bg-[#EFF6FF] rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-[#2563EB] rounded-full"
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -134,41 +140,47 @@ export function SecurityAuditView({ logs }: { logs: AuditLogEntry[] }) {
       </div>
 
       <div className="bg-white border border-[#E5E9F2] rounded-xl shadow-[0_1px_3px_rgba(15,23,42,0.03)] overflow-hidden">
-        <div className="divide-y divide-[#E5E9F2]">
-          {logs.map((entry) => (
-            <div
-              key={entry.id}
-              className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs hover:bg-[#F8FAFC] transition-colors"
-            >
-              <div className="space-y-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${actorBadge(
-                      entry.actor_type
-                    )}`}
-                  >
-                    {entry.actor_type}
-                  </span>
-                  <span className="font-semibold text-[#0F172A]">
-                    {entry.actor_label}
-                  </span>
-                  <span className="text-[#475569]">{entry.action}</span>
+        {logs.length === 0 ? (
+          <p className="p-8 text-center text-xs text-[#64748B]">
+            No hay eventos de auditoría registrados todavía en esta organización.
+          </p>
+        ) : (
+          <div className="divide-y divide-[#E5E9F2]">
+            {logs.map((entry) => (
+              <div
+                key={entry.id}
+                className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs hover:bg-[#F8FAFC] transition-colors"
+              >
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${actorBadge(
+                        entry.actor_type
+                      )}`}
+                    >
+                      {entry.actor_type}
+                    </span>
+                    <span className="font-semibold text-[#0F172A]">
+                      {entry.actor_label}
+                    </span>
+                    <span className="text-[#475569]">{entry.action}</span>
+                  </div>
+                  <p className="text-[#64748B] font-mono tabular-nums text-[11px]">
+                    Referencia: {entry.target_ref}
+                  </p>
                 </div>
-                <p className="text-[#64748B] font-mono tabular-nums text-[11px]">
-                  Referencia: {entry.target_ref}
-                </p>
+                <span className="font-mono tabular-nums text-[#64748B] shrink-0">
+                  {new Date(entry.created_at).toLocaleString('es-ES', {
+                    day: '2-digit',
+                    month: 'short',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </span>
               </div>
-              <span className="font-mono tabular-nums text-[#64748B] shrink-0">
-                {new Date(entry.created_at).toLocaleString('es-ES', {
-                  day: '2-digit',
-                  month: 'short',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
-              </span>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -253,10 +265,14 @@ export function OrganizationSettingsView({
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-semibold text-[#0F172A] mb-1.5">
+            <label
+              htmlFor="org-settings-name"
+              className="block text-xs font-semibold text-[#0F172A] mb-1.5"
+            >
               Nombre de la Organización
             </label>
             <input
+              id="org-settings-name"
               type="text"
               value={orgName}
               onChange={(e) => setOrgName(e.target.value)}
@@ -265,11 +281,15 @@ export function OrganizationSettingsView({
           </div>
 
           <div>
-            <label className="flex items-center gap-1.5 text-xs font-semibold text-[#0F172A] mb-1.5">
+            <label
+              htmlFor="org-settings-relay"
+              className="flex items-center gap-1.5 text-xs font-semibold text-[#0F172A] mb-1.5"
+            >
               <Globe className="w-3.5 h-3.5 text-[#2563EB]" aria-hidden="true" />
               <span>Dominio Relay de RustDesk</span>
             </label>
             <input
+              id="org-settings-relay"
               type="text"
               value={relayDomain}
               onChange={(e) => setRelayDomain(e.target.value)}
@@ -278,7 +298,10 @@ export function OrganizationSettingsView({
           </div>
 
           <div>
-            <label className="flex items-center gap-1.5 text-xs font-semibold text-[#0F172A] mb-1.5">
+            <label
+              htmlFor="org-settings-gateway"
+              className="flex items-center gap-1.5 text-xs font-semibold text-[#0F172A] mb-1.5"
+            >
               <CreditCard
                 className="w-3.5 h-3.5 text-[#059669]"
                 aria-hidden="true"
@@ -286,6 +309,7 @@ export function OrganizationSettingsView({
               <span>Pasarela de Pagos</span>
             </label>
             <select
+              id="org-settings-gateway"
               value={gateway}
               onChange={(e) =>
                 setGateway(

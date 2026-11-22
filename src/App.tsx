@@ -337,9 +337,28 @@ export default function App() {
       }
     });
 
+    const supabase = supabaseEnabled ? getSupabaseClient() : null;
+    const authSubscription = supabase
+      ? supabase.auth.onAuthStateChange((event, session) => {
+          if (!isMounted) return;
+          if (event === 'SIGNED_OUT') {
+            supportAdapter.clearUserProfile();
+            setCurrentUser(null);
+            return;
+          }
+          if (
+            session?.user &&
+            (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED')
+          ) {
+            syncFromRemote(false);
+          }
+        }).data.subscription
+      : null;
+
     return () => {
       isMounted = false;
       if (safetyTimer !== null) window.clearTimeout(safetyTimer);
+      authSubscription?.unsubscribe();
       unsubscribe();
     };
   }, [activeTicketCode]);
@@ -450,7 +469,8 @@ export default function App() {
 
   const createTicketForOrganization = async (
     draft: WizardDraft,
-    targetOrgId: string
+    targetOrgId: string,
+    options?: { operatorCreated?: boolean }
   ): Promise<SupportTicket | null> => {
     const targetOrg =
       organizations.find((o) => o.id === targetOrgId) ??
@@ -465,7 +485,7 @@ export default function App() {
       consent_accepted: false,
       consent_accepted_at: null,
     };
-    const result = await supportAdapter.persistTicket(newTicket, tickets);
+    const result = await supportAdapter.persistTicket(newTicket, tickets, options);
     if (!result.ok) {
       setPersistenceError(
         result.error ?? 'No se pudo emitir el ticket. Intenta nuevamente.'
@@ -481,7 +501,7 @@ export default function App() {
   const handleCreateQuickTicket = async (
     draft: WizardDraft
   ): Promise<SupportTicket | null> => {
-    return createTicketForOrganization(draft, activeOrgId);
+    return createTicketForOrganization(draft, activeOrgId, { operatorCreated: true });
   };
 
   const handleSubmitTicket = async () => {
@@ -533,8 +553,7 @@ export default function App() {
     ticketId: string,
     rustdeskId: string,
     consentAccepted: boolean
-  ) => {
-    const target = tickets.find((t) => t.id === ticketId);
+  ): Promise<boolean> => {
     const result = await supportAdapter.updateTicket(
       ticketId,
       {
@@ -547,7 +566,7 @@ export default function App() {
     );
     if (!result.ok) {
       setPersistenceError(result.error ?? 'No se pudo guardar el ID de RustDesk.');
-      return;
+      return false;
     }
     const updatedTicket = result.data.find((t) => t.id === ticketId);
     if (updatedTicket) {
@@ -566,29 +585,38 @@ export default function App() {
     }
     setPersistenceError(null);
     setTickets(result.data);
+    return true;
   };
 
   const handleConfirmPayment = async (ticketId: string) => {
     if (isSupabaseConfigured()) {
       const target = tickets.find((ticket) => ticket.id === ticketId);
       if (!target) {
-        setPersistenceError('No se encontró el ticket después de verificar el pago.');
+        setPersistenceError('No se encontró el ticket para verificar el estado de pago.');
         return;
       }
-      const refreshed = await supportAdapter.syncFromSupabaseIfConfigured({
-        ticketCode: target.ticket_code,
-      });
-      const paidTicket = refreshed.data.tickets?.find(
+      const isOperatorPortal = activeViewRef.current === 'tech_portal';
+      const refreshed = await supportAdapter.syncFromSupabaseIfConfigured(
+        isOperatorPortal ? undefined : { ticketCode: target.ticket_code }
+      );
+      const refreshedTicket = refreshed.data.tickets?.find(
         (ticket) => ticket.ticket_code === target.ticket_code
       );
-      if (!refreshed.ok || !paidTicket || paidTicket.payment_status !== 'paid') {
+      if (refreshed.ok && refreshed.data.tickets && refreshed.data.tickets.length > 0) {
+        setTickets(refreshed.data.tickets);
+      }
+      if (refreshed.ok && refreshed.data.messages) {
+        setMessages(refreshed.data.messages);
+      }
+      if (!refreshed.ok || !refreshedTicket || refreshedTicket.payment_status !== 'paid') {
         setPersistenceError(
-          refreshed.error ?? 'El servidor verificó el pago, pero el ticket aún no está sincronizado.'
+          refreshed.error ??
+            (isOperatorPortal
+              ? 'El pago aún figura pendiente en el servidor. El cliente debe completar el checkout antes de iniciar la sesión.'
+              : 'El pago aún no aparece confirmado en el servidor. Intenta verificar nuevamente en unos segundos.')
         );
         return;
       }
-      setTickets(refreshed.data.tickets ?? tickets);
-      if (refreshed.data.messages) setMessages(refreshed.data.messages);
       setPersistenceError(null);
       return;
     }
@@ -965,7 +993,7 @@ export default function App() {
     );
   };
 
-  const handleAnonymizeClientData = async (ticketId: string) => {
+  const handleAnonymizeClientData = async (ticketId: string): Promise<boolean> => {
     const result = await supportAdapter.anonymizeTicketClientData(
       ticketId,
       tickets,
@@ -975,11 +1003,12 @@ export default function App() {
       setPersistenceError(
         result.error ?? 'No se pudieron anonimizar los datos personales.'
       );
-      return;
+      return false;
     }
     setPersistenceError(null);
     setTickets(result.data);
     setAuditLogs(supportAdapter.loadAuditLogs());
+    return true;
   };
 
   const handleDeletePersonalData = async () => {
@@ -1149,23 +1178,6 @@ export default function App() {
       <main className="flex-1">
         {activeView === 'landing' && (
           <>
-            {persistenceError && (
-              <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
-                <div
-                  role="alert"
-                  className="p-4 rounded-lg bg-red-50 border border-red-200 flex items-center justify-between gap-4 text-xs text-red-900"
-                >
-                  <span className="font-medium">{persistenceError}</span>
-                  <button
-                    type="button"
-                    onClick={() => setPersistenceError(null)}
-                    className="font-semibold underline shrink-0"
-                  >
-                    Ocultar
-                  </button>
-                </div>
-              </div>
-            )}
             <HeroSection
               onStartDiagnostic={handleStartDiagnostic}
               onHowItWorks={() => handleNavigateSection('como-funciona')}

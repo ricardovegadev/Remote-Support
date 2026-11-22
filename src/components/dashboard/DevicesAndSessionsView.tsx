@@ -79,6 +79,7 @@ export function DevicesDirectoryView({
           />
           <input
             type="search"
+            aria-label="Buscar equipo, empresa o ID RustDesk"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar equipo, empresa o ID..."
@@ -236,85 +237,23 @@ export function RemoteSessionsView({ sessions }: SessionsViewProps) {
         </span>
       </div>
 
-      {/* Mobile Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:hidden">
-        {sessions.map((ses) => (
-          <div
-            key={ses.id}
-            className="bg-white border border-[#E5E9F2] rounded-xl p-4 shadow-[0_1px_3px_rgba(15,23,42,0.03)] space-y-2 text-xs"
-          >
-            <div className="flex items-center justify-between">
-              <span className="font-mono tabular-nums font-bold text-[#0F172A]">
-                {ses.ticket_code}
-              </span>
-              <span
-                className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${
-                  ses.status === 'active'
-                    ? 'bg-[#D1FAE5] text-[#059669]'
-                    : 'bg-slate-100 text-[#64748B]'
-                }`}
-              >
-                {ses.status === 'active' ? 'Activa ahora' : 'Finalizada'}
-              </span>
-            </div>
-            <p className="text-sm font-semibold text-[#0F172A]">
-              {ses.client_name}
-            </p>
-            <p className="text-[#64748B]">Técnico: {ses.technician_name}</p>
-            <p className="font-mono tabular-nums text-[#64748B]">
-              RustDesk {formatRustDeskId(ses.rustdesk_id)} ·{' '}
-              {ses.duration_minutes} min
-            </p>
-          </div>
-        ))}
-      </div>
-
-      {/* Desktop Table */}
-      <div className="hidden lg:block bg-white border border-[#E5E9F2] rounded-xl shadow-[0_1px_3px_rgba(15,23,42,0.03)] overflow-hidden">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="border-b border-[#E5E9F2] bg-[#F8FAFC] text-[11px] font-semibold uppercase tracking-wider text-[#64748B]">
-              <th className="py-3 px-4">Ticket</th>
-              <th className="py-3 px-4">Cliente</th>
-              <th className="py-3 px-4">Técnico</th>
-              <th className="py-3 px-4">RustDesk ID</th>
-              <th className="py-3 px-4">Agente</th>
-              <th className="py-3 px-4">Duración</th>
-              <th className="py-3 px-4">Estado</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-[#E5E9F2] text-xs">
+      {sessions.length === 0 ? (
+        <div className="bg-white border border-[#E5E9F2] rounded-xl p-10 text-center text-xs text-[#64748B]">
+          No hay sesiones remotas activas ni finalizadas registradas todavía en esta organización.
+        </div>
+      ) : (
+        <>
+          {/* Mobile Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:hidden">
             {sessions.map((ses) => (
-              <tr key={ses.id} className="hover:bg-[#F8FAFC] transition-colors">
-                <td className="py-3.5 px-4 font-mono tabular-nums font-semibold text-[#0F172A]">
-                  {ses.ticket_code}
-                </td>
-                <td className="py-3.5 px-4 font-medium text-[#0F172A]">
-                  {ses.client_name}
-                </td>
-                <td className="py-3.5 px-4 text-[#475569]">
-                  {ses.technician_name}
-                </td>
-                <td className="py-3.5 px-4 font-mono tabular-nums text-[#475569]">
-                  {formatRustDeskId(ses.rustdesk_id)}
-                </td>
-                <td className="py-3.5 px-4">
-                  <span
-                    className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${
-                      ses.agent_type === 'installed'
-                        ? 'bg-[#DBEAFE] text-[#1D4ED8]'
-                        : 'bg-[#E0F2FE] text-[#0284C7]'
-                    }`}
-                  >
-                    {ses.agent_type === 'installed'
-                      ? 'Agente Instalado'
-                      : 'Agente Temporal'}
+              <div
+                key={ses.id}
+                className="bg-white border border-[#E5E9F2] rounded-xl p-4 shadow-[0_1px_3px_rgba(15,23,42,0.03)] space-y-2 text-xs"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-mono tabular-nums font-bold text-[#0F172A]">
+                    {ses.ticket_code}
                   </span>
-                </td>
-                <td className="py-3.5 px-4 font-mono tabular-nums text-[#475569]">
-                  {ses.duration_minutes} min
-                </td>
-                <td className="py-3.5 px-4">
                   <span
                     className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${
                       ses.status === 'active'
@@ -324,12 +263,82 @@ export function RemoteSessionsView({ sessions }: SessionsViewProps) {
                   >
                     {ses.status === 'active' ? 'Activa ahora' : 'Finalizada'}
                   </span>
-                </td>
-              </tr>
+                </div>
+                <p className="text-sm font-semibold text-[#0F172A]">
+                  {ses.client_name}
+                </p>
+                <p className="text-[#64748B]">Técnico: {ses.technician_name}</p>
+                <p className="font-mono tabular-nums text-[#64748B]">
+                  RustDesk {formatRustDeskId(ses.rustdesk_id)} ·{' '}
+                  {ses.duration_minutes} min
+                </p>
+              </div>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </div>
+
+          {/* Desktop Table */}
+          <div className="hidden lg:block bg-white border border-[#E5E9F2] rounded-xl shadow-[0_1px_3px_rgba(15,23,42,0.03)] overflow-hidden">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-[#E5E9F2] bg-[#F8FAFC] text-[11px] font-semibold uppercase tracking-wider text-[#64748B]">
+                  <th className="py-3 px-4">Ticket</th>
+                  <th className="py-3 px-4">Cliente</th>
+                  <th className="py-3 px-4">Técnico</th>
+                  <th className="py-3 px-4">RustDesk ID</th>
+                  <th className="py-3 px-4">Agente</th>
+                  <th className="py-3 px-4">Duración</th>
+                  <th className="py-3 px-4">Estado</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#E5E9F2] text-xs">
+                {sessions.map((ses) => (
+                  <tr key={ses.id} className="hover:bg-[#F8FAFC] transition-colors">
+                    <td className="py-3.5 px-4 font-mono tabular-nums font-semibold text-[#0F172A]">
+                      {ses.ticket_code}
+                    </td>
+                    <td className="py-3.5 px-4 font-medium text-[#0F172A]">
+                      {ses.client_name}
+                    </td>
+                    <td className="py-3.5 px-4 text-[#475569]">
+                      {ses.technician_name}
+                    </td>
+                    <td className="py-3.5 px-4 font-mono tabular-nums text-[#475569]">
+                      {formatRustDeskId(ses.rustdesk_id)}
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <span
+                        className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${
+                          ses.agent_type === 'installed'
+                            ? 'bg-[#DBEAFE] text-[#1D4ED8]'
+                            : 'bg-[#E0F2FE] text-[#0284C7]'
+                        }`}
+                      >
+                        {ses.agent_type === 'installed'
+                          ? 'Agente Instalado'
+                          : 'Agente Temporal'}
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-4 font-mono tabular-nums text-[#475569]">
+                      {ses.duration_minutes} min
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <span
+                        className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${
+                          ses.status === 'active'
+                            ? 'bg-[#D1FAE5] text-[#059669]'
+                            : 'bg-slate-100 text-[#64748B]'
+                        }`}
+                      >
+                        {ses.status === 'active' ? 'Activa ahora' : 'Finalizada'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -519,6 +519,7 @@ export function WorkforceDispatchView({
         {inviteOpen && (
           <form
             onSubmit={handleInviteSubmit}
+            noValidate
             className="p-4 rounded-xl bg-[#F8FAFC] border border-[#E5E9F2] grid grid-cols-1 sm:grid-cols-4 gap-3 items-end"
           >
             <div>
