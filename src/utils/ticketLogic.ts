@@ -984,6 +984,9 @@ export function parseAppRoute(pathname: string): {
   if (lower === '/postular' || lower === '/trabaja-con-nosotros') {
     return { view: 'technician_apply', ticketCode: null };
   }
+  if (lower === '/registro-tecnico') {
+    return { view: 'technician_register', ticketCode: null };
+  }
   const sessionMatch = clean.match(/^\/sesion\/([^/]+)$/i);
   if (sessionMatch) {
     return {
@@ -992,4 +995,29 @@ export function parseAppRoute(pathname: string): {
     };
   }
   return { view: 'landing', ticketCode: null };
+}
+
+export function validateRegistrationPassword(
+  password: string,
+  confirmPassword: string
+): { valid: boolean; error?: string } {
+  if (password.length < 8) {
+    return {
+      valid: false,
+      error: 'La contraseña debe tener al menos 8 caracteres.',
+    };
+  }
+  if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+    return {
+      valid: false,
+      error: 'Incluye al menos una letra y un número en tu contraseña.',
+    };
+  }
+  if (password !== confirmPassword) {
+    return {
+      valid: false,
+      error: 'Las contraseñas no coinciden.',
+    };
+  }
+  return { valid: true };
 }

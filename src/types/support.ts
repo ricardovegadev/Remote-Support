@@ -73,7 +73,8 @@ export type AppView =
   | 'landing'
   | 'connection_room'
   | 'tech_portal'
-  | 'technician_apply';
+  | 'technician_apply'
+  | 'technician_register';
 
 export type DashboardSection =
   | 'overview'
@@ -354,6 +355,12 @@ export interface TechnicianApplication {
   recommendation: AssessmentRecommendation;
   elapsed_seconds: number;
   status: ApplicationStatus;
+  reviewer_notes?: string | null;
+  reviewed_at?: string | null;
+  invite_expires_at?: string | null;
+  email_delivery_status?: 'not_sent' | 'sent' | 'simulated' | 'failed';
+  email_sent_at?: string | null;
+  debug_register_url?: string;
   created_at: string;
 }
 

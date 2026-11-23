@@ -16,7 +16,7 @@ import {
   UserCheck,
   Wrench,
 } from 'lucide-react';
-import { saveTechnicianApplication } from '../services/supportAdapter';
+import { submitTechnicianApplicationToServer } from '../services/technicianApplicationService';
 import type {
   TechnicianApplication,
   TechnicianSpecialty,
@@ -249,7 +249,7 @@ export function TechnicianApplyView({
         created_at: nowIso,
       };
 
-      saveTechnicianApplication(application);
+      void submitTechnicianApplicationToServer(application);
       setAutoSubmitted(triggeredByTimeout);
       setSubmittedApplication(application);
       window.scrollTo({ top: 0, behavior: 'smooth' });

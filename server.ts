@@ -3,10 +3,15 @@ import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { GoogleGenAI, Type } from '@google/genai';
 import Stripe from 'stripe';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import {
+  isGmailConfigured,
+  sendTechnicianApprovedEmail,
+  sendTechnicianRejectedEmail,
+} from './src/server/gmailService.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -2104,6 +2109,608 @@ async function startServer() {
       });
     }
   });
+
+  // ==========================================================================
+  // Fase 2: Postulaciones de Técnicos, Aprobación Admin + Gmail y Registro Token
+  // ==========================================================================
+  interface StoredTechnicianApplication {
+    id: string;
+    organization_id: string;
+    full_name: string;
+    email: string;
+    country: string;
+    birth_date: string;
+    is_adult_verified: boolean;
+    modality: 'half_time' | 'full_time';
+    specialties: string[];
+    certifications: string;
+    nda_accepted: boolean;
+    nda_version: string;
+    nda_signature_name: string;
+    nda_accepted_at: string;
+    technical_score: number;
+    attitude_score: number;
+    total_score: number;
+    recommendation: 'recommended_approve' | 'manual_review' | 'recommended_reject';
+    timed_out: boolean;
+    status: 'pending_review' | 'approved' | 'rejected' | 'registered';
+    reviewer_notes: string | null;
+    reviewed_by: string | null;
+    reviewed_at: string | null;
+    invite_token_hash: string | null;
+    invite_expires_at: string | null;
+    invite_used_at: string | null;
+    email_delivery_status: 'not_sent' | 'sent' | 'simulated' | 'failed';
+    email_sent_at: string | null;
+    created_at: string;
+    updated_at: string;
+  }
+
+  const DEFAULT_ORG_ID = '00000000-0000-4000-8000-000000000001';
+  const INVITE_TTL_HOURS = 72;
+  const sandboxTechApplications = new Map<string, StoredTechnicianApplication>();
+
+  const hashInviteToken = (rawToken: string): string =>
+    createHash('sha256').update(rawToken.trim(), 'utf8').digest('hex');
+
+  const resolvePublicBaseUrl = (req: express.Request): string => {
+    const configured = process.env.APP_PUBLIC_URL?.trim();
+    if (configured && /^https?:\/\//i.test(configured)) {
+      return configured.replace(/\/+$/, '');
+    }
+    const proto = (req.headers['x-forwarded-proto'] as string)?.split(',')[0]?.trim() || req.protocol || 'http';
+    const host = (req.headers['x-forwarded-host'] as string)?.split(',')[0]?.trim() || req.get('host') || `localhost:${PORT}`;
+    return `${proto}://${host}`;
+  };
+
+  const isAdultBirthDateIso = (birthDate: string): boolean => {
+    const match = birthDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return false;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const birth = new Date(Date.UTC(year, month - 1, day));
+    if (
+      birth.getUTCFullYear() !== year ||
+      birth.getUTCMonth() !== month - 1 ||
+      birth.getUTCDate() !== day
+    ) {
+      return false;
+    }
+    const now = new Date();
+    let age = now.getUTCFullYear() - year;
+    const mDiff = now.getUTCMonth() - (month - 1);
+    if (mDiff < 0 || (mDiff === 0 && now.getUTCDate() < day)) {
+      age -= 1;
+    }
+    return age >= 18;
+  };
+
+  const sanitizeAppForAdmin = (row: StoredTechnicianApplication) => {
+    const { invite_token_hash: _hidden, ...safe } = row;
+    return safe;
+  };
+
+  app.post(
+    '/api/technicians/apply',
+    createRateLimiter(8, 15 * 60_000),
+    async (req, res) => {
+      try {
+        const body = req.body ?? {};
+        const fullName = typeof body.full_name === 'string' ? body.full_name.trim() : '';
+        const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+        const country = typeof body.country === 'string' ? body.country.trim() : '';
+        const birthDate = typeof body.birth_date === 'string' ? body.birth_date.trim() : '';
+        const modality = body.modality === 'full_time' ? 'full_time' : body.modality === 'half_time' ? 'half_time' : null;
+        const specialties = Array.isArray(body.specialties)
+          ? body.specialties.filter((s: unknown): s is string => typeof s === 'string' && s.trim().length > 0).slice(0, 8)
+          : [];
+        const certifications = typeof body.certifications === 'string' ? body.certifications.trim().slice(0, 500) : '';
+        const ndaAccepted = body.nda_accepted === true;
+        const ndaVersion = typeof body.nda_version === 'string' && body.nda_version.trim()
+          ? body.nda_version.trim().slice(0, 64)
+          : 'NDA-TECH-v1.0-2026';
+        const ndaSignatureName =
+          typeof body.nda_signature_name === 'string' && body.nda_signature_name.trim()
+            ? body.nda_signature_name.trim()
+            : typeof body.nda_signed_name === 'string'
+            ? body.nda_signed_name.trim()
+            : '';
+        const technicalScore = Math.max(0, Math.min(100, Math.round(Number(body.technical_score) || 0)));
+        const attitudeScore = Math.max(0, Math.min(100, Math.round(Number(body.attitude_score) || 0)));
+        const totalScore = Math.max(0, Math.min(100, Math.round(Number(body.total_score) || Math.round((technicalScore + attitudeScore) / 2))));
+        const recommendation =
+          totalScore >= 75 && attitudeScore >= 80
+            ? 'recommended_approve'
+            : totalScore >= 60
+            ? 'manual_review'
+            : 'recommended_reject';
+        const timedOut = Boolean(body.timed_out);
+
+        if (fullName.length < 3 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || country.length < 2) {
+          res.status(400).json({ success: false, error: 'Nombre, correo o país inválidos.' });
+          return;
+        }
+        if (!isAdultBirthDateIso(birthDate)) {
+          res.status(400).json({ success: false, error: 'Debes ser mayor de 18 años para postular.' });
+          return;
+        }
+        if (!modality || specialties.length === 0) {
+          res.status(400).json({ success: false, error: 'Selecciona modalidad y al menos una especialidad.' });
+          return;
+        }
+        if (!ndaAccepted || ndaSignatureName.length < 3) {
+          res.status(400).json({ success: false, error: 'Debes aceptar y firmar el Acuerdo de Confidencialidad Interno (NDA).' });
+          return;
+        }
+
+        const nowIso = new Date().toISOString();
+        const record: StoredTechnicianApplication = {
+          id: isValidUuid(body.id) ? body.id : randomUUID(),
+          organization_id: DEFAULT_ORG_ID,
+          full_name: fullName,
+          email,
+          country,
+          birth_date: birthDate,
+          is_adult_verified: true,
+          modality,
+          specialties,
+          certifications,
+          nda_accepted: true,
+          nda_version: ndaVersion,
+          nda_signature_name: ndaSignatureName,
+          nda_accepted_at: typeof body.nda_accepted_at === 'string' ? body.nda_accepted_at : nowIso,
+          technical_score: technicalScore,
+          attitude_score: attitudeScore,
+          total_score: totalScore,
+          recommendation,
+          timed_out: timedOut,
+          status: 'pending_review',
+          reviewer_notes: null,
+          reviewed_by: null,
+          reviewed_at: null,
+          invite_token_hash: null,
+          invite_expires_at: null,
+          invite_used_at: null,
+          email_delivery_status: 'not_sent',
+          email_sent_at: null,
+          created_at: nowIso,
+          updated_at: nowIso,
+        };
+
+        const supabase = getSupabaseAdmin();
+        if (supabase) {
+          const { data, error } = await supabase
+            .from('technician_applications')
+            .insert(record)
+            .select('*')
+            .single();
+          if (error || !data) {
+            console.error('[apply] Supabase insert error:', error?.message);
+            res.status(500).json({ success: false, error: 'No se pudo registrar la postulación en base de datos.' });
+            return;
+          }
+          res.status(201).json({
+            success: true,
+            application: sanitizeAppForAdmin(data as StoredTechnicianApplication),
+          });
+          return;
+        }
+
+        sandboxTechApplications.set(record.id, record);
+        res.status(201).json({
+          success: true,
+          mode: 'sandbox',
+          application: sanitizeAppForAdmin(record),
+        });
+      } catch {
+        res.status(500).json({ success: false, error: 'Error interno al registrar la postulación.' });
+      }
+    }
+  );
+
+  app.get(
+    '/api/admin/technician-applications',
+    requireOperatorAuth,
+    async (_req, res) => {
+      try {
+        const supabase = getSupabaseAdmin();
+        if (supabase) {
+          const { data, error } = await supabase
+            .from('technician_applications')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(100);
+          if (error) {
+            res.status(500).json({ success: false, error: 'No se pudieron consultar las postulaciones.' });
+            return;
+          }
+          res.json({
+            success: true,
+            gmailConfigured: isGmailConfigured(),
+            applications: ((data ?? []) as StoredTechnicianApplication[]).map(sanitizeAppForAdmin),
+          });
+          return;
+        }
+
+        const list = Array.from(sandboxTechApplications.values())
+          .sort((a, b) => b.created_at.localeCompare(a.created_at))
+          .map(sanitizeAppForAdmin);
+        res.json({
+          success: true,
+          mode: 'sandbox',
+          gmailConfigured: isGmailConfigured(),
+          applications: list,
+        });
+      } catch {
+        res.status(500).json({ success: false, error: 'Error al consultar postulaciones.' });
+      }
+    }
+  );
+
+  app.post(
+    '/api/admin/technician-applications/:id/decision',
+    createRateLimiter(30, 60_000),
+    requireOperatorAuth,
+    async (req, res) => {
+      try {
+        const appId = String(req.params.id ?? '').trim();
+        if (!isValidUuid(appId)) {
+          res.status(400).json({ success: false, error: 'ID de postulación inválido.' });
+          return;
+        }
+        const decision = req.body?.decision;
+        if (decision !== 'approved' && decision !== 'rejected') {
+          res.status(400).json({ success: false, error: 'La decisión debe ser "approved" o "rejected".' });
+          return;
+        }
+        const reviewerNotes =
+          typeof req.body?.reviewerNotes === 'string'
+            ? req.body.reviewerNotes.trim().slice(0, 500)
+            : null;
+        const operator = (req as express.Request & { operator?: { userId?: string } }).operator;
+        const reviewedBy = operator?.userId && isValidUuid(operator.userId) ? operator.userId : null;
+
+        const supabase = getSupabaseAdmin();
+        let existing: StoredTechnicianApplication | null = null;
+
+        if (supabase) {
+          const { data, error } = await supabase
+            .from('technician_applications')
+            .select('*')
+            .eq('id', appId)
+            .maybeSingle();
+          if (error || !data) {
+            res.status(404).json({ success: false, error: 'Postulación no encontrada.' });
+            return;
+          }
+          existing = data as StoredTechnicianApplication;
+        } else {
+          existing = sandboxTechApplications.get(appId) ?? null;
+          if (!existing) {
+            res.status(404).json({ success: false, error: 'Postulación no encontrada en sandbox.' });
+            return;
+          }
+        }
+
+        if (existing.status === 'registered') {
+          res.status(409).json({ success: false, error: 'Este técnico ya completó su registro.' });
+          return;
+        }
+
+        const nowIso = new Date().toISOString();
+        let rawToken: string | null = null;
+        let registerUrl: string | null = null;
+        let inviteTokenHash: string | null = null;
+        let inviteExpiresAt: string | null = null;
+        let deliveryStatus: 'sent' | 'simulated' | 'failed' = 'simulated';
+
+        if (decision === 'approved') {
+          rawToken = randomBytes(32).toString('hex');
+          inviteTokenHash = hashInviteToken(rawToken);
+          inviteExpiresAt = new Date(Date.now() + INVITE_TTL_HOURS * 3600_000).toISOString();
+          registerUrl = `${resolvePublicBaseUrl(req)}/registro-tecnico?token=${rawToken}`;
+
+          const emailRes = await sendTechnicianApprovedEmail({
+            to: existing.email,
+            fullName: existing.full_name,
+            modality: existing.modality,
+            specialties: existing.specialties,
+            registerUrl,
+            expiresHours: INVITE_TTL_HOURS,
+          });
+          deliveryStatus = emailRes.status;
+        } else {
+          const emailRes = await sendTechnicianRejectedEmail({
+            to: existing.email,
+            fullName: existing.full_name,
+          });
+          deliveryStatus = emailRes.status;
+        }
+
+        const patch: Partial<StoredTechnicianApplication> = {
+          status: decision,
+          reviewer_notes: reviewerNotes,
+          reviewed_by: reviewedBy,
+          reviewed_at: nowIso,
+          invite_token_hash: inviteTokenHash,
+          invite_expires_at: inviteExpiresAt,
+          invite_used_at: null,
+          email_delivery_status: deliveryStatus,
+          email_sent_at: deliveryStatus === 'sent' || deliveryStatus === 'simulated' ? nowIso : null,
+          updated_at: nowIso,
+        };
+
+        let updatedRecord: StoredTechnicianApplication = { ...existing, ...patch };
+        if (supabase) {
+          const { data, error } = await supabase
+            .from('technician_applications')
+            .update(patch)
+            .eq('id', appId)
+            .select('*')
+            .single();
+          if (error || !data) {
+            res.status(500).json({ success: false, error: 'No se pudo actualizar la decisión en base de datos.' });
+            return;
+          }
+          updatedRecord = data as StoredTechnicianApplication;
+
+          void supabase.from('audit_logs').insert({
+            organization_id: updatedRecord.organization_id,
+            actor_role: 'admin',
+            event_type:
+              decision === 'approved'
+                ? 'TECHNICIAN_APPLICATION_APPROVED'
+                : 'TECHNICIAN_APPLICATION_REJECTED',
+            details: `Postulación de ${updatedRecord.full_name} (${updatedRecord.email}) marcada como ${decision}. Correo Gmail: ${deliveryStatus}.`,
+          });
+        } else {
+          sandboxTechApplications.set(appId, updatedRecord);
+        }
+
+        res.json({
+          success: true,
+          application: sanitizeAppForAdmin(updatedRecord),
+          emailDeliveryStatus: deliveryStatus,
+          // Solo devolvemos el enlace de registro en modo simulado (sin Gmail configurado) para pruebas locales
+          ...(deliveryStatus === 'simulated' && registerUrl
+            ? { debugRegisterUrl: registerUrl }
+            : {}),
+        });
+      } catch {
+        res.status(500).json({ success: false, error: 'Error procesando la decisión del postulante.' });
+      }
+    }
+  );
+
+  app.get(
+    '/api/technicians/invite/:token',
+    createRateLimiter(20, 15 * 60_000),
+    async (req, res) => {
+      try {
+        const rawToken = String(req.params.token ?? '').trim();
+        if (!/^[a-f0-9]{64}$/i.test(rawToken)) {
+          res.status(400).json({ success: false, code: 'invalid', error: 'Enlace de invitación inválido.' });
+          return;
+        }
+        const tokenHash = hashInviteToken(rawToken);
+        const supabase = getSupabaseAdmin();
+        let record: StoredTechnicianApplication | null = null;
+
+        if (supabase) {
+          const { data } = await supabase
+            .from('technician_applications')
+            .select('*')
+            .eq('invite_token_hash', tokenHash)
+            .maybeSingle();
+          record = (data as StoredTechnicianApplication) ?? null;
+        } else {
+          record =
+            Array.from(sandboxTechApplications.values()).find(
+              (a) => a.invite_token_hash && safeTokenEquals(tokenHash, a.invite_token_hash)
+            ) ?? null;
+        }
+
+        if (!record) {
+          res.status(404).json({ success: false, code: 'not_found', error: 'Enlace de registro no encontrado.' });
+          return;
+        }
+        if (record.invite_used_at || record.status === 'registered') {
+          res.status(410).json({ success: false, code: 'used', error: 'Este enlace de registro ya fue utilizado.' });
+          return;
+        }
+        if (record.status !== 'approved') {
+          res.status(403).json({ success: false, code: 'not_approved', error: 'Esta postulación no está aprobada.' });
+          return;
+        }
+        if (record.invite_expires_at && new Date(record.invite_expires_at).getTime() < Date.now()) {
+          res.status(410).json({ success: false, code: 'expired', error: 'Este enlace de registro ha expirado (72 h).' });
+          return;
+        }
+
+        res.json({
+          success: true,
+          invite: {
+            full_name: record.full_name,
+            email: record.email,
+            country: record.country,
+            modality: record.modality,
+            specialties: record.specialties,
+            nda_version: record.nda_version,
+            invite_expires_at: record.invite_expires_at,
+          },
+        });
+      } catch {
+        res.status(500).json({ success: false, error: 'Error verificando la invitación.' });
+      }
+    }
+  );
+
+  app.post(
+    '/api/technicians/register',
+    createRateLimiter(10, 15 * 60_000),
+    async (req, res) => {
+      try {
+        const rawToken = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+        const password = typeof req.body?.password === 'string' ? req.body.password : '';
+        const confirmNda = req.body?.confirmNda === true;
+
+        if (!/^[a-f0-9]{64}$/i.test(rawToken)) {
+          res.status(400).json({ success: false, error: 'Token de invitación inválido.' });
+          return;
+        }
+        if (password.length < 8) {
+          res.status(400).json({ success: false, error: 'La contraseña debe tener al menos 8 caracteres.' });
+          return;
+        }
+        if (!confirmNda) {
+          res.status(400).json({ success: false, error: 'Debes confirmar la vigencia del Acuerdo de Confidencialidad Interno.' });
+          return;
+        }
+
+        const tokenHash = hashInviteToken(rawToken);
+        const supabase = getSupabaseAdmin();
+        let record: StoredTechnicianApplication | null = null;
+
+        if (supabase) {
+          const { data } = await supabase
+            .from('technician_applications')
+            .select('*')
+            .eq('invite_token_hash', tokenHash)
+            .maybeSingle();
+          record = (data as StoredTechnicianApplication) ?? null;
+        } else {
+          record =
+            Array.from(sandboxTechApplications.values()).find(
+              (a) => a.invite_token_hash && safeTokenEquals(tokenHash, a.invite_token_hash)
+            ) ?? null;
+        }
+
+        if (!record) {
+          res.status(404).json({ success: false, error: 'Invitación no encontrada.' });
+          return;
+        }
+        if (record.invite_used_at || record.status === 'registered') {
+          res.status(410).json({ success: false, error: 'Este enlace ya fue utilizado.' });
+          return;
+        }
+        if (record.status !== 'approved') {
+          res.status(403).json({ success: false, error: 'Postulación no autorizada para registro.' });
+          return;
+        }
+        if (record.invite_expires_at && new Date(record.invite_expires_at).getTime() < Date.now()) {
+          res.status(410).json({ success: false, error: 'El enlace de registro expiró.' });
+          return;
+        }
+
+        const nowIso = new Date().toISOString();
+        let createdUserId: string = randomUUID();
+
+        if (supabase) {
+          const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+            email: record.email,
+            password,
+            email_confirm: true,
+            user_metadata: {
+              full_name: record.full_name,
+              role: 'technician',
+              birth_date: record.birth_date,
+              is_adult_verified: true,
+              nda_version: record.nda_version,
+            },
+          });
+
+          if (authError || !authData.user) {
+            res.status(409).json({
+              success: false,
+              error: authError?.message || 'No se pudo crear la cuenta de técnico (¿el correo ya existe?).',
+            });
+            return;
+          }
+          createdUserId = authData.user.id;
+
+          await supabase.from('profiles').upsert({
+            id: createdUserId,
+            full_name: record.full_name,
+            email: record.email,
+            role: 'technician',
+            birth_date: record.birth_date,
+            is_adult_verified: true,
+            is_verified: true,
+            terms_accepted_at: record.nda_accepted_at,
+            terms_version: record.nda_version,
+          });
+
+          await supabase.from('organization_members').insert({
+            organization_id: record.organization_id,
+            user_id: createdUserId,
+            full_name: record.full_name,
+            email: record.email,
+            member_type: 'network',
+            role: 'technician',
+            agreed_ticket_rate_usd: 15,
+            status: 'active',
+          });
+
+          await supabase.from('technician_profiles').upsert({
+            id: createdUserId,
+            organization_id: record.organization_id,
+            full_name: record.full_name,
+            email: record.email,
+            specialties: record.specialties,
+            availability_status: 'offline',
+            accepting_requests: false,
+            rating: 5.0,
+            resolved_count: 0,
+          });
+
+          await supabase
+            .from('technician_applications')
+            .update({
+              status: 'registered',
+              invite_used_at: nowIso,
+              updated_at: nowIso,
+            })
+            .eq('id', record.id);
+
+          void supabase.from('audit_logs').insert({
+            organization_id: record.organization_id,
+            actor_role: 'technician',
+            event_type: 'TECHNICIAN_REGISTERED_VIA_INVITE',
+            details: `Técnico ${record.full_name} (${record.email}) activó su cuenta mediante invitación de un solo uso.`,
+          });
+        } else {
+          sandboxTechApplications.set(record.id, {
+            ...record,
+            status: 'registered',
+            invite_used_at: nowIso,
+            updated_at: nowIso,
+          });
+        }
+
+        res.json({
+          success: true,
+          profile: {
+            id: createdUserId,
+            full_name: record.full_name,
+            email: record.email,
+            role: 'technician',
+            birth_date: record.birth_date,
+            is_adult_verified: true,
+            terms_accepted_at: record.nda_accepted_at,
+            terms_version: record.nda_version,
+            marketing_opt_in: false,
+            subscription_status: 'none',
+            created_at: nowIso,
+          },
+          specialties: record.specialties,
+          modality: record.modality,
+        });
+      } catch {
+        res.status(500).json({ success: false, error: 'Error completando el registro técnico.' });
+      }
+    }
+  );
 
   app.all('/api/*', (_req, res) => {
     res.status(404).json({

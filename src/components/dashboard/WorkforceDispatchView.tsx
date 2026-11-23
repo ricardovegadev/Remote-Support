@@ -29,6 +29,7 @@ import {
   getTicketStatusLabel,
   isValidEmail,
 } from '../../utils/ticketLogic';
+import { TechnicianApplicationsPanel } from './TechnicianApplicationsPanel';
 
 interface WorkforceDispatchViewProps {
   organization: Organization;
@@ -665,6 +666,9 @@ export function WorkforceDispatchView({
           ))}
         </div>
       </div>
+
+      {/* Panel de Postulantes Técnicos (Fase 2 — Aprobación 1-clic + Gmail) */}
+      <TechnicianApplicationsPanel />
     </div>
   );
 }

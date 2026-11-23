@@ -28,6 +28,7 @@ import {
   OFFICIAL_RUSTDESK_RELEASES_URL,
   parseAppRoute,
   TECHNICIAN_COMMISSION_TIERS,
+  validateRegistrationPassword,
   validateRustDeskId,
   validateStep1,
   validateStep2,
@@ -479,6 +480,25 @@ test('evaluateTechnicianAssessment scores technical/attitude dimensions and reco
   assert.equal(empty.totalScore, 0);
   assert.equal(empty.unansweredCount, 10);
   assert.equal(empty.recommendation, 'recommended_reject');
+});
+
+test('parseAppRoute resolves /registro-tecnico to technician_register', () => {
+  assert.deepEqual(parseAppRoute('/registro-tecnico'), {
+    view: 'technician_register',
+    ticketCode: null,
+  });
+  assert.deepEqual(parseAppRoute('/REGISTRO-TECNICO/'), {
+    view: 'technician_register',
+    ticketCode: null,
+  });
+});
+
+test('validateRegistrationPassword enforces min 8 chars, letters + numbers, and match', () => {
+  assert.equal(validateRegistrationPassword('abc123', 'abc123').valid, false);
+  assert.equal(validateRegistrationPassword('abcdefgh', 'abcdefgh').valid, false);
+  assert.equal(validateRegistrationPassword('12345678', '12345678').valid, false);
+  assert.equal(validateRegistrationPassword('Soporte2026', 'Otra2026').valid, false);
+  assert.equal(validateRegistrationPassword('Soporte2026', 'Soporte2026').valid, true);
 });
 
 

@@ -30,6 +30,11 @@ const TechnicianApplyView = lazy(() =>
     default: m.TechnicianApplyView,
   }))
 );
+const TechnicianRegisterView = lazy(() =>
+  import('./components/TechnicianRegisterView').then((m) => ({
+    default: m.TechnicianRegisterView,
+  }))
+);
 const TechPortalView = lazy(() =>
   import('./components/TechPortalView').then((m) => ({
     default: m.TechPortalView,
@@ -1289,6 +1294,48 @@ export default function App() {
               />
             </Suspense>
           )}
+
+        {activeView === 'technician_register' && (
+          <Suspense fallback={lazyFallback}>
+            <TechnicianRegisterView
+              onReturnHome={handleReturnHome}
+              onOpenLegalDoc={setLegalDocTab}
+              onRegistered={({ profile, specialties }) => {
+                handleAuthenticated(profile);
+                if (specialties && specialties.length > 0) {
+                  setMembers((prev) => {
+                    if (prev.some((m) => m.email.toLowerCase() === profile.email.toLowerCase())) {
+                      return prev;
+                    }
+                    const nextMember: OrganizationMember = {
+                      id: profile.id,
+                      organization_id: PUBLIC_PORTAL_ORG_ID,
+                      user_id: profile.id,
+                      full_name: profile.full_name,
+                      email: profile.email,
+                      member_type: 'network',
+                      role: 'technician',
+                      agreed_ticket_rate_usd: 15,
+                      status: 'active',
+                      specialties,
+                      availability_status: 'offline',
+                      accepting_requests: false,
+                      rating: 5.0,
+                      resolved_count: 0,
+                    };
+                    const next = [nextMember, ...prev];
+                    supportAdapter.saveMembers(next);
+                    return next;
+                  });
+                }
+                window.setTimeout(() => {
+                  navigateToRoute('/dashboard', 'tech_portal', null);
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }, 900);
+              }}
+            />
+          </Suspense>
+        )}
 
         {activeView === 'connection_room' && (
           activeTicket ? (
