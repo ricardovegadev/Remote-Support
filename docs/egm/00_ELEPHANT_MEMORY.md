@@ -88,9 +88,32 @@ Definido en `src/types/support.ts`, `src/utils/ticketLogic.ts` y replicado en `s
 - `supabase/schema.sql` — Esquema PostgreSQL, RLS multi-tenant, RPC `claim_ticket_atomically` y columnas legales/edad/suscripción.
 - `src/App.tsx` — Enrutamiento (`/portal`, `/sesion/:code`, `/dashboard`), estado global, overlays legales y handlers GDPR.
 - `src/types/support.ts` — Contratos TypeScript de dominio, tickets, organizaciones, perfiles y cookies.
-- `src/utils/ticketLogic.ts` & `src/utils/ticketLogic.test.ts` — Reglas puras de negocio, tarifas, validación `+18`, UUID y 11 pruebas unitarias (`npm test`).
+- `src/utils/ticketLogic.ts` & `src/utils/ticketLogic.test.ts` — Reglas puras de negocio, tarifas, validación `+18`, UUID y 13 pruebas unitarias (`npm test`).
 - `src/utils/cookieConsent.ts` — Persistencia de preferencias de cookies (`v1.0-2026`).
 - `src/services/supportAdapter.ts` & `src/services/aiService.ts` — Persistencia híbrida Supabase/localStorage, portabilidad JSON, anonimización y cliente BFF de IA.
 - `src/components/PaymentBrandLogos.tsx` — SVGs oficiales de Google Pay, PayPal, Stripe, VISA, Mastercard y AMEX.
 - `src/components/HeroSection.tsx`, `DiagnosticWizard.tsx`, `LandingSections.tsx`, `ConnectionRoom.tsx`, `Header.tsx`, `Footer.tsx`, `AuthModal.tsx`, `LegalDocsModal.tsx`, `CookieConsentBanner.tsx`.
 - `src/components/TechPortalView.tsx` & `src/components/dashboard/*` — Centro de Operaciones multiempresa y gobierno de agentes AI Workforce.
+
+---
+
+## 6. Estado de Seguridad, CI/CD y Equipo de Agentes (Actualizado 2026-11-22)
+
+- **Seguridad Backend & Supabase (Fases 1–3 aplicadas y migradas a producción):**
+  - `POST /api/ai/report`, `POST /api/ai/assistant` y `POST /api/operator/tickets` protegidos con `requireOperatorAuth` (JWT de Supabase + rol activo de operador/admin).
+  - `stripe/create-session`, `stripe/verify-session`, `paypal/create-order` y `paypal/capture-order` validan el token de sala con `crypto.timingSafeEqual`.
+  - Webhook de Stripe (`/api/payments/stripe/webhook`) exento del rate limiter de usuario, con soporte para `charge.refunded` e `idempotencyKey` en checkout.
+  - `GET /api/rustdesk/official-download` con caché en memoria de 15 minutos y soporte Apple Silicon (`aarch64`).
+  - Rutas `/api/*` desconocidas devuelven `404` JSON.
+  - `supabase/migrations/20261121000000_security_and_schema_alignment.sql` aplicada en producción: `profiles` con `GRANT UPDATE` por columna (sin `role`, `is_verified` ni `is_adult_verified`), `anon` sin `INSERT` directo en `tickets`, `claim_ticket_atomically` corregido con `LEFT JOIN technician_profiles`, `update_ticket_as_staff` y `update_own_ticket_as_authenticated` desplegados.
+  - `supabase/schema.sql` ya **no** se empaqueta en el bundle público del cliente (`TechPortalView` usa guía de despliegue).
+- **Repositorio GitHub (`ricardovegadev/Remote-Support`):**
+  - Visibilidad: **Private**, `delete_branch_on_merge: true`, **Secret Scanning**, **Push Protection**, **Dependabot alerts** y **Dependabot security updates** activos.
+  - Workflows activos: `.github/workflows/ci.yml` (`Lint, Test & Build` en Node 24) y `.github/workflows/supabase-migrations.yml` (`supabase db push --remote --yes` automático en `main` para `supabase/migrations/**`).
+  - Gestor único: `npm` (`package-lock.json`; `bun.lock` y activos muertos eliminados).
+- **Equipo de Agentes Especializados (Skills en Antigravity):**
+  - `rs365-qa-auditor` (solo lectura: QA, seguridad y contratos API↔UI).
+  - `rs365-supabase-architect` (migraciones SQL, RLS y RPCs; requiere aprobación antes de push a `main`).
+  - `rs365-ui-polish` (React 19, Tailwind 4, WCAG, responsive y previews reales autocontenidos).
+  - `rs365-tech-ceo` (orquestador: consolida reportes en 3–4 decisiones prioritarias por impacto y riesgo).
+
