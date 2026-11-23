@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ArrowDown,
   ArrowRight,
@@ -218,6 +218,72 @@ export function HeroSection({
   const [scenarioIndex, setScenarioIndex] = useState(0);
   const [simStage, setSimStage] = useState<SimStage>('actions');
   const [demoPaused, setDemoPaused] = useState(false);
+  const [cardTiltActive, setCardTiltActive] = useState(false);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const glareRef = useRef<HTMLDivElement | null>(null);
+  const tiltRafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (tiltRafRef.current !== null) {
+        window.cancelAnimationFrame(tiltRafRef.current);
+      }
+    };
+  }, []);
+
+  const handleCardPointerEnter = () => {
+    setDemoPaused(true);
+    const prefersReduced =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (!prefersReduced) {
+      setCardTiltActive(true);
+    }
+  };
+
+  const handleCardPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const prefersReduced =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReduced) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const relX = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const relY = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+    const rotateY = (relX - 0.5) * 12;
+    const rotateX = (0.5 - relY) * 9;
+    const glareX = Math.round(relX * 100);
+    const glareY = Math.round(relY * 100);
+
+    if (tiltRafRef.current !== null) {
+      window.cancelAnimationFrame(tiltRafRef.current);
+    }
+    tiltRafRef.current = window.requestAnimationFrame(() => {
+      if (cardRef.current) {
+        cardRef.current.style.transform = `perspective(1100px) rotateX(${rotateX.toFixed(2)}deg) rotateY(${rotateY.toFixed(2)}deg) translateY(-4px)`;
+      }
+      if (glareRef.current) {
+        glareRef.current.style.opacity = '1';
+        glareRef.current.style.background = `radial-gradient(280px circle at ${glareX}% ${glareY}%, rgba(37, 99, 235, 0.11), transparent 65%)`;
+      }
+      tiltRafRef.current = null;
+    });
+  };
+
+  const handleCardPointerLeave = () => {
+    setDemoPaused(false);
+    setCardTiltActive(false);
+    if (tiltRafRef.current !== null) {
+      window.cancelAnimationFrame(tiltRafRef.current);
+      tiltRafRef.current = null;
+    }
+    if (cardRef.current) {
+      cardRef.current.style.transform = '';
+    }
+    if (glareRef.current) {
+      glareRef.current.style.opacity = '0';
+    }
+  };
 
   useEffect(() => {
     const prefersReduced =
@@ -382,60 +448,94 @@ export function HeroSection({
               </div>
             </div>
 
-            {/* Floating Animated Live Conversation Demo Card (Moved to the left under title & subtitle) */}
+            {/* Floating Animated Live Conversation Demo Card with Continuous 3D Perspective & Interactive Tilt */}
             <div
-              data-testid="hero-assistant-card"
-              onMouseEnter={() => setDemoPaused(true)}
-              onMouseLeave={() => setDemoPaused(false)}
+              onPointerEnter={handleCardPointerEnter}
+              onPointerMove={handleCardPointerMove}
+              onPointerLeave={handleCardPointerLeave}
               onFocusCapture={() => setDemoPaused(true)}
               onBlurCapture={() => setDemoPaused(false)}
-              className="w-full min-h-[300px] bg-white rounded-2xl shadow-lg shadow-slate-900/10 border border-slate-200/90 p-4 flex flex-col justify-between gap-3 z-10 transition-shadow duration-200 hover:shadow-xl animate-fade-up"
+              className="relative w-full p-1 pb-3 [perspective:1100px] animate-fade-up"
               style={{ animationDelay: '200ms' }}
             >
-              {/* Card Header with Custom Animated Interactive Assistant Orb */}
-              <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <AssistantOrbIcon
-                    size="sm"
-                    state={orbState}
-                    showOnlineBadge
-                  />
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold text-[#0B192C] leading-tight truncate">
-                      Asistente Remote 365
-                    </p>
-                    <p className="text-[11px] font-medium text-emerald-700 leading-tight mt-0.5 truncate">
-                      {simStage === 'typing'
-                        ? activeScenario.thinkingLabel
-                        : 'Disponible para ayudarte'}
-                    </p>
+              {/* Soft Levitating Ambient Glow Underneath */}
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute -inset-x-2 -bottom-1 h-10 rounded-full bg-gradient-to-r from-[#2563EB]/25 via-sky-400/20 to-[#10B981]/25 blur-xl animate-perspective-shadow"
+              />
+
+              <div
+                ref={cardRef}
+                data-testid="hero-assistant-card"
+                className={`relative overflow-hidden w-full min-h-[300px] bg-white/95 backdrop-blur-sm rounded-2xl shadow-xl shadow-slate-900/12 border border-slate-200/90 p-4 flex flex-col justify-between gap-3 z-10 hover:shadow-2xl hover:border-blue-300/80 ${
+                  cardTiltActive
+                    ? 'transition-[transform,box-shadow,border-color] duration-75 ease-out'
+                    : 'animate-perspective-float transition-[transform,box-shadow,border-color] duration-500 ease-out'
+                }`}
+                style={{ transformStyle: 'preserve-3d' }}
+              >
+                {/* Continuous Subtle Light Sheen Sweep */}
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-transparent via-blue-100/45 to-transparent animate-card-sheen"
+                />
+
+                {/* Interactive Pointer Spotlight Glare */}
+                <div
+                  ref={glareRef}
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-0 transition-opacity duration-200"
+                  style={{ opacity: 0 }}
+                />
+
+                {/* Card Header with Custom Animated Interactive Assistant Orb */}
+                <div className="relative z-10 flex items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <AssistantOrbIcon
+                      size="sm"
+                      state={orbState}
+                      showOnlineBadge
+                    />
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-[#0B192C] leading-tight truncate">
+                        Asistente Remote 365
+                      </p>
+                      <p className="text-[11px] font-medium text-emerald-700 leading-tight mt-0.5 truncate">
+                        {simStage === 'typing'
+                          ? activeScenario.thinkingLabel
+                          : 'Disponible para ayudarte'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Interactive Scenario Switcher Dots */}
+                  <div
+                    role="tablist"
+                    aria-label="Escenarios de simulación de chat"
+                    className="flex items-center gap-0.5 shrink-0"
+                  >
+                    {DEMO_SCENARIOS.map((sc, idx) => (
+                      <button
+                        key={sc.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={idx === scenarioIndex}
+                        aria-label={`Simular escenario ${sc.shortLabel}`}
+                        title={sc.shortLabel}
+                        onClick={() => handleSelectScenario(idx)}
+                        className="inline-flex items-center justify-center min-w-6 min-h-6 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+                      >
+                        <span
+                          className={`block h-1.5 rounded-full transition-all duration-300 ${
+                            idx === scenarioIndex
+                              ? 'w-4 bg-[#2563EB]'
+                              : 'w-1.5 bg-slate-300 hover:bg-slate-400'
+                          }`}
+                        />
+                      </button>
+                    ))}
                   </div>
                 </div>
-
-                {/* Interactive Scenario Switcher Dots */}
-                <div
-                  role="tablist"
-                  aria-label="Escenarios de simulación de chat"
-                  className="flex items-center gap-1 shrink-0"
-                >
-                  {DEMO_SCENARIOS.map((sc, idx) => (
-                    <button
-                      key={sc.id}
-                      type="button"
-                      role="tab"
-                      aria-selected={idx === scenarioIndex}
-                      aria-label={`Simular escenario ${sc.shortLabel}`}
-                      title={sc.shortLabel}
-                      onClick={() => handleSelectScenario(idx)}
-                      className={`h-1.5 rounded-full transition-all duration-300 ${
-                        idx === scenarioIndex
-                          ? 'w-4 bg-[#2563EB]'
-                          : 'w-1.5 bg-slate-300 hover:bg-slate-400'
-                      }`}
-                    />
-                  ))}
-                </div>
-              </div>
 
               {/* Live Animated Conversation Simulation Body */}
               <div
@@ -517,6 +617,7 @@ export function HeroSection({
                     aria-hidden="true"
                   />
                 </button>
+              </div>
               </div>
             </div>
           </div>

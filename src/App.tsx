@@ -29,6 +29,11 @@ const TechPortalView = lazy(() =>
     default: m.TechPortalView,
   }))
 );
+const TicketLookupModal = lazy(() =>
+  import('./components/TicketLookupModal').then((m) => ({
+    default: m.TicketLookupModal,
+  }))
+);
 import {
   haveRecordsChanged,
   haveTicketsChanged,
@@ -129,6 +134,7 @@ export default function App() {
   );
   const [legalDocTab, setLegalDocTab] = useState<LegalDocTab | null>(null);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [ticketLookupOpen, setTicketLookupOpen] = useState(false);
   const [cookieBannerOpen, setCookieBannerOpen] = useState<boolean>(
     () => typeof window !== 'undefined' && !readCookieConsent()
   );
@@ -366,9 +372,26 @@ export default function App() {
   const scrollToElement = (elementId: string) => {
     window.requestAnimationFrame(() => {
       const target = document.getElementById(elementId);
-      if (target) {
-        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (!target) return;
+      if (elementId === 'diagnostico') {
+        const assistantCard = target.querySelector<HTMLElement>(
+          '[data-testid="diagnostic-assistant-card"]'
+        );
+        const focusEl = assistantCard ?? target;
+        const rect = focusEl.getBoundingClientRect();
+        const headerOffset = 76;
+        const availableHeight = window.innerHeight - headerOffset;
+        const targetTop =
+          rect.height <= availableHeight
+            ? window.scrollY +
+              rect.top -
+              headerOffset -
+              Math.max(0, (availableHeight - rect.height) / 2)
+            : window.scrollY + rect.top - headerOffset;
+        window.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+        return;
       }
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   };
 
@@ -398,8 +421,9 @@ export default function App() {
       symptom: '',
       openComposer: true,
     });
-    navigateToRoute('/', 'landing', null);
-    scrollToElement('diagnostico');
+    if (activeView !== 'landing') {
+      navigateToRoute('/', 'landing', null);
+    }
   };
 
   const handleQuickStartSymptom = (payload: {
@@ -1107,6 +1131,28 @@ export default function App() {
           />
         </Suspense>
       )}
+      {ticketLookupOpen && (
+        <Suspense fallback={null}>
+          <TicketLookupModal
+            isOpen={true}
+            recentTickets={tickets.filter(
+              (t) =>
+                Boolean(t.client_session_token) &&
+                t.organization_id === PUBLIC_PORTAL_ORG_ID
+            )}
+            onClose={() => setTicketLookupOpen(false)}
+            onSelectTicketCode={(ticketCode) => {
+              setTicketLookupOpen(false);
+              navigateToRoute(
+                `/sesion/${ticketCode}`,
+                'connection_room',
+                ticketCode
+              );
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
+        </Suspense>
+      )}
     </>
   );
 
@@ -1172,6 +1218,7 @@ export default function App() {
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
         onOpenAuthModal={() => setAuthModalOpen(true)}
+        onOpenTicketLookup={() => setTicketLookupOpen(true)}
         onReturnHome={handleReturnHome}
       />
 
@@ -1195,6 +1242,7 @@ export default function App() {
               onSetErrors={setWizardErrors}
               onSubmitTicket={handleSubmitTicket}
               onOpenLegalDoc={setLegalDocTab}
+              onOpenTicketLookup={() => setTicketLookupOpen(true)}
             />
             <LandingSections
               onSelectCategoryForWizard={handleSelectCategoryFromLanding}

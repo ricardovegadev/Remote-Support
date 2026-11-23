@@ -189,6 +189,9 @@ export function LandingSections({
   onStartDiagnostic,
 }: LandingSectionsProps) {
   const [pricingAudience, setPricingAudience] = useState<'clients' | 'saas'>('clients');
+  const [serviceFilter, setServiceFilter] = useState<
+    'all' | 'popular' | 'office' | 'performance' | 'network'
+  >('all');
   const [referralCopied, setReferralCopied] = useState(false);
   const [companyName, setCompanyName] = useState('');
   const [contactEmail, setContactEmail] = useState('');
@@ -501,24 +504,109 @@ export function LandingSections({
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <ScrollReveal>
-            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-10">
+            <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-5 mb-6">
               <div className="max-w-2xl">
-                <p className="text-xs font-semibold text-emerald-700 tracking-wide">
-                  Catálogo Oficial de Lanzamiento · 10 Especialidades Remotas
+                <p className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 tracking-wide">
+                  <ShieldCheck className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                  <span>Soluciones remotas en vivo · Windows, Mac y Linux</span>
                 </p>
                 <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#0B1528] mt-1">
-                  10 soluciones técnicas remotas para fallas críticas en Windows, Mac y Linux
+                  Resolvemos hoy los problemas que más te frenan
                 </h2>
+                <p className="text-sm text-slate-600 mt-1.5 leading-relaxed">
+                  Elige lo que más se parece a tu caso para iniciar tu diagnóstico gratuito.
+                  Hacer clic no genera ningún cobro.
+                </p>
               </div>
-              <p className="text-xs text-slate-600">
-                Haz clic en cualquier especialidad para preseleccionarla con su tarifa sugerida
-              </p>
+
+              <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-slate-700">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white border border-slate-200/90 shadow-2xs">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-[#10B981] shrink-0" aria-hidden="true" />
+                  <span>Diagnóstico inicial gratis</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white border border-slate-200/90 shadow-2xs">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-[#10B981] shrink-0" aria-hidden="true" />
+                  <span>Precio fijo antes de empezar</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white border border-slate-200/90 shadow-2xs">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-[#10B981] shrink-0" aria-hidden="true" />
+                  <span>Garantía de resolución</span>
+                </span>
+              </div>
             </div>
           </ScrollReveal>
 
+          {/* Quick Category Filter Pills */}
+          <div
+            role="tablist"
+            aria-label="Filtrar soluciones por tipo de problema"
+            className="flex flex-wrap items-center gap-2 mb-7"
+          >
+            {(
+              [
+                { id: 'all', label: 'Todos (10)' },
+                { id: 'popular', label: 'Más solicitados' },
+                { id: 'office', label: 'Microsoft 365 y Apps' },
+                { id: 'performance', label: 'PC lenta, Virus y Archivos' },
+                { id: 'network', label: 'Wi-Fi, Impresoras y VPN' },
+              ] as const
+            ).map((tab) => {
+              const active = serviceFilter === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setServiceFilter(tab.id)}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] ${
+                    active
+                      ? 'bg-[#0B1528] text-white border-[#0B1528] shadow-xs'
+                      : 'bg-white text-slate-700 border-slate-200 hover:border-blue-300 hover:text-[#1D4ED8]'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            {CATEGORY_OPTIONS.map((service, index) => {
-              const serviceNumber = String(index + 1).padStart(2, '0');
+            {CATEGORY_OPTIONS.filter((service) => {
+              if (serviceFilter === 'all') return true;
+              if (serviceFilter === 'popular') {
+                return (
+                  service.id === 'Errores de Microsoft 365 y Outlook' ||
+                  service.id === 'Windows lento o bajo rendimiento' ||
+                  service.id === 'Configuración de impresoras' ||
+                  service.id === 'Eliminación de malware y virus'
+                );
+              }
+              if (serviceFilter === 'office') {
+                return (
+                  service.id === 'Errores de Microsoft 365 y Outlook' ||
+                  service.id === 'Aplicaciones que no arrancan'
+                );
+              }
+              if (serviceFilter === 'performance') {
+                return (
+                  service.id === 'Windows lento o bajo rendimiento' ||
+                  service.id === 'Eliminación de malware y virus' ||
+                  service.id === 'Pantallazos azules (BSOD)' ||
+                  service.id === 'Actualizaciones de Windows' ||
+                  service.id === 'Recuperación de archivos'
+                );
+              }
+              return (
+                service.id === 'Problemas de Wi-Fi o red' ||
+                service.id === 'Configuración de impresoras' ||
+                service.id === 'VPN y acceso remoto'
+              );
+            }).map((service, index) => {
+              const isPopular =
+                service.id === 'Errores de Microsoft 365 y Outlook' ||
+                service.id === 'Windows lento o bajo rendimiento' ||
+                service.id === 'Configuración de impresoras';
               const Icon = SERVICE_ICON_MAP[service.id] ?? Wrench;
               const iconTone =
                 SERVICE_COLOR_MAP[service.id] ??
@@ -526,7 +614,7 @@ export function LandingSections({
               return (
                 <ScrollReveal
                   key={service.id}
-                  delayMs={(index % 2) * 80}
+                  delayMs={(index % 2) * 70}
                   className="h-full"
                 >
                   <button
@@ -537,36 +625,37 @@ export function LandingSections({
                     className="w-full h-full text-left bg-white border border-slate-200/90 hover:border-[#2563EB] hover:-translate-y-0.5 hover:shadow-lg hover:shadow-slate-900/5 rounded-2xl p-6 transition-all duration-200 ease-out-expo flex flex-col justify-between gap-4 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
                   >
                     <div>
-                      <div className="flex items-start justify-between gap-3 mb-3.5">
+                      <div className="flex items-start justify-between gap-3 mb-3">
                         <div className="flex items-center gap-3 min-w-0">
                           <span
                             className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 transition-transform duration-200 group-hover:scale-105 ${iconTone}`}
                           >
                             <Icon className="w-5 h-5" aria-hidden="true" />
                           </span>
-                          <div>
-                            <span className="font-mono tabular-nums text-[11px] font-medium text-slate-500 block">
-                              Especialidad {serviceNumber} · {service.typicalResolutionTime}
-                            </span>
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2 mb-0.5">
+                              <span className="font-mono tabular-nums text-[11px] font-medium text-slate-500">
+                                ~{service.typicalResolutionTime}
+                              </span>
+                              {isPopular && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200/80 text-[10px] font-semibold text-amber-800">
+                                  Más solicitado
+                                </span>
+                              )}
+                            </div>
                             <h3 className="text-base font-semibold text-[#0B1528] group-hover:text-[#2563EB] transition-colors">
                               {service.label}
                             </h3>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span
-                            className={`font-mono tabular-nums text-[11px] font-semibold px-2.5 py-0.5 rounded-md border ${getTierBadgeStyle(
-                              service.suggestedTier
-                            )}`}
-                          >
-                            {service.suggestedTier}
-                          </span>
-                          <ArrowRight
-                            className="w-4 h-4 text-slate-500 group-hover:text-[#2563EB] group-hover:translate-x-1 transition-all duration-200"
-                            aria-hidden="true"
-                          />
-                        </div>
+                        <span
+                          className={`font-mono tabular-nums text-[11px] font-semibold px-2.5 py-0.5 rounded-md border shrink-0 ${getTierBadgeStyle(
+                            service.suggestedTier
+                          )}`}
+                        >
+                          {service.suggestedTier}
+                        </span>
                       </div>
 
                       <p className="text-sm text-slate-600 leading-relaxed">
@@ -574,21 +663,50 @@ export function LandingSections({
                       </p>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-1.5 pt-3 border-t border-slate-100">
-                      {service.examples.map((example) => (
-                        <span
-                          key={example}
-                          className="px-2.5 py-1 rounded-md bg-slate-100/90 text-slate-700 text-[11px] font-medium"
-                        >
-                          {example}
-                        </span>
-                      ))}
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-100">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {service.examples.map((example) => (
+                          <span
+                            key={example}
+                            className="px-2.5 py-1 rounded-md bg-slate-100/90 text-slate-700 text-[11px] font-medium"
+                          >
+                            {example}
+                          </span>
+                        ))}
+                      </div>
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#2563EB] group-hover:translate-x-0.5 transition-transform ml-auto">
+                        <span>Resolver esto</span>
+                        <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
+                      </span>
                     </div>
                   </button>
                 </ScrollReveal>
               );
             })}
           </div>
+
+          {/* Empathic Safety Net for Undecided Clients */}
+          <ScrollReveal delayMs={100}>
+            <div className="mt-7 rounded-2xl bg-white border border-slate-200/90 p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xs">
+              <div className="space-y-1">
+                <p className="text-sm font-bold text-[#0B1528]">
+                  ¿No encuentras tu problema o no estás seguro cuál elegir?
+                </p>
+                <p className="text-xs sm:text-sm text-slate-600">
+                  Cuéntanos qué te pasa en tus propias palabras y nuestro asistente te guía
+                  gratis antes de cualquier conexión.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onStartDiagnostic?.()}
+                className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs sm:text-sm font-semibold shadow-sm shadow-blue-600/20 active:scale-[0.99] transition-all whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2563EB]"
+              >
+                <span>Describir mi problema gratis</span>
+                <ArrowRight className="w-4 h-4" aria-hidden="true" />
+              </button>
+            </div>
+          </ScrollReveal>
         </div>
       </section>
 

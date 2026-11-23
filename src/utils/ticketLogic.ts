@@ -178,82 +178,92 @@ export const CATEGORY_OPTIONS: CategoryOption[] = [
   {
     id: 'Windows lento o bajo rendimiento',
     label: 'Windows lento o con bajo rendimiento',
-    summary: 'Optimización de arranque, limpieza de procesos en segundo plano y memoria.',
+    summary:
+      'Dejamos tu equipo rápido y fluido al encender, sin trabas ni programas que frenan tu trabajo.',
     typicalResolutionTime: '25–35 min',
     suggestedTier: 'Optimización $29',
-    examples: ['CPU/Disco al 100%', 'Inicio lento', 'Limpieza de procesos'],
+    examples: ['Tarda en encender', 'Se congela al abrir apps', 'Ventilador al máximo'],
   },
   {
     id: 'Aplicaciones que no arrancan',
     label: 'Aplicaciones que no arrancan o se cierran',
-    summary: 'Reparación de dependencias, librerías y conflictos de software en el sistema.',
+    summary:
+      'Hacemos que tus programas vuelvan a abrir normalmente sin cierres inesperados ni mensajes de error.',
     typicalResolutionTime: '15–25 min',
     suggestedTier: 'Express $15',
-    examples: ['Error DLL / Runtime', 'Cierres inesperados', 'Reinstalación limpia'],
+    examples: ['Programa no abre', 'Se cierra solo', 'Error al instalar'],
   },
   {
     id: 'Pantallazos azules (BSOD)',
-    label: 'Pantallazos azules (BSOD)',
-    summary: 'Análisis de volcado de memoria, drivers críticos y estabilidad de hardware/sistema.',
+    label: 'Pantallazos azules o reinicios inesperados',
+    summary:
+      'Identificamos la causa de los reinicios repentinos o pantallas azules y devolvemos estabilidad a tu equipo.',
     typicalResolutionTime: '30–45 min',
     suggestedTier: 'Avanzado $39',
-    examples: ['Minidump BSOD', 'Fallo de controlador', 'Reinicios críticos'],
+    examples: ['Pantalla azul repentina', 'Se reinicia solo', 'Se apaga trabajando'],
   },
   {
     id: 'Problemas de Wi-Fi o red',
     label: 'Problemas de conexión Wi-Fi o red',
-    summary: 'Diagnóstico de adaptadores, DNS, cortes intermitentes y conectividad en red local.',
+    summary:
+      'Recuperamos tu conexión estable a internet y red local sin cortes durante videollamadas o trabajo.',
     typicalResolutionTime: '15–25 min',
     suggestedTier: 'Express $15',
-    examples: ['Sin acceso a internet', 'Cortes de Wi-Fi', 'Ajuste DNS / IP'],
+    examples: ['Sin acceso a internet', 'Wi-Fi se desconecta', 'Red lenta en tu PC'],
   },
   {
     id: 'Errores de Microsoft 365 y Outlook',
     label: 'Errores de Microsoft 365 y Outlook',
-    summary: 'Reparación de perfiles PST/OST, sincronización, licencias y autenticación de correo.',
+    summary:
+      'Dejamos Outlook, Word, Excel y OneDrive funcionando al día sin perder tus correos ni archivos.',
     typicalResolutionTime: '20–30 min',
     suggestedTier: 'Express $15',
-    examples: ['Outlook no sincroniza', 'Bucle contraseña MFA', 'Activación 365'],
+    examples: ['Outlook no abre', 'Pide contraseña sin parar', 'Activar Microsoft 365'],
   },
   {
     id: 'Configuración de impresoras',
     label: 'Configuración de impresoras',
-    summary: 'Instalación en red o USB, liberación de cola de impresión atascada y controladores.',
+    summary:
+      'Dejamos tu impresora conectada por Wi-Fi o cable e imprimiendo tus documentos al instante.',
     typicalResolutionTime: '15–25 min',
     suggestedTier: 'Express $15',
-    examples: ['Cola atascada', 'Impresora en red/Wi-Fi', 'Driver TCP/IP'],
+    examples: ['Aparece sin conexión', 'Documentos atascados', 'Instalar en PC nueva'],
   },
   {
     id: 'Eliminación de malware y virus',
     label: 'Eliminación de malware y virus',
-    summary: 'Desinfección profunda, eliminación de adware o secuestradores de navegador y blindaje.',
+    summary:
+      'Limpiamos anuncios invasivos, ventanas sospechosas y virus protegiendo tus archivos personales.',
     typicalResolutionTime: '25–40 min',
     suggestedTier: 'Optimización $29',
-    examples: ['Adware y pop-ups', 'Secuestro de navegador', 'Blindaje antivirus'],
+    examples: ['Ventanas emergentes', 'Navegador con publicidad', 'Sospecha de virus'],
   },
   {
     id: 'Recuperación de archivos',
     label: 'Recuperación de archivos',
-    summary: 'Rescate de documentos eliminados accidentalmente o particiones dañadas y respaldo.',
+    summary:
+      'Te ayudamos a rescatar documentos, fotos o carpetas borradas por error y respaldarlas de forma segura.',
     typicalResolutionTime: '35–50 min',
     suggestedTier: 'Avanzado $39',
-    examples: ['Documentos borrados', 'Partición o USB dañado', 'Respaldo seguro'],
+    examples: ['Archivos borrados', 'USB o disco no abre', 'Respaldo seguro'],
   },
   {
     id: 'Actualizaciones de Windows',
     label: 'Problemas de actualizaciones de Windows',
-    summary: 'Desbloqueo de Windows Update atascado y reversión segura de parches fallidos.',
+    summary:
+      'Desbloqueamos actualizaciones atascadas o que fallan al reiniciar para que tu PC vuelva a operar normal.',
     typicalResolutionTime: '25–40 min',
     suggestedTier: 'Optimización $29',
-    examples: ['Update al 0% o bucle', 'Error de actualización', 'Reversión de parche'],
+    examples: ['Atascado actualizando', 'Falla al reiniciar', 'Error tras actualizar'],
   },
   {
     id: 'VPN y acceso remoto',
     label: 'Configuración de VPN y acceso remoto',
-    summary: 'Túneles corporativos, escritorio remoto RDP seguro y acceso estable para teletrabajo.',
+    summary:
+      'Configuramos tu acceso seguro a la oficina o teletrabajo para que te conectes sin bloqueos.',
     typicalResolutionTime: '25–40 min',
     suggestedTier: 'Avanzado $39',
-    examples: ['WireGuard / IPsec / Fortinet', 'RDP seguro', 'Acceso teletrabajo'],
+    examples: ['VPN no conecta', 'Acceso al trabajo', 'Escritorio remoto'],
   },
 ];
 

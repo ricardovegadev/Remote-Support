@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
-  AppWindow,
   ArrowLeft,
   ArrowRight,
   ArrowUp,
@@ -16,6 +15,7 @@ import {
   Mail,
   Monitor,
   RotateCcw,
+  ShieldAlert,
   ShieldCheck,
   Smartphone,
   Sparkles,
@@ -62,6 +62,7 @@ interface DiagnosticWizardProps {
   onSetErrors: (errors: Record<string, string>) => void;
   onSubmitTicket: () => Promise<void> | void;
   onOpenLegalDoc?: (tab: LegalDocTab) => void;
+  onOpenTicketLookup?: () => void;
 }
 
 interface ChatTurn {
@@ -69,76 +70,6 @@ interface ChatTurn {
   sender: 'assistant' | 'user';
   text: string;
 }
-
-const TOPIC_CARDS: Array<{
-  id: string;
-  title: string;
-  subtitle: string;
-  category: IssueCategory;
-  starterPrompt: string;
-  icon: typeof Cpu;
-  iconStyle: string;
-}> = [
-  {
-    id: 'windows',
-    title: 'Windows',
-    subtitle: 'Rendimiento, errores y configuración básica',
-    category: 'Windows lento o bajo rendimiento',
-    starterPrompt:
-      'Mi equipo con Windows va muy lento, tarda en arrancar o muestra errores.',
-    icon: Cpu,
-    iconStyle: 'bg-blue-50 text-[#2563EB] border-blue-100',
-  },
-  {
-    id: 'outlook',
-    title: 'Outlook',
-    subtitle: 'Inicio, correo y sincronización',
-    category: 'Errores de Microsoft 365 y Outlook',
-    starterPrompt: 'Outlook no abre o no sincroniza mis correos correctamente.',
-    icon: Mail,
-    iconStyle: 'bg-sky-50 text-sky-700 border-sky-100',
-  },
-  {
-    id: 'm365',
-    title: 'Microsoft 365',
-    subtitle: 'Aplicaciones, cuenta y servicios',
-    category: 'Errores de Microsoft 365 y Outlook',
-    starterPrompt:
-      'Tengo problemas con aplicaciones, licencia o inicio de sesión en Microsoft 365.',
-    icon: Sparkles,
-    iconStyle: 'bg-orange-50 text-orange-600 border-orange-100',
-  },
-  {
-    id: 'onedrive',
-    title: 'OneDrive',
-    subtitle: 'Sincronización y cuenta Microsoft 365',
-    category: 'Errores de Microsoft 365 y Outlook',
-    starterPrompt:
-      'OneDrive no sincroniza mis carpetas o muestra errores de sesión en Microsoft 365.',
-    icon: Cloud,
-    iconStyle: 'bg-cyan-50 text-cyan-700 border-cyan-100',
-  },
-  {
-    id: 'teams',
-    title: 'Teams',
-    subtitle: 'Reuniones, llamadas y colaboración',
-    category: 'Aplicaciones que no arrancan',
-    starterPrompt:
-      'Microsoft Teams u otra aplicación laboral no abre o falla durante llamadas.',
-    icon: AppWindow,
-    iconStyle: 'bg-indigo-50 text-indigo-600 border-indigo-100',
-  },
-  {
-    id: 'vpn-red',
-    title: 'Wi-Fi, red e impresoras',
-    subtitle: 'Conectividad, red local e impresoras',
-    category: 'Problemas de Wi-Fi o red',
-    starterPrompt:
-      'Mi conexión Wi-Fi, red local o impresora no conecta correctamente en el equipo.',
-    icon: Wifi,
-    iconStyle: 'bg-emerald-50 text-emerald-700 border-emerald-100',
-  },
-];
 
 const QUICK_STARTER_OPTIONS: Array<{
   label: string;
@@ -168,6 +99,27 @@ const QUICK_STARTER_OPTIONS: Array<{
     badgeStyle: 'bg-cyan-50 text-cyan-700 border-cyan-100',
     icon: Cloud,
   },
+  {
+    label: 'PC lenta o bloqueada',
+    symptom: 'Mi equipo va muy lento, tarda en encender o se congela al abrir programas.',
+    category: 'Windows lento o bajo rendimiento',
+    badgeStyle: 'bg-blue-50 text-[#2563EB] border-blue-100',
+    icon: Cpu,
+  },
+  {
+    label: 'Wi-Fi o impresora no conecta',
+    symptom: 'Mi Wi-Fi se desconecta o mi impresora aparece sin conexión en el equipo.',
+    category: 'Problemas de Wi-Fi o red',
+    badgeStyle: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+    icon: Wifi,
+  },
+  {
+    label: 'Virus o ventanas emergentes',
+    symptom: 'Aparecen anuncios sospechosos, ventanas emergentes o posible malware en mi PC.',
+    category: 'Eliminación de malware y virus',
+    badgeStyle: 'bg-rose-50 text-rose-700 border-rose-100',
+    icon: ShieldAlert,
+  },
 ];
 
 const OS_SELECTOR_OPTIONS: Array<{
@@ -182,6 +134,20 @@ const OS_SELECTOR_OPTIONS: Array<{
   { value: 'Mobile', label: 'Mobile', subtitle: 'Android / iOS', icon: Smartphone },
 ];
 
+function getQuickOptionsForQuestion(question: string): string[] {
+  const lower = question.toLowerCase();
+  if (lower.includes('frecuencia') || lower.includes('continua') || lower.includes('intermitente')) {
+    return ['Siempre que lo uso', 'Solo a veces', 'Empezó hoy'];
+  }
+  if (lower.includes('actualización') || lower.includes('cambio') || lower.includes('reciente')) {
+    return ['Sí, hubo un cambio', 'No, fue de repente', 'No estoy seguro'];
+  }
+  if (lower.includes('personal') || lower.includes('empresa') || lower.includes('trabajo')) {
+    return ['Equipo personal', 'De trabajo / empresa'];
+  }
+  return ['Sí', 'No', 'No estoy seguro'];
+}
+
 export function DiagnosticWizard({
   draft,
   errors,
@@ -192,10 +158,9 @@ export function DiagnosticWizard({
   onSetErrors,
   onSubmitTicket,
   onOpenLegalDoc,
+  onOpenTicketLookup,
 }: DiagnosticWizardProps) {
-  const [chatOpen, setChatOpen] = useState(true);
   const [composerText, setComposerText] = useState('');
-  const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
   const [chatTurns, setChatTurns] = useState<ChatTurn[]>([]);
   const [aiQuestionAnswers, setAiQuestionAnswers] = useState<Record<number, string>>({});
   const [aiLoading, setAiLoading] = useState(false);
@@ -219,8 +184,20 @@ export function DiagnosticWizard({
 
   const scrollToChatCard = () => {
     window.setTimeout(() => {
-      chatCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }, 60);
+      const card = chatCardRef.current;
+      if (!card) return;
+      const rect = card.getBoundingClientRect();
+      const headerOffset = 76;
+      const availableHeight = window.innerHeight - headerOffset;
+      const targetTop =
+        rect.height <= availableHeight
+          ? window.scrollY +
+            rect.top -
+            headerOffset -
+            Math.max(0, (availableHeight - rect.height) / 2)
+          : window.scrollY + rect.top - headerOffset;
+      window.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+    }, 80);
   };
 
   const executeAiTriage = async (
@@ -232,7 +209,6 @@ export function DiagnosticWizard({
     const cleanText = symptomText.trim();
     if (!cleanText) return;
 
-    setChatOpen(true);
     setSelfSolved(false);
     setAiError(null);
     onSetErrors({});
@@ -324,7 +300,6 @@ export function DiagnosticWizard({
     if (!externalTrigger || externalTrigger.id === lastTriggerIdRef.current) return;
     lastTriggerIdRef.current = externalTrigger.id;
 
-    setChatOpen(true);
     const hasLockedTier = Boolean(
       externalTrigger.preselectedTier ||
         externalTrigger.preselectedBillingMode === 'pyme_monthly'
@@ -343,7 +318,7 @@ export function DiagnosticWizard({
           : {}),
       });
       scrollToChatCard();
-      window.setTimeout(() => composerRef.current?.focus(), 220);
+      window.setTimeout(() => composerRef.current?.focus({ preventScroll: true }), 220);
       return;
     }
 
@@ -360,27 +335,10 @@ export function DiagnosticWizard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalTrigger]);
 
-  const handleSelectTopicCard = (topic: (typeof TOPIC_CARDS)[number]) => {
-    setSelectedTopicId(topic.id);
-    setSelfSolved(false);
-    setChatOpen(true);
-    setComposerText('');
-    scrollToChatCard();
-    void executeAiTriage(topic.starterPrompt, topic.category);
-  };
-
-  const handleOpenFreeChat = () => {
-    setChatOpen(true);
-    onChangeDraft({ step: 1 });
-    scrollToChatCard();
-    window.setTimeout(() => composerRef.current?.focus(), 220);
-  };
-
   const handleResetConversation = () => {
     setChatTurns([]);
     setAiQuestionAnswers({});
     setComposerText('');
-    setSelectedTopicId(null);
     setSelfSolved(false);
     setAiError(null);
     onSetErrors({});
@@ -390,7 +348,7 @@ export function DiagnosticWizard({
       aiTriage: null,
       userLockedTier: false,
     });
-    window.setTimeout(() => composerRef.current?.focus(), 80);
+    window.setTimeout(() => composerRef.current?.focus({ preventScroll: true }), 80);
   };
 
   const handleComposerSubmit = (e: React.FormEvent) => {
@@ -422,10 +380,23 @@ export function DiagnosticWizard({
 
   const handleEscalateToSpecialist = () => {
     const resolvedCategory = draft.category ?? 'Otro';
-    const fallbackDesc =
+    const baseDesc =
       draft.description.trim().length >= 8
         ? draft.description.trim()
         : `Solicitud de atención directa con especialista remoto en ${currentOs} (${resolvedCategory}).`;
+
+    const selectedQuickContext = Object.entries(aiQuestionAnswers)
+      .filter(([, ans]) => ans.trim().length > 0)
+      .map(
+        ([idx, ans]) =>
+          `${draft.aiTriage?.followUpQuestions[Number(idx)] ?? 'Detalle'} ${ans.trim()}`
+      )
+      .join(' | ');
+
+    const fallbackDesc =
+      selectedQuickContext && !baseDesc.includes(selectedQuickContext)
+        ? `${baseDesc}\nContexto rápido: ${selectedQuickContext}`
+        : baseDesc;
 
     const shouldPreserveSelectedTier =
       draft.billingMode === 'pyme_monthly' || Boolean(draft.userLockedTier);
@@ -433,7 +404,6 @@ export function DiagnosticWizard({
       ? draft.serviceTier
       : draft.aiTriage?.suggestedTier ?? getSuggestedTierForCategory(resolvedCategory);
 
-    setChatOpen(true);
     onSetErrors({});
     onChangeDraft({
       step: 3,
@@ -486,12 +456,12 @@ export function DiagnosticWizard({
     <section
       id="diagnostico"
       aria-labelledby="wizard-heading"
-      className="scroll-mt-20 py-14 sm:py-20 bg-[#F8FAFC] border-b border-slate-200/80"
+      className="scroll-mt-16 py-10 sm:py-14 bg-[#F8FAFC] border-b border-slate-200/80"
     >
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Top Luminous Topic Header */}
+        {/* Top Luminous Header */}
         <ScrollReveal>
-          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-3 mb-5">
             <div className="max-w-xl">
               <p className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-[#2563EB]">
                 <Sparkles className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
@@ -499,89 +469,23 @@ export function DiagnosticWizard({
               </p>
               <h2
                 id="wizard-heading"
-                className="text-3xl sm:text-4xl font-bold tracking-tight text-[#0B192C] mt-1.5"
+                className="text-2xl sm:text-3xl font-bold tracking-tight text-[#0B192C] mt-1"
               >
                 ¿Con qué necesitas ayuda?
               </h2>
             </div>
-            <p className="text-sm text-slate-600 max-w-sm leading-relaxed">
-              Elige un tema para iniciar. La IA hará unas preguntas y te propondrá el
-              siguiente paso.
-            </p>
-          </div>
-        </ScrollReveal>
-
-        {/* 6 Clean Pastel-Icon Topic Cards */}
-        <div
-          role="group"
-          aria-label="Temas frecuentes de soporte técnico"
-          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
-        >
-          {TOPIC_CARDS.map((topic, index) => {
-            const TopicIcon = topic.icon;
-            const isSelected = selectedTopicId === topic.id && chatOpen;
-            return (
-              <ScrollReveal key={topic.id} delayMs={index * 65}>
-                <button
-                  type="button"
-                  data-testid={`topic-card-${topic.id}`}
-                  onClick={() => handleSelectTopicCard(topic)}
-                  className={`w-full group rounded-2xl border p-5 bg-white text-left flex items-center justify-between gap-4 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] ${
-                    isSelected
-                      ? 'border-[#2563EB] ring-2 ring-blue-100 shadow-md shadow-blue-900/5'
-                      : 'border-slate-200/90 hover:border-blue-300 hover:shadow-md hover:-translate-y-0.5'
-                  }`}
-                >
-                  <div className="flex items-center gap-3.5 min-w-0">
-                    <span
-                      className={`w-11 h-11 rounded-xl border flex items-center justify-center shrink-0 transition-transform duration-200 group-hover:scale-105 ${topic.iconStyle}`}
-                    >
-                      <TopicIcon className="w-5 h-5" aria-hidden="true" />
-                    </span>
-                    <div className="min-w-0">
-                      <p className="text-sm font-bold text-[#0B192C] group-hover:text-[#2563EB] transition-colors truncate">
-                        {topic.title}
-                      </p>
-                      <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">
-                        {topic.subtitle}
-                      </p>
-                    </div>
-                  </div>
-                  <ArrowUpRight
-                    className="w-4 h-4 text-slate-500 group-hover:text-[#2563EB] group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all shrink-0"
-                    aria-hidden="true"
-                  />
-                </button>
-              </ScrollReveal>
-            );
-          })}
-        </div>
-
-        {/* Centered Link to Open Free Conversational Chat */}
-        <ScrollReveal delayMs={180}>
-          <div className="mt-6 text-center">
-            <p className="text-xs sm:text-sm text-slate-500">
-              ¿No ves tu problema?{' '}
-              <button
-                type="button"
-                data-testid="open-free-chat-link"
-                onClick={handleOpenFreeChat}
-                className="font-semibold text-[#2563EB] hover:text-[#1D4ED8] inline-flex items-center gap-1 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] rounded"
-              >
-                <span>Descríbelo con tus propias palabras</span>
-                <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
-              </button>
+            <p className="text-sm text-slate-600 max-w-md leading-relaxed">
+              Elige un fallo común o descríbelo abajo. La IA te guiará paso a paso antes de cualquier conexión remota.
             </p>
           </div>
         </ScrollReveal>
 
         {/* Wide White Rounded-3xl Conversational Assistant & Escalation Card */}
-        {(chatOpen || isStage2) && (
-          <div
-            ref={chatCardRef}
-            data-testid="diagnostic-assistant-card"
-            className="mt-8 bg-white rounded-3xl shadow-xl shadow-slate-200/60 border border-slate-200/80 overflow-hidden animate-fade-up"
-          >
+        <div
+          ref={chatCardRef}
+          data-testid="diagnostic-assistant-card"
+          className="bg-white rounded-3xl shadow-xl shadow-slate-200/60 border border-slate-200/80 overflow-hidden animate-fade-up"
+        >
             {/* Clean Light Header */}
             <div className="px-5 sm:px-8 py-5 border-b border-slate-100 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex items-center gap-3.5 min-w-0">
@@ -603,7 +507,7 @@ export function DiagnosticWizard({
               </div>
 
               <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-                {!isStage2 && (
+                {!isStage2 && !(draft.aiTriage && !aiLoading && !selfSolved) && (
                   <button
                     type="button"
                     data-testid="direct-escalate-button"
@@ -737,15 +641,12 @@ export function DiagnosticWizard({
                 {/* Chat Conversation Area */}
                 <div className="space-y-4">
                   {chatTurns.length === 0 ? (
-                    <div className="space-y-4 py-2">
-                      <div>
-                        <p className="text-xs font-medium text-slate-500">Bienvenido</p>
-                        <h3 className="text-lg sm:text-xl font-bold text-[#0B192C] mt-0.5">
-                          Vamos a resolverlo juntos. ¿Qué problema tienes?
-                        </h3>
-                      </div>
+                    <div className="space-y-3">
+                      <p className="text-xs font-semibold text-slate-600">
+                        Sugerencias rápidas de fallos comunes:
+                      </p>
 
-                      <div className="space-y-2.5 max-w-lg">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                         {QUICK_STARTER_OPTIONS.map((opt) => {
                           const OptIcon = opt.icon;
                           return (
@@ -753,20 +654,20 @@ export function DiagnosticWizard({
                               key={opt.label}
                               type="button"
                               onClick={() => void executeAiTriage(opt.symptom, opt.category)}
-                              className="w-full rounded-2xl border border-slate-200/90 hover:border-blue-300 bg-white hover:bg-blue-50/30 px-4 py-3 flex items-center justify-between gap-3 text-left transition-all duration-150 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+                              className="w-full rounded-2xl border border-slate-200/90 hover:border-blue-300 bg-white hover:bg-blue-50/40 hover:shadow-sm px-4 py-3.5 flex items-center justify-between gap-3 text-left transition-all duration-150 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
                             >
                               <span className="flex items-center gap-3 min-w-0">
                                 <span
-                                  className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 ${opt.badgeStyle}`}
+                                  className={`w-9 h-9 rounded-xl border flex items-center justify-center shrink-0 transition-transform duration-150 group-hover:scale-105 ${opt.badgeStyle}`}
                                 >
                                   <OptIcon className="w-4 h-4" aria-hidden="true" />
                                 </span>
-                                <span className="text-sm font-medium text-[#0B192C] group-hover:text-[#1D4ED8] truncate">
+                                <span className="text-sm font-medium text-[#0B192C] group-hover:text-[#1D4ED8] leading-snug">
                                   {opt.label}
                                 </span>
                               </span>
                               <ArrowUpRight
-                                className="w-4 h-4 text-slate-500 group-hover:text-[#2563EB] shrink-0"
+                                className="w-4 h-4 text-slate-400 group-hover:text-[#2563EB] group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all shrink-0"
                                 aria-hidden="true"
                               />
                             </button>
@@ -912,68 +813,83 @@ export function DiagnosticWizard({
                             </div>
                           )}
 
-                          {/* 2–3 Brief Follow-Up Questions */}
+                          {/* 2–3 Brief Follow-Up Questions (1-Click Quick Chips) */}
                           {draft.aiTriage.followUpQuestions.length > 0 && !selfSolved && (
                             <div className="space-y-3">
-                              <p className="text-xs font-semibold text-[#0B192C]">
-                                Preguntas rápidas para afinar tu diagnóstico (opcional):
-                              </p>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                {draft.aiTriage.followUpQuestions.slice(0, 3).map((q, idx) => (
-                                  <div key={idx} className="space-y-1">
-                                    <label
-                                      htmlFor={`ai-q-${idx}`}
-                                      className="block text-xs font-medium text-slate-700 leading-snug"
-                                    >
-                                      {idx + 1}. {q}
-                                    </label>
-                                    <input
-                                      id={`ai-q-${idx}`}
-                                      type="text"
-                                      maxLength={180}
-                                      value={aiQuestionAnswers[idx] ?? ''}
-                                      onChange={(e) =>
-                                        setAiQuestionAnswers((prev) => ({
-                                          ...prev,
-                                          [idx]: e.target.value,
-                                        }))
-                                      }
-                                      placeholder="Tu respuesta breve..."
-                                      className="w-full rounded-xl border border-slate-200 bg-slate-50/70 focus:bg-white px-3 py-2 text-xs text-[#0B192C] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-blue-100"
-                                    />
-                                  </div>
-                                ))}
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <p className="text-xs font-semibold text-[#0B192C]">
+                                  Ayúdanos a preparar al especialista con 1 clic (opcional):
+                                </p>
+                                {hasAnsweredFollowUps && (
+                                  <button
+                                    type="button"
+                                    onClick={handleRefineWithAnswers}
+                                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#2563EB] hover:text-[#1D4ED8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] rounded"
+                                  >
+                                    <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+                                    <span>Afinar guía IA con estas respuestas</span>
+                                  </button>
+                                )}
                               </div>
 
-                              {hasAnsweredFollowUps && (
-                                <button
-                                  type="button"
-                                  onClick={handleRefineWithAnswers}
-                                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#2563EB] hover:text-[#1D4ED8]"
-                                >
-                                  <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
-                                  <span>Enviar respuestas para afinar guía</span>
-                                </button>
-                              )}
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                {draft.aiTriage.followUpQuestions.slice(0, 3).map((q, idx) => {
+                                  const selectedAnswer = aiQuestionAnswers[idx] ?? '';
+                                  const options = getQuickOptionsForQuestion(q);
+                                  return (
+                                    <div
+                                      key={idx}
+                                      className="rounded-xl border border-slate-200/80 bg-slate-50/60 p-3 space-y-2"
+                                    >
+                                      <p className="text-xs font-medium text-slate-700 leading-snug">
+                                        {q}
+                                      </p>
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {options.map((opt) => {
+                                          const isSelected = selectedAnswer === opt;
+                                          return (
+                                            <button
+                                              key={opt}
+                                              type="button"
+                                              aria-pressed={isSelected}
+                                              onClick={() =>
+                                                setAiQuestionAnswers((prev) => ({
+                                                  ...prev,
+                                                  [idx]: prev[idx] === opt ? '' : opt,
+                                                }))
+                                              }
+                                              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] ${
+                                                isSelected
+                                                  ? 'bg-[#2563EB] text-white border-[#2563EB] shadow-xs'
+                                                  : 'bg-white text-slate-700 border-slate-200 hover:border-blue-300 hover:text-[#1D4ED8]'
+                                              }`}
+                                            >
+                                              {opt}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
                             </div>
                           )}
 
                           {/* Escalation Action Strip */}
                           {!selfSolved && (
                             <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                              <div className="space-y-0.5">
-                                <p className="text-xs font-semibold text-[#0B192C]">
-                                  ¿Sigue igual o prefieres que un especialista lo resuelva por ti?
+                              <div className="space-y-1">
+                                <p className="text-sm font-bold text-[#0B192C]">
+                                  ¿Prefieres que un especialista lo resuelva ahora por ti?
                                 </p>
-                                <p className="text-xs text-slate-600">
-                                  {draft.userLockedTier || isPymeMonthly
-                                    ? 'Tarifa seleccionada:'
-                                    : 'Tarifa fija sugerida:'}{' '}
-                                  <strong className="font-mono tabular-nums text-[#0B192C]">
-                                    ${activePrice} USD{isPymeMonthly ? '/mes' : ''}
+                                <p className="text-xs text-slate-600 leading-relaxed">
+                                  <strong className="font-semibold text-[#0B192C]">
+                                    Sin cobro todavía
                                   </strong>{' '}
+                                  · En el siguiente paso confirmas tus datos y abres tu sala segura.{' '}
                                   <span className="text-emerald-700 font-medium">
-                                    · Garantía de resolución: si el problema técnico no puede resolverse en sesión, gestionamos el reembolso conforme a nuestra Política de Reembolsos.
+                                    Garantía de resolución conforme a nuestra Política de Reembolsos.
                                   </span>
                                 </p>
                               </div>
@@ -983,7 +899,10 @@ export function DiagnosticWizard({
                                 onClick={handleEscalateToSpecialist}
                                 className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs sm:text-sm font-semibold shadow-md shadow-blue-600/20 active:scale-[0.99] transition-all whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2563EB]"
                               >
-                                <span>Ver tarifa fija y solicitar especialista</span>
+                                <span>
+                                  Continuar con especialista · ${activePrice} USD
+                                  {isPymeMonthly ? '/mes' : ''}
+                                </span>
                                 <ArrowRight className="w-4 h-4" aria-hidden="true" />
                               </button>
                             </div>
@@ -1047,10 +966,26 @@ export function DiagnosticWizard({
                     </div>
                   </div>
 
-                  <p className="text-center text-[11px] text-slate-500">
-                    La IA puede equivocarse. Tú decides qué pasos seguir. Si escalas,
-                    verás el precio antes de aceptar.
-                  </p>
+                  <div className="flex flex-col sm:flex-row items-center justify-center gap-x-3 gap-y-1 text-center text-[11px] text-slate-500">
+                    <span>
+                      La IA puede equivocarse. Tú decides qué pasos seguir. Si escalas,
+                      verás el precio antes de aceptar.
+                    </span>
+                    {onOpenTicketLookup && (
+                      <>
+                        <span className="hidden sm:inline text-slate-300" aria-hidden="true">
+                          ·
+                        </span>
+                        <button
+                          type="button"
+                          onClick={onOpenTicketLookup}
+                          className="font-semibold text-[#2563EB] hover:text-[#1D4ED8] underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] rounded"
+                        >
+                          ¿Ya tienes un ticket RS-XXXX? Retomar sala
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </form>
               </div>
             )}
@@ -1406,8 +1341,7 @@ export function DiagnosticWizard({
                 </div>
               </form>
             )}
-          </div>
-        )}
+        </div>
       </div>
     </section>
   );

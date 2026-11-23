@@ -44,6 +44,9 @@
     .animate-orb-bar,
     .animate-orb-halo,
     .animate-float-gentle,
+    .animate-perspective-float,
+    .animate-perspective-shadow,
+    .animate-card-sheen,
     .animate-ambient-drift,
     .animate-ken-burns,
     .animate-pulse {
@@ -149,6 +152,46 @@
   }
 }
 
+@keyframes perspectiveFloat {
+  0%,
+  100% {
+    transform: perspective(1100px) rotateX(2.5deg) rotateY(5deg) translateY(0px);
+  }
+  50% {
+    transform: perspective(1100px) rotateX(4.5deg) rotateY(2deg) translateY(-7px);
+  }
+}
+
+@keyframes perspectiveShadow {
+  0%,
+  100% {
+    opacity: 0.48;
+    transform: scale(0.96) translateY(0px);
+  }
+  50% {
+    opacity: 0.3;
+    transform: scale(0.91) translateY(4px);
+  }
+}
+
+@keyframes cardSheen {
+  0% {
+    transform: translateX(-140%) skewX(-18deg);
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.55;
+  }
+  45% {
+    transform: translateX(220%) skewX(-18deg);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(220%) skewX(-18deg);
+    opacity: 0;
+  }
+}
+
 @keyframes ambientDrift {
   0%,
   100% {
@@ -203,6 +246,19 @@
 
   .animate-float-gentle {
     animation: floatGentle 5.5s ease-in-out infinite;
+  }
+
+  .animate-perspective-float {
+    animation: perspectiveFloat 6.8s ease-in-out infinite;
+    will-change: transform;
+  }
+
+  .animate-perspective-shadow {
+    animation: perspectiveShadow 6.8s ease-in-out infinite;
+  }
+
+  .animate-card-sheen {
+    animation: cardSheen 7.5s ease-in-out infinite;
   }
 
   .animate-ambient-drift {

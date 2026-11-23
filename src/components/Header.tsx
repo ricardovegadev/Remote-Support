@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Menu, ShieldCheck, UserCircle2, X } from 'lucide-react';
+import { Menu, ShieldCheck, Ticket, UserCircle2, X } from 'lucide-react';
 import type { AppView, UserAccountProfile } from '../types/support';
 
 interface HeaderProps {
@@ -8,6 +8,7 @@ interface HeaderProps {
   onNavigateSection: (sectionId: string) => void;
   onOpenTechPortal: () => void;
   onOpenAuthModal: () => void;
+  onOpenTicketLookup?: () => void;
   onReturnHome: () => void;
 }
 
@@ -24,6 +25,7 @@ export function Header({
   onNavigateSection,
   onOpenTechPortal,
   onOpenAuthModal,
+  onOpenTicketLookup,
   onReturnHome,
 }: HeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -92,6 +94,21 @@ export function Header({
 
         {/* Zone 3: Account access + Primary Diagnostic CTA + Secondary Tech Portal + Mobile Menu Button */}
         <div className="flex items-center gap-2 shrink-0">
+          {onOpenTicketLookup && (
+            <button
+              type="button"
+              onClick={() => {
+                setMobileMenuOpen(false);
+                onOpenTicketLookup();
+              }}
+              data-testid="header-ticket-lookup-button"
+              className="hidden md:inline-flex items-center justify-center gap-1.5 px-2.5 py-2 text-xs font-medium text-slate-600 hover:text-[#0B1528] hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+            >
+              <Ticket className="w-3.5 h-3.5 text-[#10B981]" aria-hidden="true" />
+              <span>Mi ticket</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => {
@@ -163,6 +180,19 @@ export function Header({
             >
               Iniciar diagnóstico gratuito
             </button>
+            {onOpenTicketLookup && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  onOpenTicketLookup();
+                }}
+                className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-[#0B1528] bg-emerald-50/70 hover:bg-emerald-50 border border-emerald-200 rounded-lg transition-colors"
+              >
+                <Ticket className="w-4 h-4 text-emerald-700" aria-hidden="true" />
+                <span>Retomar mi ticket (RS-XXXX)</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {
