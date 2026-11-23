@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
@@ -20,7 +21,7 @@ function parseCliArg(flag: string): string | null {
   return null;
 }
 
-const isProduction = process.env.NODE_ENV === 'production' || Boolean(process.env.K_SERVICE);
+const isProduction = process.env.NODE_ENV === 'production';
 const cliPortRaw = parseCliArg('--port');
 const cliPort = cliPortRaw ? Number(cliPortRaw) : NaN;
 const envPort = process.env.PORT ? Number(process.env.PORT) : NaN;
@@ -197,7 +198,8 @@ const PUBLIC_CATEGORIES = new Set([
   'Pantallazos azules (BSOD)', 'Problemas de Wi-Fi o red',
   'Errores de Microsoft 365 y Outlook', 'Configuración de impresoras',
   'Eliminación de malware y virus', 'Recuperación de archivos',
-  'Actualizaciones de Windows', 'VPN y acceso remoto', 'Otro',
+  'Actualizaciones de Windows', 'VPN y acceso remoto',
+  'Impresoras', 'Correo/Office', 'Sistema Operativo/Lentitud', 'Redes/Wi-Fi', 'Otro',
 ]);
 
 function isAdultBirthDate(value: string): boolean {
@@ -827,7 +829,7 @@ async function startServer() {
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
     res.setHeader(
       'Content-Security-Policy',
-      "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: https://*.supabase.co https://api.github.com https://generativelanguage.googleapis.com; frame-src https://checkout.stripe.com https://www.paypal.com https://www.sandbox.paypal.com"
+      "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self' https://aistudio.google.com https://*.usercontent.goog; form-action 'self'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: https://*.supabase.co https://api.github.com https://generativelanguage.googleapis.com; frame-src https://checkout.stripe.com https://www.paypal.com https://www.sandbox.paypal.com"
     );
     if (isProduction) {
       res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
@@ -2110,24 +2112,61 @@ async function startServer() {
     });
   });
 
+  let viteServer: { close: () => Promise<void> } | null = null;
+
   if (!isProduction) {
+    const isPreviewEnv =
+      process.env.DISABLE_HMR === 'true' ||
+      Boolean(
+        process.env.K_SERVICE ||
+          process.env.K_REVISION ||
+          process.env.K_CONFIGURATION ||
+          process.env.CLOUD_RUN_TIMEOUT_SECONDS
+      );
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        ...(isPreviewEnv ? { ws: false as const, hmr: false } : {}),
+      },
       appType: 'spa',
     });
+    viteServer = vite;
     app.use(vite.middlewares);
   } else {
     const distDir = path.resolve(__dirname, 'dist');
+    const indexHtmlPath = path.join(distDir, 'index.html');
     app.use(express.static(distDir));
     app.get('*', (_req, res) => {
-      res.sendFile(path.join(distDir, 'index.html'));
+      if (!fs.existsSync(indexHtmlPath)) {
+        res.status(503).send('Aplicación no compilada. Ejecuta npm run build antes de iniciar en modo producción.');
+        return;
+      }
+      res.sendFile(indexHtmlPath);
     });
   }
 
-  app.listen(PORT, HOST, () => {
+  const httpServer = app.listen(PORT, HOST, () => {
     console.log(`Remote Support 365 server running on http://${HOST}:${PORT}`);
   });
+
+  const shutdown = (signal: string) => {
+    httpServer.close(() => {
+      void (viteServer ? viteServer.close() : Promise.resolve()).finally(() => {
+        process.exit(0);
+      });
+    });
+    setTimeout(() => {
+      console.error(`Forced exit after ${signal} shutdown timeout.`);
+      process.exit(1);
+    }, 3000).unref();
+  };
+
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
 }
 
-void startServer();
+startServer().catch((err) => {
+  console.error('Failed to start Remote Support 365 server:', err);
+  process.exit(1);
+});

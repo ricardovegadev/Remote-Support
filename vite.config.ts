@@ -70,11 +70,12 @@ export default defineConfig(() => {
       // proxy hosts and Cloud Run's generated hostname.
       // Avoid `true`, which disables Vite's DNS-rebinding protection.
       allowedHosts: [...allowedHosts],
-      // Disable HMR WebSocket in AI Studio / Cloud Run preview proxy to avoid
-      // `@vite/client` "WebSocket closed without opened" errors.
+      // Disable HMR and standalone Vite WebSocket server (port 24678) in AI Studio / Cloud Run
+      // preview proxy to avoid port conflicts on restart and WebSocket console errors.
+      ...(isPreviewEnv ? { ws: false as const } : {}),
       hmr: isPreviewEnv ? false : true,
-      // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
-      watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      // Disable file watching in preview/DISABLE_HMR mode to speed up cold start and save CPU.
+      watch: isPreviewEnv ? null : {},
     },
   };
 });
