@@ -938,7 +938,7 @@ export function TechPortalView({
               type="button"
               aria-label="Abrir menú lateral"
               onClick={() => setMobileDrawerOpen(true)}
-              className="lg:hidden inline-flex items-center justify-center w-8 h-8 rounded-lg text-[#334155] hover:bg-[#F8FAFC] transition-colors shrink-0"
+              className="lg:hidden inline-flex items-center justify-center w-11 h-11 rounded-lg text-[#334155] hover:bg-[#F8FAFC] transition-colors shrink-0"
             >
               <Menu className="w-5 h-5" strokeWidth={1.9} />
             </button>
@@ -960,7 +960,7 @@ export function TechPortalView({
             </nav>
           </div>
 
-          {/* Right: Search + Desktop Portal Cliente + Notification Bell + AD Avatar */}
+          {/* Right: Search + Desktop Portal Cliente + Notification Bell + Interactive Operator Menu */}
           <div className="flex items-center justify-end gap-2.5 sm:gap-3.5 min-w-0 flex-1 sm:flex-initial">
             <div className="relative flex-1 max-w-[165px] sm:max-w-none sm:w-64 lg:w-72">
               <Search
@@ -972,9 +972,14 @@ export function TechPortalView({
                 type="search"
                 value={globalSearchQuery}
                 onChange={(e) => setGlobalSearchQuery(e.target.value)}
-                placeholder="Buscar..."
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && globalSearchQuery.trim() && activeSection !== 'tickets') {
+                    setActiveSection('tickets');
+                  }
+                }}
+                placeholder="Buscar solicitudes..."
                 aria-label="Buscar solicitudes"
-                className="w-full h-9 rounded-xl border border-[#E5E9F2] bg-[#F8FAFC] pl-9 pr-3 lg:pr-12 text-[13px] text-[#0F172A] placeholder:text-[#64748B] focus:bg-white focus:border-[#2563EB] focus:outline-none transition-colors"
+                className="w-full h-9 rounded-xl border border-[#E5E9F2] bg-[#F8FAFC] pl-9 pr-3 lg:pr-12 text-base sm:text-[13px] text-[#0F172A] placeholder:text-[#64748B] focus:bg-white focus:border-[#2563EB] focus:outline-none transition-colors"
               />
               <kbd className="pointer-events-none hidden lg:inline-block absolute right-2.5 top-1/2 -translate-y-1/2 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-[#64748B] bg-white border border-[#E5E9F2] rounded">
                 ⌘K
@@ -996,13 +1001,13 @@ export function TechPortalView({
                 aria-label="Notificaciones"
                 aria-expanded={notificationsOpen}
                 onClick={() => setNotificationsOpen((prev) => !prev)}
-                className="relative w-9 h-9 rounded-full hover:bg-[#F8FAFC] flex items-center justify-center text-[#334155] transition-colors"
+                className="relative w-10 h-10 rounded-full hover:bg-[#F8FAFC] flex items-center justify-center text-[#334155] transition-colors"
               >
                 <Bell className="w-[19px] h-[19px]" strokeWidth={1.8} aria-hidden="true" />
                 {openTicketsCount > 0 && (
                   <span
                     aria-hidden="true"
-                    className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#F97316] ring-2 ring-white"
+                    className="absolute top-2 right-2 w-2 h-2 rounded-full bg-[#F97316] ring-2 ring-white"
                   />
                 )}
               </button>
@@ -1039,12 +1044,58 @@ export function TechPortalView({
               )}
             </div>
 
-            <span
-              title={`${operatorDisplayName} · ${supabaseConfigured ? operatorEmail : 'Cuenta de demostración'}`}
-              className="w-9 h-9 rounded-full bg-[#EFF6FF] text-[#2563EB] text-[12px] font-bold flex items-center justify-center shrink-0"
-            >
-              {getInitials(operatorDisplayName)}
-            </span>
+            <details className="relative shrink-0">
+              <summary
+                aria-label="Menú de cuenta de operador"
+                title={`${operatorDisplayName} · ${supabaseConfigured ? operatorEmail : 'Cuenta de demostración'}`}
+                className="list-none cursor-pointer w-10 h-10 rounded-full bg-[#EFF6FF] hover:bg-[#DBEAFE] text-[#2563EB] text-[12px] font-bold flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+              >
+                {getInitials(operatorDisplayName)}
+              </summary>
+              <div className="absolute right-0 mt-2 w-60 bg-white border border-[#E5E9F2] rounded-xl shadow-lg p-2 z-40 space-y-1 text-xs">
+                <div className="px-2.5 py-2 border-b border-[#E5E9F2]">
+                  <p className="font-bold text-[#0F172A] truncate">{operatorDisplayName}</p>
+                  <p className="text-[11px] text-[#64748B] truncate">
+                    {supabaseConfigured ? operatorEmail : 'Modo demostración'}
+                  </p>
+                </div>
+                {organizations.length > 1 && (
+                  <div className="py-1 border-b border-[#E5E9F2]">
+                    <p className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#64748B]">
+                      Organización activa
+                    </p>
+                    {organizations.map((org) => (
+                      <button
+                        key={org.id}
+                        type="button"
+                        onClick={() => onSelectOrg(org.id)}
+                        className={`w-full text-left px-2.5 py-1.5 rounded-lg truncate transition-colors ${
+                          org.id === activeOrgId
+                            ? 'bg-[#EFF6FF] text-[#2563EB] font-semibold'
+                            : 'text-[#334155] hover:bg-[#F8FAFC]'
+                        }`}
+                      >
+                        {org.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={onOpenPublicPortal}
+                  className="w-full text-left px-2.5 py-2 rounded-lg text-[#0F172A] hover:bg-[#F8FAFC] font-medium"
+                >
+                  Ir al Portal Cliente
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleSignOut()}
+                  className="w-full text-left px-2.5 py-2 rounded-lg text-red-700 hover:bg-red-50 font-semibold"
+                >
+                  Cerrar sesión
+                </button>
+              </div>
+            </details>
           </div>
         </header>
 
@@ -1235,7 +1286,7 @@ export function TechPortalView({
                     value={qtClientName}
                     onChange={(e) => setQtClientName(e.target.value)}
                     placeholder="Ej. Estudio Contable Vega"
-                    className="w-full rounded-xl border border-[#E5E9F2] px-3 py-2 text-xs text-[#0F172A] focus:border-[#2563EB] focus:outline-none"
+                    className="w-full rounded-xl border border-[#E5E9F2] px-3 py-2 text-base sm:text-xs text-[#0F172A] focus:border-[#2563EB] focus:outline-none"
                   />
                 </div>
                 <div>
@@ -1251,7 +1302,7 @@ export function TechPortalView({
                     value={qtClientEmail}
                     onChange={(e) => setQtClientEmail(e.target.value)}
                     placeholder="soporte@cliente.com"
-                    className="w-full rounded-xl border border-[#E5E9F2] px-3 py-2 text-xs text-[#0F172A] focus:border-[#2563EB] focus:outline-none"
+                    className="w-full rounded-xl border border-[#E5E9F2] px-3 py-2 text-base sm:text-xs text-[#0F172A] focus:border-[#2563EB] focus:outline-none"
                   />
                 </div>
               </div>
@@ -1270,7 +1321,7 @@ export function TechPortalView({
                     onChange={(e) =>
                       setQtCategory(e.target.value as IssueCategory)
                     }
-                    className="w-full rounded-xl border border-[#E5E9F2] bg-white px-2.5 py-2 text-xs text-[#0F172A]"
+                    className="w-full rounded-xl border border-[#E5E9F2] bg-white px-2.5 py-2 text-base sm:text-xs text-[#0F172A]"
                   >
                     {CATEGORY_OPTIONS.map((c) => (
                       <option key={c.id} value={c.id}>
@@ -1293,7 +1344,7 @@ export function TechPortalView({
                     onChange={(e) =>
                       setQtOs(e.target.value as OperatingSystem)
                     }
-                    className="w-full rounded-xl border border-[#E5E9F2] bg-white px-2.5 py-2 text-xs text-[#0F172A]"
+                    className="w-full rounded-xl border border-[#E5E9F2] bg-white px-2.5 py-2 text-base sm:text-xs text-[#0F172A]"
                   >
                     <option value="Windows">Windows</option>
                     <option value="Mac">Mac</option>
@@ -1313,7 +1364,7 @@ export function TechPortalView({
                     id="qt-tier"
                     value={qtTier}
                     onChange={(e) => setQtTier(e.target.value as ServiceTier)}
-                    className="w-full rounded-xl border border-[#E5E9F2] bg-white px-2.5 py-2 text-xs text-[#0F172A]"
+                    className="w-full rounded-xl border border-[#E5E9F2] bg-white px-2.5 py-2 text-base sm:text-xs text-[#0F172A]"
                   >
                     {SERVICE_TIER_OPTIONS.map((t) => (
                       <option key={t.id} value={t.id}>

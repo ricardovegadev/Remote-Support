@@ -193,7 +193,7 @@ export function DiagnosticWizard({
   onSubmitTicket,
   onOpenLegalDoc,
 }: DiagnosticWizardProps) {
-  const [chatOpen, setChatOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(true);
   const [composerText, setComposerText] = useState('');
   const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
   const [chatTurns, setChatTurns] = useState<ChatTurn[]>([]);
@@ -1220,10 +1220,11 @@ export function DiagnosticWizard({
                     <input
                       id="client-name"
                       type="text"
+                      autoComplete="name"
                       value={draft.clientName}
                       onChange={(e) => onChangeDraft({ clientName: e.target.value })}
                       placeholder="Ej. María Fernanda Torres"
-                      className={`w-full rounded-xl border px-3.5 py-2.5 text-sm text-[#0B192C] bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 ${
+                      className={`w-full rounded-xl border px-3.5 py-2.5 text-base sm:text-sm text-[#0B192C] bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 ${
                         errors.clientName
                           ? 'border-red-400 focus:border-red-500'
                           : 'border-slate-300 focus:border-[#2563EB]'
@@ -1244,10 +1245,11 @@ export function DiagnosticWizard({
                     <input
                       id="client-email"
                       type="email"
+                      autoComplete="email"
                       value={draft.clientEmail}
                       onChange={(e) => onChangeDraft({ clientEmail: e.target.value })}
                       placeholder="tu@correo.com"
-                      className={`w-full rounded-xl border px-3.5 py-2.5 text-sm text-[#0B192C] bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 ${
+                      className={`w-full rounded-xl border px-3.5 py-2.5 text-base sm:text-sm text-[#0B192C] bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 ${
                         errors.clientEmail
                           ? 'border-red-400 focus:border-red-500'
                           : 'border-slate-300 focus:border-[#2563EB]'
@@ -1268,9 +1270,19 @@ export function DiagnosticWizard({
                     <input
                       id="client-birth-date"
                       type="date"
+                      autoComplete="bday"
+                      max={new Date(
+                        Date.UTC(
+                          new Date().getUTCFullYear() - 18,
+                          new Date().getUTCMonth(),
+                          new Date().getUTCDate()
+                        )
+                      )
+                        .toISOString()
+                        .slice(0, 10)}
                       value={draft.birthDate ?? ''}
                       onChange={(e) => onChangeDraft({ birthDate: e.target.value })}
-                      className={`w-full rounded-xl border px-3.5 py-2.5 text-sm text-[#0B192C] bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 ${
+                      className={`w-full rounded-xl border px-3.5 py-2.5 text-base sm:text-sm text-[#0B192C] bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 ${
                         errors.birthDate
                           ? 'border-red-400 focus:border-red-500'
                           : 'border-slate-300 focus:border-[#2563EB]'

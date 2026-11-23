@@ -90,8 +90,19 @@ export function Header({
           ))}
         </nav>
 
-        {/* Zone 3: Account access + Tech Portal CTA + Mobile Menu Button */}
-        <div className="flex items-center gap-2.5 shrink-0">
+        {/* Zone 3: Account access + Primary Diagnostic CTA + Secondary Tech Portal + Mobile Menu Button */}
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              setMobileMenuOpen(false);
+              onOpenTechPortal();
+            }}
+            className="hidden xl:inline-flex items-center justify-center px-3 py-2 text-xs font-medium text-slate-600 hover:text-[#0B1528] hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+          >
+            Centro de Operaciones
+          </button>
+
           <button
             type="button"
             onClick={() => {
@@ -99,7 +110,7 @@ export function Header({
               onOpenAuthModal();
             }}
             data-testid="header-auth-button"
-            className="hidden sm:inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#0B1528] bg-white hover:bg-slate-50 border border-slate-300/90 hover:border-slate-400 rounded-lg shadow-xs active:scale-[0.98] transition-all duration-150 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+            className="hidden sm:inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-[#0B1528] bg-white hover:bg-slate-50 border border-slate-300/90 hover:border-slate-400 rounded-lg shadow-xs active:scale-[0.98] transition-all duration-150 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
           >
             <UserCircle2 className="w-3.5 h-3.5 text-[#2563EB]" aria-hidden="true" />
             <span>{userShortLabel}</span>
@@ -107,17 +118,11 @@ export function Header({
 
           <button
             type="button"
-            onClick={() => {
-              setMobileMenuOpen(false);
-              onOpenTechPortal();
-            }}
-            className={`hidden sm:inline-flex items-center justify-center px-4 py-2 text-xs font-semibold rounded-lg shadow-xs active:scale-[0.98] transition-all duration-150 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-2 ${
-              activeView === 'tech_portal'
-                ? 'bg-emerald-700 text-white hover:bg-emerald-800'
-                : 'bg-[#0B1528] text-white hover:bg-[#132544]'
-            }`}
+            onClick={() => handleNavClick('diagnostico')}
+            data-testid="header-start-diagnostic"
+            className="hidden sm:inline-flex items-center justify-center px-4 py-2 text-xs font-semibold rounded-lg bg-[#2563EB] text-white hover:bg-[#1D4ED8] shadow-xs active:scale-[0.98] transition-all duration-150 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-2"
           >
-            Centro de Operaciones
+            Iniciar diagnóstico
           </button>
 
           <button
@@ -153,6 +158,13 @@ export function Header({
           <div className="pt-2 border-t border-slate-100 space-y-2">
             <button
               type="button"
+              onClick={() => handleNavClick('diagnostico')}
+              className="w-full px-4 py-2.5 text-sm font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-lg transition-colors"
+            >
+              Iniciar diagnóstico gratuito
+            </button>
+            <button
+              type="button"
               onClick={() => {
                 setMobileMenuOpen(false);
                 onOpenAuthModal();
@@ -167,9 +179,9 @@ export function Header({
                 setMobileMenuOpen(false);
                 onOpenTechPortal();
               }}
-              className="w-full px-4 py-2.5 text-sm font-semibold text-white bg-[#0B1528] hover:bg-[#132544] rounded-lg transition-colors"
+              className="w-full px-4 py-2.5 text-sm font-medium text-slate-600 hover:text-[#0B1528] bg-slate-50 hover:bg-slate-100 rounded-lg transition-colors"
             >
-              Centro de Operaciones
+              Centro de Operaciones (Técnicos)
             </button>
           </div>
         </div>

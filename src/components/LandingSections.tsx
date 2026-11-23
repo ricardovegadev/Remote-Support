@@ -620,9 +620,11 @@ export function LandingSections({
                 className="grid grid-cols-2 sm:inline-flex items-center p-1 bg-slate-100 border border-slate-200 rounded-xl w-full sm:w-auto self-start lg:self-auto"
               >
                 <button
+                  id="pricing-tab-clients"
                   type="button"
                   role="tab"
                   aria-selected={pricingAudience === 'clients'}
+                  aria-controls="pricing-panel-clients"
                   onClick={() => setPricingAudience('clients')}
                   className={`inline-flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-2 text-[11px] sm:text-xs font-semibold rounded-lg transition-all duration-200 text-center sm:whitespace-nowrap ${
                     pricingAudience === 'clients'
@@ -635,9 +637,11 @@ export function LandingSections({
                 </button>
 
                 <button
+                  id="pricing-tab-saas"
                   type="button"
                   role="tab"
                   aria-selected={pricingAudience === 'saas'}
+                  aria-controls="pricing-panel-saas"
                   onClick={() => setPricingAudience('saas')}
                   className={`inline-flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-2 text-[11px] sm:text-xs font-semibold rounded-lg transition-all duration-200 text-center sm:whitespace-nowrap ${
                     pricingAudience === 'saas'
@@ -655,6 +659,9 @@ export function LandingSections({
           {pricingAudience === 'clients' ? (
             <div
               key="clients"
+              id="pricing-panel-clients"
+              role="tabpanel"
+              aria-labelledby="pricing-tab-clients"
               data-testid="plans-clients-panel"
               className="space-y-10 animate-fade-up"
             >
@@ -956,7 +963,7 @@ export function LandingSections({
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-4 pt-3 border-t border-slate-200 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-3 border-t border-slate-200 text-xs">
                     <div>
                       <p className="font-mono tabular-nums font-bold text-[#0B1528]">
                         Tarifa publicada

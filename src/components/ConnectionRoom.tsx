@@ -676,6 +676,64 @@ export function ConnectionRoom({
           </div>
         </div>
 
+        {/* 3-Step Visual Onboarding Progress Stepper */}
+        <ol
+          aria-label="Progreso de conexión"
+          data-testid="room-progress-stepper"
+          className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 bg-white border border-slate-200 rounded-xl p-3 text-xs"
+        >
+          {[
+            {
+              num: 1,
+              label: 'Confirmar pago',
+              done: ticket.payment_status === 'paid',
+              active: ticket.payment_status !== 'paid',
+            },
+            {
+              num: 2,
+              label: 'Descargar RustDesk',
+              done: Boolean(ticket.agent_downloaded || ticket.rustdesk_id),
+              active:
+                ticket.payment_status === 'paid' &&
+                !ticket.agent_downloaded &&
+                !ticket.rustdesk_id,
+            },
+            {
+              num: 3,
+              label: 'Vincular ID y conectar',
+              done: Boolean(ticket.rustdesk_id && ticket.consent_accepted),
+              active:
+                ticket.payment_status === 'paid' &&
+                Boolean(ticket.agent_downloaded) &&
+                !(ticket.rustdesk_id && ticket.consent_accepted),
+            },
+          ].map((step) => (
+            <li
+              key={step.num}
+              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border transition-colors ${
+                step.done
+                  ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+                  : step.active
+                  ? 'bg-blue-50/70 border-blue-200 text-[#0B192C]'
+                  : 'bg-slate-50 border-slate-200 text-slate-500'
+              }`}
+            >
+              <span
+                className={`w-6 h-6 rounded-full text-[11px] font-bold flex items-center justify-center shrink-0 ${
+                  step.done
+                    ? 'bg-emerald-600 text-white'
+                    : step.active
+                    ? 'bg-[#2563EB] text-white'
+                    : 'bg-slate-200 text-slate-600'
+                }`}
+              >
+                {step.done ? '✓' : step.num}
+              </span>
+              <span className="font-semibold truncate">{step.label}</span>
+            </li>
+          ))}
+        </ol>
+
         {/* Ticket Header & Explicit Organization / Technician Traceability */}
         <div className="bg-[#0B192C] text-white rounded-xl p-6 sm:p-8 border border-slate-800 space-y-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
@@ -919,95 +977,19 @@ export function ConnectionRoom({
                   </div>
                 ) : (
                   <>
-                    <div className="space-y-2.5">
-                      <p className="text-xs font-semibold text-[#0B192C]">
-                        Pago Rápido Express
-                      </p>
-
-                      <div className="flex flex-col gap-2.5">
-                        {/* 1. Google Pay Button */}
-                        <button
-                          type="button"
-                          disabled={isProcessingPayment}
-                          onClick={() => void handleExecutePayment('google_pay')}
-                          aria-label="Pagar con Google Pay"
-                          className="w-full h-12 bg-black hover:bg-neutral-900 text-white font-medium rounded-lg flex items-center justify-center gap-2 transition-all shadow-xs disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
-                        >
-                          {processingMethod === 'google_pay' ? (
-                            <>
-                              <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-                              <span className="text-xs font-semibold">Conectando con Google Pay...</span>
-                            </>
-                          ) : (
-                            <GooglePayLogo variant="dark" />
-                          )}
-                        </button>
-
-                        {!isMonthlyPlan && (
-                          <button
-                            type="button"
-                            disabled={isProcessingPayment}
-                            onClick={() => void handleExecutePayment('paypal')}
-                            aria-label="Pagar con PayPal"
-                            className="w-full h-12 bg-[#FFC439] hover:bg-[#F5BA2E] text-[#003087] font-bold rounded-lg flex items-center justify-center gap-2 transition-all shadow-xs disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
-                          >
-                            {processingMethod === 'paypal' ? (
-                              <>
-                                <Loader2 className="w-4 h-4 animate-spin text-[#003087]" aria-hidden="true" />
-                                <span className="text-xs font-bold">Abriendo PayPal...</span>
-                              </>
-                            ) : (
-                              <PayPalLogo />
-                            )}
-                          </button>
-                        )}
-
-                        {/* 3. Stripe Express Button */}
-                        <button
-                          type="button"
-                          disabled={isProcessingPayment}
-                          onClick={() => void handleExecutePayment('stripe')}
-                          aria-label="Pagar con Stripe"
-                          className="w-full h-12 bg-[#635BFF] hover:bg-[#5249F5] text-white font-semibold rounded-lg flex items-center justify-center gap-2 transition-all shadow-xs disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
-                        >
-                          {processingMethod === 'stripe' ? (
-                            <>
-                              <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-                              <span className="text-xs font-semibold">Conectando con Stripe...</span>
-                            </>
-                          ) : (
-                            <>
-                              <span className="text-xs font-semibold tracking-tight">Pagar con</span>
-                              <StripeLogo variant="dark" />
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Subtle Divider */}
-                    <div className="relative flex py-1 items-center">
-                      <div className="flex-grow border-t border-slate-200" />
-                      <span className="flex-shrink mx-3.5 text-slate-600 text-[11px] font-medium">
-                        o paga con tarjeta débito / crédito
-                      </span>
-                      <div className="flex-grow border-t border-slate-200" />
-                    </div>
-
-                    {/* PCI-DSS Hosted Stripe Card Checkout */}
+                    {/* Primary PCI-DSS Hosted Stripe Card Checkout */}
                     <div className="rounded-xl border border-slate-200 bg-[#F8FAFC] p-4 space-y-3.5">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0B192C]">
                           <CreditCard className="w-4 h-4 text-[#2563EB]" aria-hidden="true" />
-                          <span>Tarjeta vía Stripe Checkout (PCI-DSS)</span>
+                          <span>Tarjeta débito / crédito vía Stripe (PCI-DSS)</span>
                         </span>
                         <CardNetworkBadges />
                       </div>
 
                       <p className="text-[11px] text-slate-600 leading-relaxed">
-                        Para máxima seguridad PCI-DSS, ingresas los datos de tu tarjeta
-                        directamente en la pasarela cifrada de Stripe sin almacenarlos en
-                        este sitio.
+                        Ingresas tu tarjeta directamente en la pasarela cifrada de Stripe
+                        sin almacenar datos bancarios en este sitio.
                       </p>
 
                       {paymentError && (
@@ -1022,7 +1004,7 @@ export function ConnectionRoom({
                         onClick={() => void handleExecutePayment('stripe', true)}
                         className="w-full h-12 inline-flex items-center justify-center gap-2 px-5 text-sm font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] disabled:bg-slate-400 rounded-lg transition-colors whitespace-nowrap shadow-sm cursor-pointer disabled:cursor-not-allowed"
                       >
-                        {processingMethod === 'card' ? (
+                        {processingMethod === 'card' || processingMethod === 'stripe' ? (
                           <>
                             <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
                             <span>Abriendo pasarela segura...</span>
@@ -1031,11 +1013,58 @@ export function ConnectionRoom({
                           <>
                             <Lock className="w-4 h-4" aria-hidden="true" />
                             <span>
-                              {`Pagar con tarjeta · $${computedTotalUsd.toFixed(2)} USD`}
+                              {`Pagar con tarjeta / Stripe · $${computedTotalUsd.toFixed(2)} USD`}
                             </span>
                           </>
                         )}
                       </button>
+                    </div>
+
+                    {/* Subtle Divider */}
+                    <div className="relative flex py-1 items-center">
+                      <div className="flex-grow border-t border-slate-200" />
+                      <span className="flex-shrink mx-3.5 text-slate-600 text-[11px] font-medium">
+                        o paga rápido con billetera digital
+                      </span>
+                      <div className="flex-grow border-t border-slate-200" />
+                    </div>
+
+                    <div className={`grid gap-2.5 ${!isMonthlyPlan ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
+                      <button
+                        type="button"
+                        disabled={isProcessingPayment}
+                        onClick={() => void handleExecutePayment('google_pay')}
+                        aria-label={`Pagar $${computedTotalUsd.toFixed(2)} USD con Google Pay`}
+                        className="w-full h-11 bg-black hover:bg-neutral-900 text-white font-medium rounded-lg flex items-center justify-center gap-2 transition-all shadow-xs disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+                      >
+                        {processingMethod === 'google_pay' ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                            <span className="text-xs font-semibold">Conectando...</span>
+                          </>
+                        ) : (
+                          <GooglePayLogo variant="dark" />
+                        )}
+                      </button>
+
+                      {!isMonthlyPlan && (
+                        <button
+                          type="button"
+                          disabled={isProcessingPayment}
+                          onClick={() => void handleExecutePayment('paypal')}
+                          aria-label={`Pagar $${computedTotalUsd.toFixed(2)} USD con PayPal`}
+                          className="w-full h-11 bg-[#FFC439] hover:bg-[#F5BA2E] text-[#003087] font-bold rounded-lg flex items-center justify-center gap-2 transition-all shadow-xs disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
+                        >
+                          {processingMethod === 'paypal' ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin text-[#003087]" aria-hidden="true" />
+                              <span className="text-xs font-bold">Abriendo PayPal...</span>
+                            </>
+                          ) : (
+                            <PayPalLogo />
+                          )}
+                        </button>
+                      )}
                     </div>
                   </>
                 )}
@@ -1143,69 +1172,124 @@ export function ConnectionRoom({
                 </p>
               </div>
 
-              {/* Primary: Temporary Quick Agent */}
-              <div className="p-4 rounded-xl bg-[#F8FAFC] border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="space-y-1 min-w-0">
-                  <p className="text-xs font-semibold text-emerald-700">
-                    Opción Principal · Ticket Puntual (Sin instalación)
-                  </p>
-                  <p className="font-mono text-sm font-semibold text-[#0B192C] break-words">
-                    {tempAgentMeta.fileName}
-                  </p>
-                  <p className="text-xs text-slate-600">{tempAgentMeta.sizeLabel}</p>
-                  <p className="text-xs text-slate-600">{tempAgentMeta.shaHint}</p>
-                </div>
+              {/* Recommended Installer based on Plan Mode */}
+              {!isMonthlyPlan ? (
+                <>
+                  <div className="p-4 rounded-xl bg-[#F8FAFC] border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="space-y-1 min-w-0">
+                      <p className="text-xs font-semibold text-emerald-700">
+                        Recomendado para tu ticket · Sin instalación
+                      </p>
+                      <p className="font-mono text-sm font-semibold text-[#0B192C] break-words">
+                        {tempAgentMeta.fileName}
+                      </p>
+                      <p className="text-xs text-slate-600">{tempAgentMeta.sizeLabel}</p>
+                      <p className="text-xs text-slate-600">{tempAgentMeta.shaHint}</p>
+                    </div>
 
-                <a
-                  href={tempInstallerUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={() => void onMarkAgentDownloaded(ticket.id, 'temporary')}
-                  className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-lg transition-colors text-center sm:whitespace-nowrap shrink-0 max-w-full ${
-                    ticket.agent_downloaded && ticket.agent_type === 'temporary'
-                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-300'
-                      : 'bg-[#2563EB] text-white hover:bg-blue-500'
-                  }`}
-                >
-                  <Download className="w-4 h-4 shrink-0" aria-hidden="true" />
-                  <span className="break-words">
-                    Descargar {tempAgentMeta.fileName}
-                  </span>
-                  <ExternalLink className="w-3.5 h-3.5 shrink-0 opacity-80" aria-hidden="true" />
-                </a>
-              </div>
+                    <a
+                      href={tempInstallerUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => void onMarkAgentDownloaded(ticket.id, 'temporary')}
+                      className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-lg transition-colors text-center sm:whitespace-nowrap shrink-0 max-w-full ${
+                        ticket.agent_downloaded && ticket.agent_type === 'temporary'
+                          ? 'bg-emerald-50 text-emerald-800 border border-emerald-300'
+                          : 'bg-[#2563EB] text-white hover:bg-blue-500'
+                      }`}
+                    >
+                      <Download className="w-4 h-4 shrink-0" aria-hidden="true" />
+                      <span className="break-words">
+                        Descargar {tempAgentMeta.fileName}
+                      </span>
+                      <ExternalLink className="w-3.5 h-3.5 shrink-0 opacity-80" aria-hidden="true" />
+                    </a>
+                  </div>
 
-              {/* Secondary: Installed Unattended Agent */}
-              <div className="p-4 rounded-xl bg-white border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="space-y-1 min-w-0">
-                  <p className="text-xs font-semibold text-slate-500">
-                    Opción Secundaria · Clientes con Plan Mensual Pyme
-                  </p>
-                  <p className="font-mono text-sm font-semibold text-[#0B192C] break-words">
-                    {installedAgentMeta.fileName}
-                  </p>
-                  <p className="text-xs text-slate-600">{installedAgentMeta.sizeLabel}</p>
-                  <p className="text-xs text-slate-500">{installedAgentMeta.shaHint}</p>
-                </div>
+                  <details className="rounded-xl bg-white border border-slate-200 p-3.5 text-xs">
+                    <summary className="cursor-pointer font-semibold text-slate-600 hover:text-[#0B192C]">
+                      ¿Prefieres el Agente Instalado (Plan Mensual Pyme)?
+                    </summary>
+                    <div className="mt-3 pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="space-y-0.5 min-w-0">
+                        <p className="font-mono font-semibold text-[#0B192C] break-words">
+                          {installedAgentMeta.fileName}
+                        </p>
+                        <p className="text-slate-600">{installedAgentMeta.sizeLabel}</p>
+                      </div>
+                      <a
+                        href={installedInstallerUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => void onMarkAgentDownloaded(ticket.id, 'installed')}
+                        className="inline-flex items-center justify-center gap-2 px-3.5 py-2 font-semibold rounded-lg bg-white text-[#0B192C] border border-slate-300 hover:bg-slate-50 transition-colors shrink-0"
+                      >
+                        <HardDriveDownload className="w-4 h-4 shrink-0" aria-hidden="true" />
+                        <span>Descargar Agente Instalado</span>
+                        <ExternalLink className="w-3.5 h-3.5 shrink-0 opacity-70" aria-hidden="true" />
+                      </a>
+                    </div>
+                  </details>
+                </>
+              ) : (
+                <>
+                  <div className="p-4 rounded-xl bg-[#F8FAFC] border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="space-y-1 min-w-0">
+                      <p className="text-xs font-semibold text-emerald-700">
+                        Recomendado para Plan Mensual Pyme · Acceso Desatendido
+                      </p>
+                      <p className="font-mono text-sm font-semibold text-[#0B192C] break-words">
+                        {installedAgentMeta.fileName}
+                      </p>
+                      <p className="text-xs text-slate-600">{installedAgentMeta.sizeLabel}</p>
+                      <p className="text-xs text-slate-500">{installedAgentMeta.shaHint}</p>
+                    </div>
 
-                <a
-                  href={installedInstallerUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={() => void onMarkAgentDownloaded(ticket.id, 'installed')}
-                  className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-lg transition-colors text-center sm:whitespace-nowrap shrink-0 max-w-full ${
-                    ticket.agent_downloaded && ticket.agent_type === 'installed'
-                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-300'
-                      : 'bg-white text-[#0B192C] border border-slate-300 hover:bg-slate-50'
-                  }`}
-                >
-                  <HardDriveDownload className="w-4 h-4 shrink-0" aria-hidden="true" />
-                  <span className="break-words">
-                    Agente Instalado ({installedAgentMeta.fileName})
-                  </span>
-                  <ExternalLink className="w-3.5 h-3.5 shrink-0 opacity-70" aria-hidden="true" />
-                </a>
-              </div>
+                    <a
+                      href={installedInstallerUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => void onMarkAgentDownloaded(ticket.id, 'installed')}
+                      className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold rounded-lg transition-colors text-center sm:whitespace-nowrap shrink-0 max-w-full ${
+                        ticket.agent_downloaded && ticket.agent_type === 'installed'
+                          ? 'bg-emerald-50 text-emerald-800 border border-emerald-300'
+                          : 'bg-[#2563EB] text-white hover:bg-blue-500'
+                      }`}
+                    >
+                      <HardDriveDownload className="w-4 h-4 shrink-0" aria-hidden="true" />
+                      <span className="break-words">
+                        Descargar {installedAgentMeta.fileName}
+                      </span>
+                      <ExternalLink className="w-3.5 h-3.5 shrink-0 opacity-80" aria-hidden="true" />
+                    </a>
+                  </div>
+
+                  <details className="rounded-xl bg-white border border-slate-200 p-3.5 text-xs">
+                    <summary className="cursor-pointer font-semibold text-slate-600 hover:text-[#0B192C]">
+                      ¿Prefieres usar el Agente Temporal sin instalación?
+                    </summary>
+                    <div className="mt-3 pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="space-y-0.5 min-w-0">
+                        <p className="font-mono font-semibold text-[#0B192C] break-words">
+                          {tempAgentMeta.fileName}
+                        </p>
+                        <p className="text-slate-600">{tempAgentMeta.sizeLabel}</p>
+                      </div>
+                      <a
+                        href={tempInstallerUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => void onMarkAgentDownloaded(ticket.id, 'temporary')}
+                        className="inline-flex items-center justify-center gap-2 px-3.5 py-2 font-semibold rounded-lg bg-white text-[#0B192C] border border-slate-300 hover:bg-slate-50 transition-colors shrink-0"
+                      >
+                        <Download className="w-4 h-4 shrink-0" aria-hidden="true" />
+                        <span>Descargar Agente Temporal</span>
+                        <ExternalLink className="w-3.5 h-3.5 shrink-0 opacity-70" aria-hidden="true" />
+                      </a>
+                    </div>
+                  </details>
+                </>
+              )}
 
               {/* Public Network Ready-to-Connect Info Card */}
               <div
@@ -1380,105 +1464,109 @@ export function ConnectionRoom({
             </div>
 
             {/* GDPR / LOPDP Data Portability, Erasure & 1-Click Cancellation */}
-            <div
+            <details
               data-testid="room-privacy-controls"
-              className="bg-white border border-slate-200 rounded-xl p-5 space-y-3.5"
+              className="bg-white border border-slate-200 rounded-xl p-4"
             >
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-bold text-[#0B192C]">
-                  Privacidad, Datos y Suscripción (GDPR / LOPDP)
-                </p>
-                <button
-                  type="button"
-                  onClick={() => onOpenLegalDoc?.('privacy')}
-                  className="text-[11px] font-semibold text-[#2563EB] hover:underline"
-                >
-                  Política de Privacidad
-                </button>
-              </div>
+              <summary className="cursor-pointer list-none flex items-center justify-between gap-2 text-xs font-bold text-[#0B192C]">
+                <span>Privacidad y control de datos (GDPR / LOPDP)</span>
+                <span className="text-[11px] font-medium text-[#2563EB]">Ver opciones</span>
+              </summary>
 
-              <p className="text-xs text-slate-600 leading-relaxed">
-                No hay una política automática de eliminación configurada en esta versión.
-                Algunas funciones de IA procesan texto del incidente mediante un proveedor
-                externo; evita incluir credenciales o datos innecesarios.
-              </p>
-
-              <div className="space-y-2">
-                {onExportClientData && (
+              <div className="mt-3.5 pt-3.5 border-t border-slate-100 space-y-3.5">
+                <div className="flex items-center justify-end">
                   <button
                     type="button"
-                    onClick={() => {
-                      onExportClientData(ticket.id);
-                      setPrivacyActionNotice(
-                        'Archivo JSON con tus datos exportado correctamente.'
-                      );
-                    }}
-                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold text-[#0B192C] bg-[#F8FAFC] hover:bg-slate-100 border border-slate-300 rounded-lg transition-colors"
+                    onClick={() => onOpenLegalDoc?.('privacy')}
+                    className="text-[11px] font-semibold text-[#2563EB] hover:underline"
                   >
-                    <Download className="w-3.5 h-3.5 text-[#2563EB]" aria-hidden="true" />
-                    <span>Descargar mis datos (JSON)</span>
+                    Leer Política de Privacidad
                   </button>
-                )}
+                </div>
 
-                {onAnonymizeClientData && !ticket.anonymized_at && (
-                  confirmAnonymizeOpen ? (
-                    <div className="p-3 rounded-lg bg-red-50 border border-red-200 space-y-2 text-xs">
-                      <p className="font-semibold text-red-900">
-                        ¿Confirmas anonimizar tu nombre, correo e ID RustDesk de este
-                        ticket?
-                      </p>
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setConfirmAnonymizeOpen(false)}
-                          className="px-3 py-1 font-medium text-slate-700 bg-white border border-slate-300 rounded-md"
-                        >
-                          Cancelar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            void onAnonymizeClientData(ticket.id).then((ok) => {
-                              setConfirmAnonymizeOpen(false);
-                              if (ok !== false) {
-                                setPrivacyActionNotice(
-                                  'Tus datos personales fueron anonimizados y registrados en auditoría.'
-                                );
-                              }
-                            });
-                          }}
-                          className="px-3 py-1 font-semibold text-white bg-red-700 hover:bg-red-800 rounded-md"
-                        >
-                          Confirmar eliminación
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  No hay una política automática de eliminación configurada en esta versión.
+                  Algunas funciones de IA procesan texto del incidente mediante un proveedor
+                  externo; evita incluir credenciales o datos innecesarios.
+                </p>
+
+                <div className="space-y-2">
+                  {onExportClientData && (
                     <button
                       type="button"
-                      onClick={() => setConfirmAnonymizeOpen(true)}
-                      className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold text-red-700 bg-white hover:bg-red-50 border border-red-200 rounded-lg transition-colors"
+                      onClick={() => {
+                        onExportClientData(ticket.id);
+                        setPrivacyActionNotice(
+                          'Archivo JSON con tus datos exportado correctamente.'
+                        );
+                      }}
+                      className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold text-[#0B192C] bg-[#F8FAFC] hover:bg-slate-100 border border-slate-300 rounded-lg transition-colors"
                     >
-                      <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-                      <span>Eliminar mis datos personales</span>
+                      <Download className="w-3.5 h-3.5 text-[#2563EB]" aria-hidden="true" />
+                      <span>Descargar mis datos (JSON)</span>
                     </button>
-                  )
-                )}
+                  )}
 
-                {ticket.anonymized_at && (
-                  <p className="text-xs font-medium text-slate-700 bg-slate-100 border border-slate-200 rounded-lg px-3 py-2">
-                    Datos personales anonimizados el{' '}
-                    {new Date(ticket.anonymized_at).toLocaleDateString('es-ES')}.
-                  </p>
-                )}
+                  {onAnonymizeClientData && !ticket.anonymized_at && (
+                    confirmAnonymizeOpen ? (
+                      <div className="p-3 rounded-lg bg-red-50 border border-red-200 space-y-2 text-xs">
+                        <p className="font-semibold text-red-900">
+                          ¿Confirmas anonimizar tu nombre, correo e ID RustDesk de este
+                          ticket?
+                        </p>
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setConfirmAnonymizeOpen(false)}
+                            className="px-3 py-1 font-medium text-slate-700 bg-white border border-slate-300 rounded-md"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void onAnonymizeClientData(ticket.id).then((ok) => {
+                                setConfirmAnonymizeOpen(false);
+                                if (ok !== false) {
+                                  setPrivacyActionNotice(
+                                    'Tus datos personales fueron anonimizados y registrados en auditoría.'
+                                  );
+                                }
+                              });
+                            }}
+                            className="px-3 py-1 font-semibold text-white bg-red-700 hover:bg-red-800 rounded-md"
+                          >
+                            Confirmar eliminación
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmAnonymizeOpen(true)}
+                        className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold text-red-700 bg-white hover:bg-red-50 border border-red-200 rounded-lg transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Eliminar mis datos personales</span>
+                      </button>
+                    )
+                  )}
 
-                {privacyActionNotice && (
-                  <p className="text-xs font-medium text-emerald-700">
-                    {privacyActionNotice}
-                  </p>
-                )}
+                  {ticket.anonymized_at && (
+                    <p className="text-xs font-medium text-slate-700 bg-slate-100 border border-slate-200 rounded-lg px-3 py-2">
+                      Datos personales anonimizados el{' '}
+                      {new Date(ticket.anonymized_at).toLocaleDateString('es-ES')}.
+                    </p>
+                  )}
+
+                  {privacyActionNotice && (
+                    <p className="text-xs font-medium text-emerald-700">
+                      {privacyActionNotice}
+                    </p>
+                  )}
+                </div>
               </div>
-            </div>
+            </details>
           </div>
         </div>
       </div>

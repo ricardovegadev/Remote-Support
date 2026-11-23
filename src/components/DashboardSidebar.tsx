@@ -267,7 +267,7 @@ export function DashboardSidebar({
           {navGroups.map((group) => (
             <div key={group.groupLabel} className="space-y-1">
               {!isCompact && (
-                <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[#64748B]">
+                <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[#94A3B8]">
                   {group.groupLabel}
                 </p>
               )}
