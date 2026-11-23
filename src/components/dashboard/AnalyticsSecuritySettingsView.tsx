@@ -8,6 +8,7 @@ import {
   ShieldAlert,
   Trash2,
 } from 'lucide-react';
+import { FEATURE_FLAGS } from '../../config/features';
 import type {
   AuditLogEntry,
   Organization,
@@ -252,10 +253,14 @@ export function OrganizationSettingsView({
       >
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#2563EB]">
-            CONFIGURACIÓN MULTI-TENANT
+            {FEATURE_FLAGS.ENABLE_SAAS_MULTITENANT
+              ? 'CONFIGURACIÓN MULTI-TENANT'
+              : 'CONFIGURACIÓN OPERATIVA'}
           </p>
           <h2 className="text-lg font-bold text-[#0F172A] mt-0.5">
-            Parámetros de la organización
+            {FEATURE_FLAGS.ENABLE_SAAS_MULTITENANT
+              ? 'Parámetros de la organización'
+              : 'Parámetros de la plataforma'}
           </h2>
           <p className="text-xs text-[#64748B] mt-0.5">
             Configura el nombre del espacio de trabajo, relay RustDesk dedicado y
@@ -269,7 +274,9 @@ export function OrganizationSettingsView({
               htmlFor="org-settings-name"
               className="block text-xs font-semibold text-[#0F172A] mb-1.5"
             >
-              Nombre de la Organización
+              {FEATURE_FLAGS.ENABLE_SAAS_MULTITENANT
+                ? 'Nombre de la Organización'
+                : 'Nombre del espacio operativo'}
             </label>
             <input
               id="org-settings-name"
@@ -328,7 +335,9 @@ export function OrganizationSettingsView({
             <p className="text-[#64748B]">Motor de Base de Datos</p>
             <p className="font-semibold text-[#0F172A] mt-1">
               {supabaseConfigured
-                ? 'Supabase PostgreSQL + RLS Multiempresa Activo'
+                ? FEATURE_FLAGS.ENABLE_SAAS_MULTITENANT
+                  ? 'Supabase PostgreSQL + RLS Multiempresa Activo'
+                  : 'Supabase PostgreSQL + RLS Activo'
                 : 'Modo Demo Local (Fallback en memoria + BroadcastChannel)'}
             </p>
             <p className="text-[#64748B] mt-0.5">Operador: {operatorEmail}</p>
@@ -372,31 +381,39 @@ export function OrganizationSettingsView({
       </form>
 
       {/* SaaS billing status & data portability */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div
-          data-testid="org-subscription-card"
-          className="bg-white border border-[#E5E9F2] rounded-xl p-6 shadow-[0_1px_3px_rgba(15,23,42,0.03)] space-y-4"
-        >
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#2563EB]">
-              PLAN DE ORGANIZACIÓN
-            </p>
-            <h3 className="text-base font-bold text-[#0F172A] mt-0.5">
-              Plan de la organización
-            </h3>
-            <p className="text-xs text-[#64748B] mt-1 leading-relaxed">
-              Plan activo:{' '}
-              <strong className="text-[#0F172A] font-mono">
-                {organization.plan_tier}
-              </strong>
-              . El estado de cobro no está sincronizado con una pasarela en esta versión.
-            </p>
-          </div>
+      <div
+        className={
+          FEATURE_FLAGS.ENABLE_SAAS_MULTITENANT
+            ? 'grid grid-cols-1 md:grid-cols-2 gap-6'
+            : 'grid grid-cols-1 gap-6'
+        }
+      >
+        {FEATURE_FLAGS.ENABLE_SAAS_MULTITENANT && (
+          <div
+            data-testid="org-subscription-card"
+            className="bg-white border border-[#E5E9F2] rounded-xl p-6 shadow-[0_1px_3px_rgba(15,23,42,0.03)] space-y-4"
+          >
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#2563EB]">
+                PLAN DE ORGANIZACIÓN
+              </p>
+              <h3 className="text-base font-bold text-[#0F172A] mt-0.5">
+                Plan de la organización
+              </h3>
+              <p className="text-xs text-[#64748B] mt-1 leading-relaxed">
+                Plan activo:{' '}
+                <strong className="text-[#0F172A] font-mono">
+                  {organization.plan_tier}
+                </strong>
+                . El estado de cobro no está sincronizado con una pasarela en esta versión.
+              </p>
+            </div>
 
-          <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-950">
-            La etiqueta del plan es informativa. Todavía no hay portal de facturación para consultar cargos o cancelar una renovación.
+            <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-950">
+              La etiqueta del plan es informativa. Todavía no hay portal de facturación para consultar cargos o cancelar una renovación.
+            </div>
           </div>
-        </div>
+        )}
 
         <div
           data-testid="org-gdpr-card"

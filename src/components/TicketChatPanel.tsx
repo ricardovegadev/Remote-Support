@@ -10,6 +10,84 @@ interface TicketChatPanelProps {
   disabled?: boolean;
 }
 
+function getContextualClientQuickReplies(messages: TicketMessage[]): string[] {
+  const lastTechMessage = [...messages]
+    .reverse()
+    .find((m) => m.sender_role === 'technician')?.message;
+
+  if (!lastTechMessage) {
+    return [
+      'Hola, ya estoy listo para empezar',
+      'Necesito ayuda para encontrar mi ID',
+      'Ya descargué el programa',
+    ];
+  }
+
+  const lower = lastTechMessage.toLowerCase();
+
+  if (
+    lower.includes('id') ||
+    lower.includes('rustdesk') ||
+    lower.includes('9 dígito') ||
+    lower.includes('9 digito') ||
+    lower.includes('descarg') ||
+    lower.includes('código') ||
+    lower.includes('codigo')
+  ) {
+    return [
+      'Ya abrí RustDesk, te envío mi ID',
+      'Necesito ayuda para ubicar mi ID',
+      'Ya acepté la conexión en pantalla',
+    ];
+  }
+
+  if (
+    lower.includes('acept') ||
+    lower.includes('permiso') ||
+    lower.includes('ventana') ||
+    lower.includes('pantalla') ||
+    lower.includes('solicitud') ||
+    lower.includes('conect')
+  ) {
+    return [
+      'Ya acepté el permiso',
+      'No me aparece la ventana todavía',
+      'Un momento, ya lo reviso',
+    ];
+  }
+
+  if (
+    lower.includes('reinic') ||
+    lower.includes('prueba') ||
+    lower.includes('probar') ||
+    lower.includes('verific') ||
+    lower.includes('listo') ||
+    lower.includes('resuelto') ||
+    lower.includes('funciona')
+  ) {
+    return [
+      'Ya quedó funcionando, ¡gracias!',
+      'Sigo viendo el mismo problema',
+      'Voy a reiniciar y te aviso',
+    ];
+  }
+
+  if (lower.includes('pago') || lower.includes('comprobante') || lower.includes('tarifa')) {
+    return [
+      'Ya realicé el pago',
+      'Tengo una duda con el pago',
+      'Listo para iniciar la sesión',
+    ];
+  }
+
+  return [
+    'Sí, estoy frente al equipo',
+    'Listo, puedes continuar',
+    'Un momento por favor',
+    '¿Cuál es el siguiente paso?',
+  ];
+}
+
 export function TicketChatPanel({
   ticketCode,
   messages,
@@ -25,9 +103,8 @@ export function TicketChatPanel({
     listEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [messages.length]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = draftMessage.trim();
+  const sendMessageText = async (text: string) => {
+    const trimmed = text.trim();
     if (!trimmed || disabled || isSending) return;
     setIsSending(true);
     try {
@@ -39,6 +116,16 @@ export function TicketChatPanel({
       setIsSending(false);
     }
   };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await sendMessageText(draftMessage);
+  };
+
+  const clientQuickReplies =
+    currentRole === 'client' && !disabled
+      ? getContextualClientQuickReplies(messages)
+      : [];
 
   return (
     <div
@@ -58,7 +145,7 @@ export function TicketChatPanel({
       </div>
 
       {/* Messages Feed */}
-      <div className="p-4 space-y-3 h-72 overflow-y-auto bg-[#F8FAFC]">
+      <div className="p-4 space-y-3 h-72 overflow-y-auto chat-scroll-hover bg-[#F8FAFC]">
         {messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center px-4">
             <p className="text-xs font-medium text-slate-600">
@@ -66,7 +153,7 @@ export function TicketChatPanel({
             </p>
             <p className="text-xs text-slate-500 mt-1">
               {currentRole === 'client'
-                ? 'Escribe aquí si necesitas ayuda para ubicar tu ID de 9 dígitos.'
+                ? 'Escribe aquí o usa una respuesta rápida si necesitas ayuda para ubicar tu ID.'
                 : 'Envía un saludo o confirma al cliente que estás listo para conectarte.'}
             </p>
           </div>
@@ -116,10 +203,30 @@ export function TicketChatPanel({
         <div ref={listEndRef} />
       </div>
 
+      {/* Contextual Quick Replies for Client */}
+      {clientQuickReplies.length > 0 && (
+        <div
+          aria-label="Respuestas rápidas sugeridas"
+          className="px-3 pt-2.5 pb-1 border-t border-slate-100 bg-white flex flex-wrap items-center gap-1.5"
+        >
+          {clientQuickReplies.map((reply) => (
+            <button
+              key={reply}
+              type="button"
+              disabled={isSending}
+              onClick={() => void sendMessageText(reply)}
+              className="px-2.5 py-1 rounded-full border border-blue-200/80 bg-blue-50/50 hover:bg-[#2563EB] hover:border-[#2563EB] hover:text-white text-[11px] font-medium text-[#1D4ED8] transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+            >
+              {reply}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Composer */}
       <form
         onSubmit={(e) => void handleSubmit(e)}
-        className="p-3 border-t border-slate-200 bg-white flex items-center gap-2"
+        className="p-3 border-t border-slate-200/80 bg-white flex items-center gap-2"
       >
         <label htmlFor={`chat-input-${currentRole}`} className="sr-only">
           Escribir mensaje en el chat de soporte

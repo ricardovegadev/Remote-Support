@@ -18,17 +18,26 @@ import {
   getServiceTierPriceUsd,
   getServiceTierRegularPriceUsd,
   getSuggestedTierForCategory,
+  getTechnicianCommissionTier,
   isAdultBirthDate,
   isValidUuid,
   LEGAL_TERMS_VERSION,
+  NDA_CLIENT_VERSION,
+  NDA_TECH_VERSION,
   normalizeRustDeskId,
   OFFICIAL_RUSTDESK_RELEASES_URL,
   parseAppRoute,
+  TECHNICIAN_COMMISSION_TIERS,
   validateRustDeskId,
   validateStep1,
   validateStep2,
   validateStep3,
 } from './ticketLogic';
+import {
+  ASSESSMENT_DURATION_SECONDS,
+  evaluateTechnicianAssessment,
+  TECHNICIAN_ASSESSMENT_QUESTIONS,
+} from './techEvaluation';
 import type { SupportTicket, WizardDraft } from '../types/support';
 
 test('generateTicketCode produces RS-XXXX format', () => {
@@ -344,5 +353,133 @@ test('createTicketFromDraft generates cryptographic 64-char hex client_session_t
   assert.notEqual(tA.client_session_token, tB.client_session_token);
   assert.equal(tA.consent_accepted, false);
 });
+
+test('parseAppRoute resolves /postular and /trabaja-con-nosotros to technician_apply', () => {
+  assert.deepEqual(parseAppRoute('/postular'), {
+    view: 'technician_apply',
+    ticketCode: null,
+  });
+  assert.deepEqual(parseAppRoute('/postular/'), {
+    view: 'technician_apply',
+    ticketCode: null,
+  });
+  assert.deepEqual(parseAppRoute('/POSTULAR'), {
+    view: 'technician_apply',
+    ticketCode: null,
+  });
+  assert.deepEqual(parseAppRoute('/trabaja-con-nosotros'), {
+    view: 'technician_apply',
+    ticketCode: null,
+  });
+});
+
+test('NDA version constants expose official dual NDA identifiers', () => {
+  assert.equal(NDA_CLIENT_VERSION, 'NDA-CLIENT-v1.0-2026');
+  assert.equal(NDA_TECH_VERSION, 'NDA-TECH-v1.0-2026');
+});
+
+test('getTechnicianCommissionTier enforces approved 65/75/80/85% thresholds and handles edge inputs', () => {
+  assert.deepEqual(
+    TECHNICIAN_COMMISSION_TIERS.map((tier) => tier.commissionPercent),
+    [65, 75, 80, 85]
+  );
+
+  // Base: 0 - 25 -> 65% (including negative and NaN defensive clamping)
+  assert.equal(getTechnicianCommissionTier(-10).id, 'base');
+  assert.equal(getTechnicianCommissionTier(-10).commissionPercent, 65);
+  assert.equal(getTechnicianCommissionTier(Number.NaN).id, 'base');
+  assert.equal(getTechnicianCommissionTier(Number.NaN).commissionPercent, 65);
+  assert.equal(getTechnicianCommissionTier(0).commissionPercent, 65);
+  assert.equal(getTechnicianCommissionTier(25).commissionPercent, 65);
+
+  // Pro: 26 - 100 -> 75%
+  assert.equal(getTechnicianCommissionTier(26).id, 'pro');
+  assert.equal(getTechnicianCommissionTier(26).commissionPercent, 75);
+  assert.equal(getTechnicianCommissionTier(100).commissionPercent, 75);
+
+  // Senior: 101 - 250 -> 80%
+  assert.equal(getTechnicianCommissionTier(101).id, 'senior');
+  assert.equal(getTechnicianCommissionTier(101).commissionPercent, 80);
+  assert.equal(getTechnicianCommissionTier(250).commissionPercent, 80);
+
+  // Elite: 251 - 500+ -> 85%
+  assert.equal(getTechnicianCommissionTier(251).id, 'elite');
+  assert.equal(getTechnicianCommissionTier(251).commissionPercent, 85);
+  assert.equal(getTechnicianCommissionTier(500).commissionPercent, 85);
+  assert.equal(getTechnicianCommissionTier(900).commissionPercent, 85);
+});
+
+test('evaluateTechnicianAssessment scores technical/attitude dimensions and recommendation rules', () => {
+  assert.equal(ASSESSMENT_DURATION_SECONDS, 900);
+  assert.equal(TECHNICIAN_ASSESSMENT_QUESTIONS.length, 10);
+
+  const technicalQuestions = TECHNICIAN_ASSESSMENT_QUESTIONS.filter(
+    (q) => q.dimension === 'technical'
+  );
+  const attitudeQuestions = TECHNICIAN_ASSESSMENT_QUESTIONS.filter(
+    (q) => q.dimension === 'attitude'
+  );
+  assert.equal(technicalQuestions.length, 5);
+  assert.equal(attitudeQuestions.length, 5);
+
+  // 10/10 -> recommended_approve
+  const allCorrect: Record<string, string> = {};
+  for (const q of TECHNICIAN_ASSESSMENT_QUESTIONS) {
+    allCorrect[q.id] = q.correctOptionId;
+  }
+  const perfect = evaluateTechnicianAssessment(allCorrect);
+  assert.equal(perfect.technicalScore, 100);
+  assert.equal(perfect.attitudeScore, 100);
+  assert.equal(perfect.totalScore, 100);
+  assert.equal(perfect.unansweredCount, 0);
+  assert.equal(perfect.recommendation, 'recommended_approve');
+
+  // 4/5 technical (80%) + 4/5 attitude (80%) -> total 80% -> recommended_approve
+  const solidAnswers: Record<string, string> = {};
+  technicalQuestions.forEach((q, idx) => {
+    solidAnswers[q.id] = idx < 4 ? q.correctOptionId : 'wrong';
+  });
+  attitudeQuestions.forEach((q, idx) => {
+    solidAnswers[q.id] = idx < 4 ? q.correctOptionId : 'wrong';
+  });
+  const solid = evaluateTechnicianAssessment(solidAnswers);
+  assert.equal(solid.technicalScore, 80);
+  assert.equal(solid.attitudeScore, 80);
+  assert.equal(solid.totalScore, 80);
+  assert.equal(solid.recommendation, 'recommended_approve');
+
+  // Edge case: 5/5 technical (100%) + 3/5 attitude (60%) -> total 80% >= 75, but attitude < 80 -> manual_review
+  const lowAttitudeAnswers: Record<string, string> = {};
+  technicalQuestions.forEach((q) => {
+    lowAttitudeAnswers[q.id] = q.correctOptionId;
+  });
+  attitudeQuestions.forEach((q, idx) => {
+    lowAttitudeAnswers[q.id] = idx < 3 ? q.correctOptionId : 'wrong';
+  });
+  const lowAttitude = evaluateTechnicianAssessment(lowAttitudeAnswers);
+  assert.equal(lowAttitude.technicalScore, 100);
+  assert.equal(lowAttitude.attitudeScore, 60);
+  assert.equal(lowAttitude.totalScore, 80);
+  assert.equal(lowAttitude.recommendation, 'manual_review');
+
+  // 3/5 technical + 3/5 attitude -> total 60% -> manual_review
+  const midAnswers: Record<string, string> = {};
+  technicalQuestions.forEach((q, idx) => {
+    midAnswers[q.id] = idx < 3 ? q.correctOptionId : 'wrong';
+  });
+  attitudeQuestions.forEach((q, idx) => {
+    midAnswers[q.id] = idx < 3 ? q.correctOptionId : 'wrong';
+  });
+  const mid = evaluateTechnicianAssessment(midAnswers);
+  assert.equal(mid.totalScore, 60);
+  assert.equal(mid.recommendation, 'manual_review');
+
+  // Empty answers -> 0% -> recommended_reject
+  const empty = evaluateTechnicianAssessment({});
+  assert.equal(empty.totalScore, 0);
+  assert.equal(empty.unansweredCount, 10);
+  assert.equal(empty.recommendation, 'recommended_reject');
+});
+
 
 

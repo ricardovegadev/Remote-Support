@@ -1,4 +1,5 @@
 import { ShieldCheck } from 'lucide-react';
+import { FEATURE_FLAGS } from '../config/features';
 import type { LegalDocTab } from './LegalDocsModal';
 import { ScrollReveal } from './ScrollReveal';
 
@@ -6,12 +7,14 @@ interface FooterProps {
   onNavigateSection: (sectionId: string) => void;
   onOpenLegalDoc: (tab: LegalDocTab) => void;
   onOpenCookieSettings: () => void;
+  onOpenTechnicianApply?: () => void;
 }
 
 export function Footer({
   onNavigateSection,
   onOpenLegalDoc,
   onOpenCookieSettings,
+  onOpenTechnicianApply,
 }: FooterProps) {
   return (
     <footer className="bg-[#0B1528] text-slate-300 border-t border-slate-800/90">
@@ -60,8 +63,23 @@ export function Footer({
               }}
               className="hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded px-1 py-0.5"
             >
-              Planes Empresas
+              {FEATURE_FLAGS.ENABLE_SAAS_MULTITENANT
+                ? 'Planes Empresas'
+                : 'Planes y Tarifas'}
             </a>
+            {FEATURE_FLAGS.ENABLE_TECHNICIAN_RECRUITMENT && onOpenTechnicianApply && (
+              <a
+                href="/postular"
+                onClick={(e) => {
+                  e.preventDefault();
+                  onOpenTechnicianApply();
+                }}
+                data-testid="footer-tech-apply-link"
+                className="text-emerald-400 hover:text-emerald-300 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded px-1 py-0.5"
+              >
+                Trabaja como Técnico
+              </a>
+            )}
           </nav>
         </div>
 
@@ -84,6 +102,14 @@ export function Footer({
               className="text-slate-300 hover:text-white underline-offset-4 hover:underline transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded"
             >
               Términos y Condiciones
+            </button>
+            <button
+              type="button"
+              onClick={() => onOpenLegalDoc('nda')}
+              data-testid="footer-legal-nda-button"
+              className="text-slate-300 hover:text-white underline-offset-4 hover:underline transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded"
+            >
+              Confidencialidad (NDA)
             </button>
             <button
               type="button"

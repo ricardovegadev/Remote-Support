@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import {
+  FileSignature,
   FileText,
   Lock,
   Mail,
@@ -7,9 +8,13 @@ import {
   ShieldCheck,
   X,
 } from 'lucide-react';
-import { LEGAL_TERMS_VERSION } from '../utils/ticketLogic';
+import {
+  LEGAL_TERMS_VERSION,
+  NDA_CLIENT_VERSION,
+  NDA_TECH_VERSION,
+} from '../utils/ticketLogic';
 
-export type LegalDocTab = 'privacy' | 'terms' | 'refunds' | 'contact';
+export type LegalDocTab = 'privacy' | 'terms' | 'nda' | 'refunds' | 'contact';
 
 interface LegalDocsModalProps {
   isOpen: boolean;
@@ -21,6 +26,7 @@ interface LegalDocsModalProps {
 const TABS: Array<{ id: LegalDocTab; label: string; icon: typeof Lock }> = [
   { id: 'privacy', label: 'Política de Privacidad', icon: Lock },
   { id: 'terms', label: 'Términos y Condiciones', icon: FileText },
+  { id: 'nda', label: 'Confidencialidad (NDA)', icon: FileSignature },
   { id: 'refunds', label: 'Reembolsos y Cancelación', icon: RotateCcw },
   { id: 'contact', label: 'Contacto y DMCA', icon: Mail },
 ];
@@ -254,6 +260,142 @@ export function LegalDocsModal({
             </div>
           )}
 
+          {activeTab === 'nda' && (
+            <div data-testid="legal-nda-panel" className="space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-base font-bold text-[#0B192C]">
+                  Acuerdos de Confidencialidad (NDA Dual)
+                </h3>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-50 border border-blue-200 text-[11px] font-mono font-semibold text-[#1D4ED8]">
+                    {NDA_CLIENT_VERSION}
+                  </span>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-[11px] font-mono font-semibold text-emerald-800">
+                    {NDA_TECH_VERSION}
+                  </span>
+                </div>
+              </div>
+
+              {/* Bloque 1: NDA Clientes */}
+              <div className="p-4 rounded-xl bg-blue-50/80 border border-blue-200 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h4 className="text-sm font-bold text-blue-950">
+                    1. Acuerdo de Confidencialidad para Clientes
+                  </h4>
+                  <span className="text-[11px] font-mono font-semibold text-[#1D4ED8]">
+                    {NDA_CLIENT_VERSION}
+                  </span>
+                </div>
+                <p className="text-xs text-blue-950/90 leading-relaxed">
+                  Aplica automáticamente a todas las sesiones de soporte remoto contratadas en
+                  Remote Support 365 para resguardar tus archivos, pantalla e información personal.
+                </p>
+                <div className="space-y-2.5 pt-1">
+                  <div>
+                    <h5 className="text-xs font-semibold text-[#0B192C]">
+                      1.1 Secreto profesional y alcance estrictamente técnico
+                    </h5>
+                    <p className="text-xs text-slate-700 mt-0.5">
+                      Toda pantalla, documento, correo o dato visible durante la asistencia remota
+                      tiene carácter estrictamente confidencial. El especialista solo accede a los
+                      elementos necesarios para diagnosticar y resolver el incidente del ticket activo.
+                    </p>
+                  </div>
+                  <div>
+                    <h5 className="text-xs font-semibold text-[#0B192C]">
+                      1.2 Prohibición de capturas, grabaciones y extracciones no autorizadas
+                    </h5>
+                    <p className="text-xs text-slate-700 mt-0.5">
+                      Está prohibido que cualquier técnico grabe la sesión, tome capturas de datos
+                      sensibles o copie archivos del equipo del cliente hacia dispositivos externos.
+                    </p>
+                  </div>
+                  <div>
+                    <h5 className="text-xs font-semibold text-[#0B192C]">
+                      1.3 Supervisión continua y revocación en 1 clic
+                    </h5>
+                    <p className="text-xs text-slate-700 mt-0.5">
+                      El cliente mantiene el control total del equipo en todo momento y puede
+                      revocar o cerrar el acceso remoto instantáneamente desde RustDesk.
+                    </p>
+                  </div>
+                  <div>
+                    <h5 className="text-xs font-semibold text-[#0B192C]">
+                      1.4 Derechos de acceso, exportación y eliminación
+                    </h5>
+                    <p className="text-xs text-slate-700 mt-0.5">
+                      Puedes exportar tu historial en JSON o solicitar la anonimización y
+                      eliminación de tus datos desde la Sala de Conexión o escribiendo a{' '}
+                      <span className="font-mono text-[#0B192C]">
+                        privacidad@remotesupport365.com
+                      </span>
+                      .
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bloque 2: NDA Interno Técnicos */}
+              <div className="p-4 rounded-xl bg-emerald-50/80 border border-emerald-200 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h4 className="text-sm font-bold text-emerald-950">
+                    2. Acuerdo de Confidencialidad Interno para Técnicos
+                  </h4>
+                  <span className="text-[11px] font-mono font-semibold text-emerald-800">
+                    {NDA_TECH_VERSION}
+                  </span>
+                </div>
+                <p className="text-xs text-emerald-950/90 leading-relaxed">
+                  De aceptación obligatoria y firma nominal para todos los técnicos postulantes y
+                  especialistas activos de la red Remote Support 365 (modalidades Half-time y
+                  Full-time).
+                </p>
+                <div className="space-y-2.5 pt-1">
+                  <div>
+                    <h5 className="text-xs font-semibold text-[#0B192C]">
+                      2.1 Confidencialidad de clientes y arquitectura interna
+                    </h5>
+                    <p className="text-xs text-slate-700 mt-0.5">
+                      El técnico se compromete a guardar reserva absoluta sobre datos personales,
+                      tickets, diagnósticos, metodologías y herramientas internas de Remote Support
+                      365 durante su colaboración y tras su finalización.
+                    </p>
+                  </div>
+                  <div>
+                    <h5 className="text-xs font-semibold text-[#0B192C]">
+                      2.2 Prohibición absoluta de solicitar contraseñas o datos bancarios
+                    </h5>
+                    <p className="text-xs text-slate-700 mt-0.5">
+                      Queda estrictamente prohibido pedir contraseñas personales, códigos 2FA, PINs
+                      o información financiera/bancaria. Cuando sea necesario autenticarse, el
+                      propio cliente ingresará sus credenciales directamente en su equipo.
+                    </p>
+                  </div>
+                  <div>
+                    <h5 className="text-xs font-semibold text-[#0B192C]">
+                      2.3 Cero grabación, copia o retención local de archivos
+                    </h5>
+                    <p className="text-xs text-slate-700 mt-0.5">
+                      Está prohibido grabar pantallas, capturar información privada o conservar
+                      copias de archivos de clientes en equipos o nubes personales del técnico.
+                    </p>
+                  </div>
+                  <div>
+                    <h5 className="text-xs font-semibold text-[#0B192C]">
+                      2.4 Cláusula de no elusión (Non-Circumvention)
+                    </h5>
+                    <p className="text-xs text-slate-700 mt-0.5">
+                      El técnico no podrá contactar, ofrecer servicios independientes ni recibir
+                      pagos por fuera de Remote Support 365 de clientes conocidos a través de la
+                      plataforma. El incumplimiento conlleva la desvinculación inmediata y las
+                      acciones legales aplicables.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {activeTab === 'refunds' && (
             <div className="space-y-4">
               <h3 className="text-base font-bold text-[#0B192C]">
@@ -370,7 +512,9 @@ export function LegalDocsModal({
         {/* Footer */}
         <div className="px-6 py-3.5 bg-[#F8FAFC] border-t border-slate-200 flex items-center justify-between gap-4 shrink-0">
           <p className="text-xs text-slate-600">
-            Documento normativo {LEGAL_TERMS_VERSION} · Remote Support 365
+            {activeTab === 'nda'
+              ? `Versiones vigentes: ${NDA_CLIENT_VERSION} · ${NDA_TECH_VERSION}`
+              : `Documento normativo ${LEGAL_TERMS_VERSION} · Remote Support 365`}
           </p>
           <button
             type="button"

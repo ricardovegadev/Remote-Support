@@ -1355,26 +1355,38 @@ export function ConnectionRoom({
 
                 {/* Explicit Access Consent Panel */}
                 <div className="p-4 rounded-lg bg-[#F8FAFC] border border-slate-200 space-y-2">
-                  <label className="flex items-start gap-3 cursor-pointer">
+                  <div className="flex items-start gap-3">
                     <input
+                      id="connection-remote-consent"
                       type="checkbox"
                       checked={consentChecked}
                       onChange={(e) => {
                         setConsentChecked(e.target.checked);
                         if (idError) setIdError(null);
                       }}
-                      className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB]"
+                      className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
                     />
                     <span className="text-xs text-slate-700 leading-relaxed">
-                      <strong>Consentimiento explícito de acceso remoto:</strong> Autorizo a{' '}
-                      <span className="font-semibold text-[#0B192C]">
-                        {ticket.organization_name}
-                      </span>{' '}
-                      y al especialista asignado a visualizar y operar mi equipo de forma
-                      supervisada. Puedo finalizar o revocar la sesión en cualquier
-                      momento.
+                      <label htmlFor="connection-remote-consent" className="cursor-pointer">
+                        <strong>Consentimiento explícito de acceso remoto:</strong> Autorizo a{' '}
+                        <span className="font-semibold text-[#0B192C]">
+                          {ticket.organization_name}
+                        </span>{' '}
+                        y al especialista asignado a visualizar y operar mi equipo de forma
+                        supervisada. Puedo finalizar o revocar la sesión en cualquier
+                        momento. La sesión está protegida por nuestro{' '}
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => onOpenLegalDoc?.('nda')}
+                        data-testid="connection-legal-nda-link"
+                        className="font-semibold text-[#2563EB] underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] rounded"
+                      >
+                        Acuerdo de Confidencialidad para Clientes (NDA)
+                      </button>
+                      .
                     </span>
-                  </label>
+                  </div>
                 </div>
 
                 {idError && (
@@ -1474,7 +1486,14 @@ export function ConnectionRoom({
               </summary>
 
               <div className="mt-3.5 pt-3.5 border-t border-slate-100 space-y-3.5">
-                <div className="flex items-center justify-end">
+                <div className="flex flex-wrap items-center justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => onOpenLegalDoc?.('nda')}
+                    className="text-[11px] font-semibold text-[#2563EB] hover:underline"
+                  >
+                    Leer Confidencialidad (NDA)
+                  </button>
                   <button
                     type="button"
                     onClick={() => onOpenLegalDoc?.('privacy')}

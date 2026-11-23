@@ -9,6 +9,7 @@ import { Header } from './components/Header';
 import { HeroSection } from './components/HeroSection';
 import { LandingSections } from './components/LandingSections';
 import type { LegalDocTab } from './components/LegalDocsModal';
+import { FEATURE_FLAGS } from './config/features';
 import { getSupabaseClient, isSupabaseConfigured } from './lib/supabaseClient';
 
 const AuthModal = lazy(() =>
@@ -22,6 +23,11 @@ const ConnectionRoom = lazy(() =>
 const LegalDocsModal = lazy(() =>
   import('./components/LegalDocsModal').then((m) => ({
     default: m.LegalDocsModal,
+  }))
+);
+const TechnicianApplyView = lazy(() =>
+  import('./components/TechnicianApplyView').then((m) => ({
+    default: m.TechnicianApplyView,
   }))
 );
 const TechPortalView = lazy(() =>
@@ -82,10 +88,21 @@ function triggerJsonDownload(filename: string, jsonText: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 500);
 }
 
+function resolveAppRoute(pathname: string): { view: AppView; ticketCode: string | null } {
+  const parsed = parseAppRoute(pathname);
+  if (
+    parsed.view === 'technician_apply' &&
+    !FEATURE_FLAGS.ENABLE_TECHNICIAN_RECRUITMENT
+  ) {
+    return { view: 'landing', ticketCode: null };
+  }
+  return parsed;
+}
+
 export default function App() {
   const initialRoute =
     typeof window !== 'undefined'
-      ? parseAppRoute(window.location.pathname)
+      ? resolveAppRoute(window.location.pathname)
       : { view: 'landing' as AppView, ticketCode: null };
 
   const [activeView, setActiveView] = useState<AppView>(initialRoute.view);
@@ -192,7 +209,7 @@ export default function App() {
     }
 
     const onPopState = () => {
-      const parsed = parseAppRoute(window.location.pathname);
+      const parsed = resolveAppRoute(window.location.pathname);
       setActiveView(parsed.view);
       setActiveTicketCode(parsed.ticketCode);
     };
@@ -406,6 +423,15 @@ export default function App() {
 
   const handleReturnHome = () => {
     navigateToRoute('/', 'landing', null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleOpenTechnicianApply = () => {
+    if (!FEATURE_FLAGS.ENABLE_TECHNICIAN_RECRUITMENT) {
+      navigateToRoute('/', 'landing', null);
+      return;
+    }
+    navigateToRoute('/postular', 'technician_apply', null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -1219,6 +1245,7 @@ export default function App() {
         }}
         onOpenAuthModal={() => setAuthModalOpen(true)}
         onOpenTicketLookup={() => setTicketLookupOpen(true)}
+        onOpenTechnicianApply={handleOpenTechnicianApply}
         onReturnHome={handleReturnHome}
       />
 
@@ -1248,9 +1275,20 @@ export default function App() {
               onSelectCategoryForWizard={handleSelectCategoryFromLanding}
               onSubmitEnterpriseLead={handleSubmitEnterpriseLead}
               onStartDiagnostic={handleStartDiagnostic}
+              onOpenTechnicianApply={handleOpenTechnicianApply}
             />
           </>
         )}
+
+        {activeView === 'technician_apply' &&
+          FEATURE_FLAGS.ENABLE_TECHNICIAN_RECRUITMENT && (
+            <Suspense fallback={lazyFallback}>
+              <TechnicianApplyView
+                onReturnHome={handleReturnHome}
+                onOpenLegalDoc={setLegalDocTab}
+              />
+            </Suspense>
+          )}
 
         {activeView === 'connection_room' && (
           activeTicket ? (
@@ -1313,6 +1351,7 @@ export default function App() {
         onNavigateSection={handleNavigateSection}
         onOpenLegalDoc={setLegalDocTab}
         onOpenCookieSettings={() => setCookieBannerOpen(true)}
+        onOpenTechnicianApply={handleOpenTechnicianApply}
       />
       {sharedOverlays}
     </div>

@@ -19,6 +19,7 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import { FEATURE_FLAGS } from '../config/features';
 import type { DashboardSection, Organization } from '../types/support';
 import { getInitials } from '../utils/ticketLogic';
 
@@ -192,68 +193,89 @@ export function DashboardSidebar({
         {/* Selector de Espacio de Trabajo */}
         {!isCompact && activeOrg && (
           <div className="px-3.5 pt-4 pb-2 relative">
-            <button
-              type="button"
-              aria-expanded={orgMenuOpen}
-              aria-haspopup="listbox"
-              onClick={() => setOrgMenuOpen((prev) => !prev)}
-              className="w-full rounded-xl bg-[#111E35] hover:bg-[#162847] border border-[#1E2E4A] px-3 py-2.5 flex items-center justify-between gap-2.5 text-left transition-colors"
-            >
-              <span className="flex items-center gap-2.5 min-w-0">
+            {FEATURE_FLAGS.ENABLE_SAAS_MULTITENANT ? (
+              <>
+                <button
+                  type="button"
+                  aria-expanded={orgMenuOpen}
+                  aria-haspopup="listbox"
+                  onClick={() => setOrgMenuOpen((prev) => !prev)}
+                  className="w-full rounded-xl bg-[#111E35] hover:bg-[#162847] border border-[#1E2E4A] px-3 py-2.5 flex items-center justify-between gap-2.5 text-left transition-colors"
+                >
+                  <span className="flex items-center gap-2.5 min-w-0">
+                    <span className="w-8 h-8 rounded-lg bg-[#1B2B48] text-white text-xs font-bold flex items-center justify-center shrink-0">
+                      {getInitials(activeOrg.name)}
+                    </span>
+                    <span className="min-w-0 leading-tight">
+                      <span className="block text-xs font-semibold text-white truncate">
+                        {activeOrg.name}
+                      </span>
+                      <span className="block text-[11px] text-[#94A3B8] truncate">
+                        Espacio de trabajo
+                      </span>
+                    </span>
+                  </span>
+                  <ChevronDown
+                    className={`w-4 h-4 text-[#94A3B8] shrink-0 transition-transform ${
+                      orgMenuOpen ? 'rotate-180' : ''
+                    }`}
+                    aria-hidden="true"
+                  />
+                </button>
+
+                {orgMenuOpen && (
+                  <div
+                    role="listbox"
+                    aria-label="Cambiar espacio de trabajo"
+                    className="mt-1.5 rounded-xl bg-[#0F1D36] border border-[#1E3256] p-1.5 shadow-xl space-y-0.5 z-30 relative"
+                  >
+                    {organizations.map((org) => {
+                      const selected = org.id === activeOrg.id;
+                      return (
+                        <button
+                          key={org.id}
+                          type="button"
+                          role="option"
+                          aria-selected={selected}
+                          onClick={() => {
+                            onSelectOrg(org.id);
+                            setOrgMenuOpen(false);
+                          }}
+                          className={`w-full px-2.5 py-2 rounded-lg text-left text-xs flex items-center justify-between gap-2 transition-colors ${
+                            selected
+                              ? 'bg-[#162847] text-white font-semibold'
+                              : 'text-[#94A3B8] hover:text-white hover:bg-[#11213D]'
+                          }`}
+                        >
+                          <span className="truncate">{org.name}</span>
+                          {selected && (
+                            <Check
+                              className="w-3.5 h-3.5 text-[#3B82F6] shrink-0"
+                              aria-hidden="true"
+                            />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div
+                data-testid="sidebar-single-workspace-badge"
+                className="w-full rounded-xl bg-[#111E35] border border-[#1E2E4A] px-3 py-2.5 flex items-center gap-2.5 text-left"
+              >
                 <span className="w-8 h-8 rounded-lg bg-[#1B2B48] text-white text-xs font-bold flex items-center justify-center shrink-0">
-                  {getInitials(activeOrg.name)}
+                  RS
                 </span>
                 <span className="min-w-0 leading-tight">
                   <span className="block text-xs font-semibold text-white truncate">
-                    {activeOrg.name}
+                    Remote Support 365
                   </span>
                   <span className="block text-[11px] text-[#94A3B8] truncate">
-                    Espacio de trabajo
+                    Operación centralizada
                   </span>
                 </span>
-              </span>
-              <ChevronDown
-                className={`w-4 h-4 text-[#94A3B8] shrink-0 transition-transform ${
-                  orgMenuOpen ? 'rotate-180' : ''
-                }`}
-                aria-hidden="true"
-              />
-            </button>
-
-            {orgMenuOpen && (
-              <div
-                role="listbox"
-                aria-label="Cambiar espacio de trabajo"
-                className="mt-1.5 rounded-xl bg-[#0F1D36] border border-[#1E3256] p-1.5 shadow-xl space-y-0.5 z-30 relative"
-              >
-                {organizations.map((org) => {
-                  const selected = org.id === activeOrg.id;
-                  return (
-                    <button
-                      key={org.id}
-                      type="button"
-                      role="option"
-                      aria-selected={selected}
-                      onClick={() => {
-                        onSelectOrg(org.id);
-                        setOrgMenuOpen(false);
-                      }}
-                      className={`w-full px-2.5 py-2 rounded-lg text-left text-xs flex items-center justify-between gap-2 transition-colors ${
-                        selected
-                          ? 'bg-[#162847] text-white font-semibold'
-                          : 'text-[#94A3B8] hover:text-white hover:bg-[#11213D]'
-                      }`}
-                    >
-                      <span className="truncate">{org.name}</span>
-                      {selected && (
-                        <Check
-                          className="w-3.5 h-3.5 text-[#3B82F6] shrink-0"
-                          aria-hidden="true"
-                        />
-                      )}
-                    </button>
-                  );
-                })}
               </div>
             )}
           </div>

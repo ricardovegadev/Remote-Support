@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import type { IssueCategory } from '../types/support';
 import { AssistantOrbIcon } from './AssistantOrbIcon';
+import heroSpecialistMainImg from '../assets/images/hero_specialist_main.png';
 import heroRemoteSupportImg from '../assets/images/hero_remote_support_screens_1795192443338.jpg';
 import heroWindowsFixImg from '../assets/images/hero_windows_fix_screen_1795193579297.jpg';
 import heroCleanWorkstationImg from '../assets/images/hero_clean_workstation_1794958415031.jpg';
@@ -44,7 +45,7 @@ interface HeroSlide {
 const HERO_SLIDES: HeroSlide[] = [
   {
     id: 'warm-specialist',
-    src: '/assets/aistudio/image_d9221c48.png',
+    src: heroSpecialistMainImg,
     alt: 'Especialista de soporte técnico remoto sonriendo con auriculares frente a monitores de diagnóstico IT',
     objectPosition: 'object-[60%_20%]',
     statusTitle: 'IA primero · Especialista si hace falta',

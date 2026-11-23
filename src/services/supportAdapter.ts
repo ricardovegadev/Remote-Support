@@ -17,6 +17,7 @@ import type {
   PaymentStatus,
   RemoteSessionRecord,
   SupportTicket,
+  TechnicianApplication,
   TechnicianAvailability,
   TechnicianSpecialty,
   TicketMessage,
@@ -37,6 +38,7 @@ const ROOM_TOKENS_STORAGE_KEY = 'rs365_room_tokens_v1';
 const LOCAL_FALLBACK_TICKET_IDS_KEY = 'rs365_local_fallback_ticket_ids_v1';
 const ENTERPRISE_STORAGE_KEY = 'rs365_enterprise_leads_v1';
 const USER_PROFILE_STORAGE_KEY = 'rs365_user_profile_v1';
+export const TECHNICIAN_APPLICATIONS_STORAGE_KEY = 'rs365_technician_applications_v1';
 const BROADCAST_CHANNEL_NAME = 'rs365_realtime_sync_v5';
 
 const TODAY_ISO = new Date().toISOString().slice(0, 10);
@@ -2542,7 +2544,8 @@ export const supportAdapter = {
           event.key === SESSIONS_STORAGE_KEY ||
           event.key === ORGS_STORAGE_KEY ||
           event.key === AI_AGENTS_STORAGE_KEY ||
-          event.key === AUDIT_STORAGE_KEY
+          event.key === AUDIT_STORAGE_KEY ||
+          event.key === TECHNICIAN_APPLICATIONS_STORAGE_KEY
         ) {
           onRefresh();
         }
@@ -2729,4 +2732,65 @@ export const supportAdapter = {
     return res;
   },
 
+  loadTechnicianApplications(): TechnicianApplication[] {
+    return loadTechnicianApplications();
+  },
+
+  saveTechnicianApplication(
+    application: TechnicianApplication
+  ): TechnicianApplication[] {
+    return saveTechnicianApplication(application);
+  },
 };
+
+function isValidTechnicianApplication(
+  item: unknown
+): item is TechnicianApplication {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+  const candidate = item as Partial<TechnicianApplication>;
+  return (
+    typeof candidate.id === 'string' &&
+    candidate.id.trim().length > 0 &&
+    typeof candidate.full_name === 'string' &&
+    candidate.full_name.trim().length > 0 &&
+    typeof candidate.email === 'string' &&
+    candidate.email.trim().length > 0 &&
+    candidate.nda_accepted === true &&
+    typeof candidate.total_score === 'number'
+  );
+}
+
+export function loadTechnicianApplications(): TechnicianApplication[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(TECHNICIAN_APPLICATIONS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isValidTechnicianApplication);
+  } catch {
+    return [];
+  }
+}
+
+export function saveTechnicianApplication(
+  application: TechnicianApplication
+): TechnicianApplication[] {
+  const existing = loadTechnicianApplications();
+  const next = [
+    application,
+    ...existing.filter((item) => item.id !== application.id),
+  ];
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.setItem(
+        TECHNICIAN_APPLICATIONS_STORAGE_KEY,
+        JSON.stringify(next)
+      );
+      broadcastSync();
+    } catch {
+      // Ignore storage errors
+    }
+  }
+  return next;
+}

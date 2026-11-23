@@ -1259,6 +1259,15 @@ export function DiagnosticWizard({
                         className="font-semibold text-[#2563EB] underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] rounded"
                       >
                         Política de Privacidad
+                      </button>
+                      , el{' '}
+                      <button
+                        type="button"
+                        onClick={() => onOpenLegalDoc?.('nda')}
+                        data-testid="wizard-legal-nda-link"
+                        className="font-semibold text-[#2563EB] underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] rounded"
+                      >
+                        Acuerdo de Confidencialidad (NDA)
                       </button>{' '}
                       y la{' '}
                       <button

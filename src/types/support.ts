@@ -69,7 +69,11 @@ export type TicketStatus =
 
 export type MessageSenderRole = 'client' | 'technician' | 'system';
 
-export type AppView = 'landing' | 'connection_room' | 'tech_portal';
+export type AppView =
+  | 'landing'
+  | 'connection_room'
+  | 'tech_portal'
+  | 'technician_apply';
 
 export type DashboardSection =
   | 'overview'
@@ -304,6 +308,53 @@ export interface EnterpriseLead {
   teamSize: string;
   planInterest?: string;
   createdAt: string;
+}
+
+export type WorkModality = 'half_time' | 'full_time';
+
+export type ApplicationStatus =
+  | 'pending_review'
+  | 'approved'
+  | 'rejected'
+  | 'registered';
+
+export type AssessmentRecommendation =
+  | 'recommended_approve'
+  | 'manual_review'
+  | 'recommended_reject';
+
+export interface TechnicianCommissionTier {
+  id: 'base' | 'pro' | 'senior' | 'elite';
+  label: string;
+  minIncidents: number;
+  maxIncidents: number | null;
+  rangeLabel: string;
+  commissionPercent: number;
+  description: string;
+}
+
+export interface TechnicianApplication {
+  id: string;
+  full_name: string;
+  email: string;
+  country: string;
+  timezone: string;
+  birth_date: string;
+  is_adult_verified: boolean;
+  modality: WorkModality;
+  specialties: TechnicianSpecialty[];
+  certifications: string;
+  nda_accepted: boolean;
+  nda_version: string;
+  nda_signed_name: string;
+  nda_accepted_at: string;
+  technical_score: number;
+  attitude_score: number;
+  total_score: number;
+  recommendation: AssessmentRecommendation;
+  elapsed_seconds: number;
+  status: ApplicationStatus;
+  created_at: string;
 }
 
 export interface ValidationResult {

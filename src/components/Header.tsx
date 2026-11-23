@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Menu, ShieldCheck, Ticket, UserCircle2, X } from 'lucide-react';
+import { FEATURE_FLAGS } from '../config/features';
 import type { AppView, UserAccountProfile } from '../types/support';
 
 interface HeaderProps {
@@ -9,6 +10,7 @@ interface HeaderProps {
   onOpenTechPortal: () => void;
   onOpenAuthModal: () => void;
   onOpenTicketLookup?: () => void;
+  onOpenTechnicianApply?: () => void;
   onReturnHome: () => void;
 }
 
@@ -16,7 +18,12 @@ const NAV_ITEMS = [
   { id: 'diagnostico', label: 'Diagnóstico' },
   { id: 'como-funciona', label: 'Cómo funciona' },
   { id: 'servicios', label: 'Servicios' },
-  { id: 'planes-empresas', label: 'Planes y SaaS' },
+  {
+    id: 'planes-empresas',
+    label: FEATURE_FLAGS.ENABLE_SAAS_MULTITENANT
+      ? 'Planes y SaaS'
+      : 'Planes y Tarifas',
+  },
 ];
 
 export function Header({
@@ -26,6 +33,7 @@ export function Header({
   onOpenTechPortal,
   onOpenAuthModal,
   onOpenTicketLookup,
+  onOpenTechnicianApply,
   onReturnHome,
 }: HeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -52,7 +60,7 @@ export function Header({
 
   return (
     <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-slate-200/80 shadow-[0_1px_12px_rgba(11,21,40,0.04)]">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-6">
+      <div className="max-w-7xl 2xl:max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-6 xl:px-8 h-16 flex items-center justify-between gap-3 lg:gap-4">
         {/* Zone 1: Single-line Brand Wordmark */}
         <a
           href="#inicio"
@@ -61,7 +69,7 @@ export function Header({
             setMobileMenuOpen(false);
             onReturnHome();
           }}
-          className="inline-flex items-center gap-2.5 text-lg font-bold tracking-tight text-[#0B1528] whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] rounded-md py-1 group"
+          className="inline-flex items-center gap-2 text-base xl:text-lg font-bold tracking-tight text-[#0B1528] whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] rounded-md py-1 group"
         >
           <span
             aria-hidden="true"
@@ -75,7 +83,7 @@ export function Header({
         {/* Zone 2: Clean single-line navigation links with animated underline */}
         <nav
           aria-label="Navegación principal"
-          className="hidden lg:flex items-center gap-5 xl:gap-7 text-sm font-medium text-slate-700"
+          className="hidden lg:flex items-center gap-3 xl:gap-5 text-[13px] xl:text-sm font-medium text-slate-700"
         >
           {NAV_ITEMS.map((item) => (
             <a
@@ -90,6 +98,25 @@ export function Header({
               {item.label}
             </a>
           ))}
+          {FEATURE_FLAGS.ENABLE_TECHNICIAN_RECRUITMENT && onOpenTechnicianApply && (
+            <a
+              href="/postular"
+              onClick={(e) => {
+                e.preventDefault();
+                setMobileMenuOpen(false);
+                onOpenTechnicianApply();
+              }}
+              data-testid="header-tech-apply-link"
+              aria-current={activeView === 'technician_apply' ? 'page' : undefined}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap shrink-0 border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] ${
+                activeView === 'technician_apply'
+                  ? 'bg-emerald-600 text-white border-emerald-600'
+                  : 'bg-emerald-50 text-emerald-800 border-emerald-200/90 hover:bg-emerald-100'
+              }`}
+            >
+              <span>Sé Técnico</span>
+            </a>
+          )}
         </nav>
 
         {/* Zone 3: Account access + Primary Diagnostic CTA + Secondary Tech Portal + Mobile Menu Button */}
@@ -102,7 +129,7 @@ export function Header({
                 onOpenTicketLookup();
               }}
               data-testid="header-ticket-lookup-button"
-              className="hidden md:inline-flex items-center justify-center gap-1.5 px-2.5 py-2 text-xs font-medium text-slate-600 hover:text-[#0B1528] hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+              className="hidden md:inline-flex lg:hidden xl:inline-flex items-center justify-center gap-1.5 px-2.5 py-2 text-xs font-medium text-slate-600 hover:text-[#0B1528] hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
             >
               <Ticket className="w-3.5 h-3.5 text-[#10B981]" aria-hidden="true" />
               <span>Mi ticket</span>
@@ -115,7 +142,7 @@ export function Header({
               setMobileMenuOpen(false);
               onOpenTechPortal();
             }}
-            className="hidden xl:inline-flex items-center justify-center px-3 py-2 text-xs font-medium text-slate-600 hover:text-[#0B1528] hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+            className="hidden 2xl:inline-flex items-center justify-center px-2.5 py-2 text-xs font-medium text-slate-600 hover:text-[#0B1528] hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
           >
             Centro de Operaciones
           </button>
@@ -127,7 +154,7 @@ export function Header({
               onOpenAuthModal();
             }}
             data-testid="header-auth-button"
-            className="hidden sm:inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-[#0B1528] bg-white hover:bg-slate-50 border border-slate-300/90 hover:border-slate-400 rounded-lg shadow-xs active:scale-[0.98] transition-all duration-150 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+            className="hidden sm:inline-flex items-center justify-center gap-1.5 px-2.5 xl:px-3 py-2 text-xs font-semibold text-[#0B1528] bg-white hover:bg-slate-50 border border-slate-300/90 hover:border-slate-400 rounded-lg shadow-xs active:scale-[0.98] transition-all duration-150 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
           >
             <UserCircle2 className="w-3.5 h-3.5 text-[#2563EB]" aria-hidden="true" />
             <span>{userShortLabel}</span>
@@ -137,7 +164,7 @@ export function Header({
             type="button"
             onClick={() => handleNavClick('diagnostico')}
             data-testid="header-start-diagnostic"
-            className="hidden sm:inline-flex items-center justify-center px-4 py-2 text-xs font-semibold rounded-lg bg-[#2563EB] text-white hover:bg-[#1D4ED8] shadow-xs active:scale-[0.98] transition-all duration-150 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-2"
+            className="hidden sm:inline-flex items-center justify-center px-3 xl:px-4 py-2 text-xs font-semibold rounded-lg bg-[#2563EB] text-white hover:bg-[#1D4ED8] shadow-xs active:scale-[0.98] transition-all duration-150 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] focus-visible:ring-offset-2"
           >
             Iniciar diagnóstico
           </button>
@@ -171,6 +198,20 @@ export function Header({
                 {item.label}
               </a>
             ))}
+            {FEATURE_FLAGS.ENABLE_TECHNICIAN_RECRUITMENT && onOpenTechnicianApply && (
+              <a
+                href="/postular"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setMobileMenuOpen(false);
+                  onOpenTechnicianApply();
+                }}
+                data-testid="mobile-tech-apply-link"
+                className="px-3 py-2.5 text-sm font-semibold text-emerald-800 bg-emerald-50/80 hover:bg-emerald-100/80 border border-emerald-200/80 rounded-lg transition-colors"
+              >
+                Sé Técnico (Gana 65% – 85%)
+              </a>
+            )}
           </nav>
           <div className="pt-2 border-t border-slate-100 space-y-2">
             <button

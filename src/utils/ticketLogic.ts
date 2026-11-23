@@ -12,6 +12,7 @@ import type {
   ServiceTier,
   SupportTicket,
   TechnicianAvailability,
+  TechnicianCommissionTier,
   TicketPriority,
   TicketStatus,
   ValidationResult,
@@ -20,6 +21,8 @@ import type {
 
 export const FIXED_SERVICE_PRICE_USD = 15;
 export const LEGAL_TERMS_VERSION = 'v1.0-2026';
+export const NDA_CLIENT_VERSION = 'NDA-CLIENT-v1.0-2026';
+export const NDA_TECH_VERSION = 'NDA-TECH-v1.0-2026';
 export const ADULT_RESTRICTION_ERROR =
   'Remote Support 365 está disponible únicamente para personas mayores de 18 años.';
 
@@ -532,7 +535,7 @@ export function validateStep3(draft: WizardDraft): ValidationResult {
   }
   if (!draft.termsAccepted) {
     errors.termsAccepted =
-      'Debes aceptar los Términos y Condiciones, la Política de Privacidad y la Política de Reembolsos.';
+      'Debes aceptar los Términos y Condiciones, la Política de Privacidad, el Acuerdo de Confidencialidad (NDA) y la Política de Reembolsos.';
   }
   return { valid: Object.keys(errors).length === 0, errors };
 }
@@ -911,16 +914,75 @@ export function getRustDeskInstallerUrl(
   return getOfficialRustDeskDownloadEndpoint(os);
 }
 
+export const TECHNICIAN_COMMISSION_TIERS: TechnicianCommissionTier[] = [
+  {
+    id: 'base',
+    label: 'Nivel Base',
+    minIncidents: 0,
+    maxIncidents: 25,
+    rangeLabel: '0 – 25 incidencias/mes',
+    commissionPercent: 65,
+    description:
+      'Ingreso inicial para técnicos verificados en modalidad Half-time o Full-time.',
+  },
+  {
+    id: 'pro',
+    label: 'Nivel Pro',
+    minIncidents: 26,
+    maxIncidents: 100,
+    rangeLabel: '26 – 100 incidencias/mes',
+    commissionPercent: 75,
+    description:
+      'Desbloqueado al superar 25 incidencias resueltas en el mes calendario.',
+  },
+  {
+    id: 'senior',
+    label: 'Nivel Senior',
+    minIncidents: 101,
+    maxIncidents: 250,
+    rangeLabel: '101 – 250 incidencias/mes',
+    commissionPercent: 80,
+    description:
+      'Para especialistas de alto volumen con SLA y calificación consistentes.',
+  },
+  {
+    id: 'elite',
+    label: 'Nivel Elite',
+    minIncidents: 251,
+    maxIncidents: null,
+    rangeLabel: '251 – 500+ incidencias/mes',
+    commissionPercent: 85,
+    description:
+      'Máxima participación mensual para referentes de la red Remote Support 365.',
+  },
+];
+
+export function getTechnicianCommissionTier(
+  monthlyResolvedCount: number
+): TechnicianCommissionTier {
+  const safeCount = Number.isFinite(monthlyResolvedCount)
+    ? Math.max(0, Math.floor(monthlyResolvedCount))
+    : 0;
+  if (safeCount >= 251) return TECHNICIAN_COMMISSION_TIERS[3];
+  if (safeCount >= 101) return TECHNICIAN_COMMISSION_TIERS[2];
+  if (safeCount >= 26) return TECHNICIAN_COMMISSION_TIERS[1];
+  return TECHNICIAN_COMMISSION_TIERS[0];
+}
+
 export function parseAppRoute(pathname: string): {
   view: AppView;
   ticketCode: string | null;
 } {
   const clean = pathname.replace(/\/+$/, '') || '/';
-  if (clean === '/' || clean === '/portal') {
+  const lower = clean.toLowerCase();
+  if (lower === '/' || lower === '/portal') {
     return { view: 'landing', ticketCode: null };
   }
-  if (clean === '/dashboard') {
+  if (lower === '/dashboard') {
     return { view: 'tech_portal', ticketCode: null };
+  }
+  if (lower === '/postular' || lower === '/trabaja-con-nosotros') {
+    return { view: 'technician_apply', ticketCode: null };
   }
   const sessionMatch = clean.match(/^\/sesion\/([^/]+)$/i);
   if (sessionMatch) {

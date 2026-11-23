@@ -13,6 +13,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
+import { FEATURE_FLAGS } from '../config/features';
 import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabaseClient';
 
 const SCHEMA_DEPLOYMENT_GUIDE = `-- Remote Support 365 · Guía de despliegue de base de datos Supabase
@@ -1059,7 +1060,7 @@ export function TechPortalView({
                     {supabaseConfigured ? operatorEmail : 'Modo demostración'}
                   </p>
                 </div>
-                {organizations.length > 1 && (
+                {FEATURE_FLAGS.ENABLE_SAAS_MULTITENANT && organizations.length > 1 && (
                   <div className="py-1 border-b border-[#E5E9F2]">
                     <p className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#64748B]">
                       Organización activa

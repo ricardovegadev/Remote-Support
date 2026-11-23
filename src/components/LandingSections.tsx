@@ -31,6 +31,7 @@ import {
   Wrench,
   Zap,
 } from 'lucide-react';
+import { FEATURE_FLAGS } from '../config/features';
 import type { IssueCategory, ServiceTier } from '../types/support';
 import {
   CATEGORY_OPTIONS,
@@ -38,6 +39,7 @@ import {
   PYME_PLANS,
   SAAS_PLANS,
   SERVICE_TIER_OPTIONS,
+  TECHNICIAN_COMMISSION_TIERS,
 } from '../utils/ticketLogic';
 import {
   CardNetworkBadges,
@@ -60,6 +62,7 @@ interface LandingSectionsProps {
     planInterest?: string;
   }) => void;
   onStartDiagnostic?: () => void;
+  onOpenTechnicianApply?: () => void;
 }
 
 const SERVICE_ICON_MAP: Record<IssueCategory, typeof Cpu> = {
@@ -187,6 +190,7 @@ export function LandingSections({
   onSelectCategoryForWizard,
   onSubmitEnterpriseLead,
   onStartDiagnostic,
+  onOpenTechnicianApply,
 }: LandingSectionsProps) {
   const [pricingAudience, setPricingAudience] = useState<'clients' | 'saas'>('clients');
   const [serviceFilter, setServiceFilter] = useState<
@@ -423,8 +427,9 @@ export function LandingSections({
                 Protocolo remoto seguro en tres pasos claros
               </h2>
               <p className="text-sm sm:text-base text-slate-600 mt-2 leading-relaxed">
-                Sin visitas presenciales ni accesos ocultos. Visualizas qué organización y
-                qué técnico atiende tu equipo en tiempo real.
+                {FEATURE_FLAGS.ENABLE_SAAS_MULTITENANT
+                  ? 'Sin visitas presenciales ni accesos ocultos. Visualizas qué organización y qué técnico atiende tu equipo en tiempo real.'
+                  : 'Sin visitas presenciales ni accesos ocultos. Visualizas qué técnico verificado atiende tu equipo en tiempo real.'}
               </p>
             </div>
           </ScrollReveal>
@@ -726,60 +731,65 @@ export function LandingSections({
                   Precios y política de reembolso
                 </h2>
                 <p className="text-sm text-slate-600 mt-2 leading-relaxed">
-                  Consulta el precio, alcance, renovación y condiciones del servicio puntual,
-                  los planes Pyme y la plataforma SaaS antes de contratar.
+                  {FEATURE_FLAGS.ENABLE_SAAS_MULTITENANT
+                    ? 'Consulta el precio, alcance, renovación y condiciones del servicio puntual, los planes Pyme y la plataforma SaaS antes de contratar.'
+                    : 'Consulta el precio, alcance, renovación y condiciones del servicio puntual y los planes Pyme antes de contratar.'}
                 </p>
               </div>
 
               {/* Segmented Control Switch */}
-              <div
-                role="tablist"
-                aria-label="Seleccionar audiencia de planes"
-                className="grid grid-cols-2 sm:inline-flex items-center p-1 bg-slate-100 border border-slate-200 rounded-xl w-full sm:w-auto self-start lg:self-auto"
-              >
-                <button
-                  id="pricing-tab-clients"
-                  type="button"
-                  role="tab"
-                  aria-selected={pricingAudience === 'clients'}
-                  aria-controls="pricing-panel-clients"
-                  onClick={() => setPricingAudience('clients')}
-                  className={`inline-flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-2 text-[11px] sm:text-xs font-semibold rounded-lg transition-all duration-200 text-center sm:whitespace-nowrap ${
-                    pricingAudience === 'clients'
-                      ? 'bg-[#0B1528] text-white shadow-sm'
-                      : 'text-slate-600 hover:text-[#0B1528]'
-                  }`}
+              {FEATURE_FLAGS.ENABLE_SAAS_MULTITENANT && (
+                <div
+                  role="tablist"
+                  aria-label="Seleccionar audiencia de planes"
+                  className="grid grid-cols-2 sm:inline-flex items-center p-1 bg-slate-100 border border-slate-200 rounded-xl w-full sm:w-auto self-start lg:self-auto"
                 >
-                  <Users className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                  <span>Para Clientes Finales</span>
-                </button>
+                  <button
+                    id="pricing-tab-clients"
+                    type="button"
+                    role="tab"
+                    aria-selected={pricingAudience === 'clients'}
+                    aria-controls="pricing-panel-clients"
+                    onClick={() => setPricingAudience('clients')}
+                    className={`inline-flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-2 text-[11px] sm:text-xs font-semibold rounded-lg transition-all duration-200 text-center sm:whitespace-nowrap ${
+                      pricingAudience === 'clients'
+                        ? 'bg-[#0B1528] text-white shadow-sm'
+                        : 'text-slate-600 hover:text-[#0B1528]'
+                    }`}
+                  >
+                    <Users className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                    <span>Para Clientes Finales</span>
+                  </button>
 
-                <button
-                  id="pricing-tab-saas"
-                  type="button"
-                  role="tab"
-                  aria-selected={pricingAudience === 'saas'}
-                  aria-controls="pricing-panel-saas"
-                  onClick={() => setPricingAudience('saas')}
-                  className={`inline-flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-2 text-[11px] sm:text-xs font-semibold rounded-lg transition-all duration-200 text-center sm:whitespace-nowrap ${
-                    pricingAudience === 'saas'
-                      ? 'bg-[#2563EB] text-white shadow-sm'
-                      : 'text-slate-600 hover:text-[#0B1528]'
-                  }`}
-                >
-                  <Layers className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                  <span>Para Empresas de Soporte (SaaS)</span>
-                </button>
-              </div>
+                  <button
+                    id="pricing-tab-saas"
+                    type="button"
+                    role="tab"
+                    aria-selected={pricingAudience === 'saas'}
+                    aria-controls="pricing-panel-saas"
+                    onClick={() => setPricingAudience('saas')}
+                    className={`inline-flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-2 text-[11px] sm:text-xs font-semibold rounded-lg transition-all duration-200 text-center sm:whitespace-nowrap ${
+                      pricingAudience === 'saas'
+                        ? 'bg-[#2563EB] text-white shadow-sm'
+                        : 'text-slate-600 hover:text-[#0B1528]'
+                    }`}
+                  >
+                    <Layers className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                    <span>Para Empresas de Soporte (SaaS)</span>
+                  </button>
+                </div>
+              )}
             </div>
           </ScrollReveal>
 
-          {pricingAudience === 'clients' ? (
+          {!FEATURE_FLAGS.ENABLE_SAAS_MULTITENANT || pricingAudience === 'clients' ? (
             <div
               key="clients"
               id="pricing-panel-clients"
-              role="tabpanel"
-              aria-labelledby="pricing-tab-clients"
+              role={FEATURE_FLAGS.ENABLE_SAAS_MULTITENANT ? 'tabpanel' : undefined}
+              aria-labelledby={
+                FEATURE_FLAGS.ENABLE_SAAS_MULTITENANT ? 'pricing-tab-clients' : undefined
+              }
               data-testid="plans-clients-panel"
               className="space-y-10 animate-fade-up"
             >
@@ -1384,6 +1394,107 @@ export function LandingSections({
           )}
         </div>
       </section>
+
+      {/* Technician Recruitment Section (65% - 85% monthly commission tiers) */}
+      {FEATURE_FLAGS.ENABLE_TECHNICIAN_RECRUITMENT && onOpenTechnicianApply && (
+        <section
+          id="trabaja-con-nosotros"
+          data-testid="technician-recruitment-section"
+          className="scroll-mt-20 py-16 sm:py-20 bg-[#F8FAFC] border-b border-slate-200/80"
+        >
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <ScrollReveal>
+              <div className="bg-[#0B1528] text-white rounded-3xl p-8 sm:p-10 lg:p-12 border border-slate-800 shadow-xl grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+                <div className="lg:col-span-7 space-y-5">
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 text-xs font-semibold">
+                    <Sparkles className="w-3.5 h-3.5 text-[#10B981]" aria-hidden="true" />
+                    <span>Red de Especialistas Remotos · Half-time / Full-time</span>
+                  </div>
+
+                  <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
+                    ¿Eres técnico en soporte IT? Trabaja con nosotros
+                  </h2>
+
+                  <p className="text-sm sm:text-base text-slate-300 leading-relaxed">
+                    Únete a nuestra red bajo demanda estilo Uber: conéctate en tus horarios,
+                    atiende incidencias según tu especialidad y escala tu comisión mensual
+                    del <strong className="text-emerald-300">65 % al 85 %</strong> conforme
+                    resuelves casos.
+                  </p>
+
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0F172A] border border-slate-700/80 text-slate-200">
+                      <Clock className="w-3.5 h-3.5 text-[#10B981]" aria-hidden="true" />
+                      <span>Modalidad Half-time o Full-time</span>
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0F172A] border border-slate-700/80 text-slate-200">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-[#10B981]" aria-hidden="true" />
+                      <span>Pago por incidencia resuelta</span>
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0F172A] border border-slate-700/80 text-slate-200">
+                      <ShieldCheck className="w-3.5 h-3.5 text-[#10B981]" aria-hidden="true" />
+                      <span>Evaluación técnica + NDA en línea</span>
+                    </span>
+                  </div>
+
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      data-testid="landing-tech-apply-cta"
+                      onClick={onOpenTechnicianApply}
+                      className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-[#10B981] hover:bg-emerald-400 text-[#0B1528] text-sm font-bold shadow-lg shadow-emerald-950/30 active:scale-[0.99] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B1528]"
+                    >
+                      <span>Postular y realizar evaluación</span>
+                      <ArrowRight className="w-4 h-4" aria-hidden="true" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="lg:col-span-5">
+                  <div className="rounded-2xl bg-[#0F172A] border border-slate-800 p-5 space-y-3">
+                    <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-800">
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                        Comisiones mensuales
+                      </span>
+                      <span className="text-xs font-mono font-semibold text-emerald-300">
+                        65 % – 85 %
+                      </span>
+                    </div>
+
+                    <div className="space-y-2">
+                      {TECHNICIAN_COMMISSION_TIERS.map((tier) => (
+                        <div
+                          key={tier.id}
+                          className={`flex items-center justify-between gap-3 rounded-xl px-3.5 py-2.5 border ${
+                            tier.id === 'elite'
+                              ? 'bg-emerald-500/10 border-emerald-400/30'
+                              : 'bg-slate-900/70 border-slate-800'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-white">{tier.label}</p>
+                            <p className="text-[11px] font-mono text-slate-300">
+                              {tier.rangeLabel}
+                            </p>
+                          </div>
+                          <span className="text-base font-extrabold font-mono tabular-nums text-emerald-300 shrink-0">
+                            {tier.commissionPercent}%
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <p className="text-[11px] text-slate-400 leading-relaxed pt-1">
+                      Calculado sobre el ingreso neto tras comisión de pasarela de pago.
+                      Requiere mayoría de edad (+18) y firma del NDA interno.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </ScrollReveal>
+          </div>
+        </section>
+      )}
     </>
   );
 }
