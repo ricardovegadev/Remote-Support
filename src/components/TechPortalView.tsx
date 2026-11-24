@@ -97,6 +97,7 @@ import {
 } from './dashboard/DevicesAndSessionsView';
 import { TicketsInboxView } from './dashboard/TicketsInboxView';
 import { WorkforceDispatchView } from './dashboard/WorkforceDispatchView';
+import { TechnicianEarningsCard } from './dashboard/TechnicianEarningsCard';
 
 interface TechPortalViewProps {
   organizations: Organization[];
@@ -1148,21 +1149,27 @@ export function TechPortalView({
           )}
 
           {activeSection === 'overview' && (
-            <DashboardOverview
-              organization={activeOrg}
-              tickets={orgTickets}
-              members={orgMembers}
-              sessions={orgSessions}
-              aiAgents={orgAiAgents}
-              supabaseConfigured={supabaseConfigured}
-              searchQuery={globalSearchQuery}
-              onNavigateSection={setActiveSection}
-              onSelectTicket={(ticketId) => {
-                setSelectedTicketId(ticketId);
-                setActiveSection('tickets');
-              }}
-              onOpenNewTicketModal={() => setNewTicketModalOpen(true)}
-            />
+            <div className="space-y-6">
+              <DashboardOverview
+                organization={activeOrg}
+                tickets={orgTickets}
+                members={orgMembers}
+                sessions={orgSessions}
+                aiAgents={orgAiAgents}
+                supabaseConfigured={supabaseConfigured}
+                searchQuery={globalSearchQuery}
+                onNavigateSection={setActiveSection}
+                onSelectTicket={(ticketId) => {
+                  setSelectedTicketId(ticketId);
+                  setActiveSection('tickets');
+                }}
+                onOpenNewTicketModal={() => setNewTicketModalOpen(true)}
+              />
+              <TechnicianEarningsCard
+                tickets={orgTickets}
+                technicianName={operatorDisplayName}
+              />
+            </div>
           )}
 
           {activeSection === 'tickets' && (
@@ -1233,6 +1240,25 @@ export function TechPortalView({
               logs={orgAuditLogs}
               members={orgMembers}
               operatorRole={operatorRole}
+              onUpdateMemberRole={(memberId, nextRole) => {
+                void (async () => {
+                  if (supabaseConfigured) {
+                    const supabase = getSupabaseClient();
+                    if (supabase) {
+                      await supabase
+                        .from('organization_members')
+                        .update({ role: nextRole })
+                        .eq('id', memberId)
+                        .eq('organization_id', activeOrg.id);
+                    }
+                  }
+                  void recordTelemetryEvent({
+                    category: 'rbac',
+                    name: `member_role_updated_${nextRole}`,
+                    status: 'ok',
+                  });
+                })();
+              }}
               demoMode={!supabaseConfigured}
               onChangeDemoRole={(nextRole) => {
                 setDemoRole(nextRole);

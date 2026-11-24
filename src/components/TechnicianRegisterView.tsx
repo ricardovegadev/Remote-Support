@@ -113,6 +113,19 @@ export function TechnicianRegisterView({
         setFormError(res.error ?? 'No se pudo activar tu cuenta de técnico.');
         return;
       }
+      // Auto-login en Supabase Auth para ingresar autenticado directo a /dashboard
+      try {
+        const { getSupabaseClient } = await import('../lib/supabaseClient');
+        const supabase = getSupabaseClient();
+        if (supabase && res.profile.email) {
+          await supabase.auth.signInWithPassword({
+            email: res.profile.email,
+            password,
+          });
+        }
+      } catch {
+        // Si falla el auto-login silencioso, el operador puede iniciar sesión con su nueva contraseña
+      }
       setRegisteredOk(true);
       onRegistered({
         profile: res.profile,

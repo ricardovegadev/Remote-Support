@@ -33,6 +33,7 @@ import {
   validateRustDeskId,
 } from '../utils/ticketLogic';
 import { TicketChatPanel } from './TicketChatPanel';
+import { ResolutionFeedbackCard } from './ResolutionFeedbackCard';
 import type { LegalDocTab } from './LegalDocsModal';
 import {
   CardNetworkBadges,
@@ -796,20 +797,33 @@ export function ConnectionRoom({
                 className="w-5 h-5 text-[#10B981] shrink-0 mt-0.5"
                 aria-hidden="true"
               />
-              <div>
-                <p className="text-[11px] text-slate-300">Técnico asignado al equipo</p>
-                <p className="text-sm font-semibold text-white mt-0.5">
-                  {ticket.assigned_technician_name ?? 'En cola prioritaria de despacho'}
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-[11px] text-slate-300">Técnico asignado al equipo</p>
+                  {ticket.assigned_technician_name && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-[10px] font-semibold text-emerald-300">
+                      <ShieldCheck className="w-3 h-3" aria-hidden="true" />
+                      NDA Interno Firmado · Verificado
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm font-semibold text-white">
+                  {ticket.assigned_technician_name ?? 'Buscando especialista disponible...'}
                 </p>
-                <p className="text-xs text-slate-300 mt-0.5">
+                <p className="text-xs text-slate-300">
                   {ticket.assigned_technician_name
-                    ? `${ticket.assigned_technician_specialty ?? 'Especialista Verificado'} · Asignación atómica confirmada`
-                    : 'El primer especialista disponible tomará tu ticket'}
+                    ? `${ticket.assigned_technician_specialty ?? 'Especialista Verificado'} · Nunca te pediremos contraseñas bancarias ni códigos 2FA. Cierra RustDesk o pulsa ESC para cortar el acceso al instante.`
+                    : 'El primer especialista certificado disponible tomará tu ticket de forma atómica.'}
                 </p>
               </div>
             </div>
           </div>
         </div>
+
+        {/* Cierre Seguro, CSAT (1-5★), Disputa y Checklist RustDesk */}
+        {ticket.status === 'resolved' && (
+          <ResolutionFeedbackCard ticket={ticket} />
+        )}
 
         {/* Professional Multi-Method Checkout Block when Payment is Pending */}
         {ticket.payment_status === 'pending' && ticket.status !== 'resolved' && (

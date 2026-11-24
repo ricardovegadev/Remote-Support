@@ -1055,6 +1055,190 @@ async function startServer() {
     }
   );
 
+  // P1: Client CSAT (1-5★), resolution confirmation & dispute/guarantee request
+  app.post(
+    '/api/tickets/:id/csat',
+    createRateLimiter(20, 60_000),
+    async (req, res) => {
+      try {
+        const ticketId = String(req.params.id ?? '').trim();
+        if (!isValidUuid(ticketId)) {
+          res.status(400).json({ success: false, error: 'ID de ticket inválido.' });
+          return;
+        }
+        const roomToken = extractRoomToken(req);
+        const body = req.body ?? {};
+        const rating = Number(body.rating);
+        if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+          res.status(400).json({ success: false, error: 'La calificación debe ser entre 1 y 5.' });
+          return;
+        }
+        const comment =
+          typeof body.comment === 'string' ? body.comment.trim().slice(0, 500) : null;
+        const disputeReason =
+          typeof body.disputeReason === 'string' && body.disputeReason.trim().length >= 10
+            ? body.disputeReason.trim().slice(0, 500)
+            : null;
+        const nowIso = new Date().toISOString();
+
+        const supabase = getSupabaseAdmin();
+        if (!supabase) {
+          if (isProduction) {
+            res.status(503).json({ success: false, error: 'Persistencia CSAT no configurada.' });
+            return;
+          }
+          res.json({ success: true, mode: 'sandbox', rating, disputed: Boolean(disputeReason) });
+          return;
+        }
+
+        const { data: ticketRow, error: fetchErr } = await supabase
+          .from('tickets')
+          .select('id, organization_id, ticket_code, status, client_session_token')
+          .eq('id', ticketId)
+          .maybeSingle();
+
+        if (fetchErr || !ticketRow) {
+          res.status(404).json({ success: false, error: 'Ticket no encontrado.' });
+          return;
+        }
+        if (
+          !roomToken ||
+          !ticketRow.client_session_token ||
+          !safeTokenEquals(roomToken, String(ticketRow.client_session_token))
+        ) {
+          res.status(403).json({ success: false, error: 'Token de sala inválido.' });
+          return;
+        }
+
+        const { error: updateErr } = await supabase
+          .from('tickets')
+          .update({
+            csat_rating: rating,
+            csat_comment: comment,
+            client_confirmed_at: disputeReason ? null : nowIso,
+            dispute_reason: disputeReason,
+            disputed_at: disputeReason ? nowIso : null,
+          })
+          .eq('id', ticketId);
+
+        if (updateErr) {
+          res.status(500).json({ success: false, error: 'No se pudo guardar la calificación.' });
+          return;
+        }
+
+        const { error: auditErr } = await supabase.from('audit_logs').insert({
+          organization_id: ticketRow.organization_id,
+          actor_type: 'client',
+          actor_label: 'Cliente',
+          action: disputeReason
+            ? `Abrió solicitud de revisión/garantía en ${ticketRow.ticket_code}`
+            : `Confirmó resolución de ${ticketRow.ticket_code} con calificación ${rating}/5★`,
+          target_ref: String(ticketRow.ticket_code),
+        });
+        if (auditErr) {
+          console.error('[csat] audit_logs insert error:', auditErr.message);
+        }
+
+        res.json({ success: true, rating, disputed: Boolean(disputeReason) });
+      } catch {
+        res.status(500).json({ success: false, error: 'Error procesando calificación CSAT.' });
+      }
+    }
+  );
+
+  // P1: Admin ticket unclaim / reassign (handles technician no-show safely)
+  app.post(
+    '/api/admin/tickets/:id/reassign',
+    createRateLimiter(30, 60_000),
+    requireOperatorAuth,
+    requireAdminOrOwnerRole,
+    async (req, res) => {
+      try {
+        const ticketId = String(req.params.id ?? '').trim();
+        if (!isValidUuid(ticketId)) {
+          res.status(400).json({ success: false, error: 'ID de ticket inválido.' });
+          return;
+        }
+        const nextTechRaw = req.body?.nextTechId;
+        const nextTechId =
+          typeof nextTechRaw === 'string' && isValidUuid(nextTechRaw)
+            ? nextTechRaw.trim()
+            : null;
+
+        const supabase = getSupabaseAdmin();
+        if (!supabase) {
+          if (isProduction) {
+            res.status(503).json({ success: false, error: 'Base de datos no configurada.' });
+            return;
+          }
+          res.json({ success: true, mode: 'sandbox', ticketId, nextTechId });
+          return;
+        }
+
+        const { data: ok, error } = await supabase.rpc('admin_reassign_ticket', {
+          p_ticket_id: ticketId,
+          p_next_tech_id: nextTechId,
+        });
+        if (error || !ok) {
+          res.status(409).json({
+            success: false,
+            error: 'No se pudo reasignar el ticket (verifica estado y membresía).',
+          });
+          return;
+        }
+
+        res.json({ success: true, ticketId, nextTechId });
+      } catch {
+        res.status(500).json({ success: false, error: 'Error reasignando ticket.' });
+      }
+    }
+  );
+
+  // P1: Stripe Billing Portal for real Pyme 1-click subscription cancellation
+  app.post(
+    '/api/payments/stripe/billing-portal',
+    createRateLimiter(15, 60_000),
+    requireOperatorAuth,
+    async (req, res) => {
+      try {
+        const stripeKey = normalizeSecret(process.env.STRIPE_SECRET_KEY);
+        const customerId =
+          typeof req.body?.stripeCustomerId === 'string'
+            ? req.body.stripeCustomerId.trim()
+            : '';
+        const baseUrl = getPublicBaseUrl();
+
+        if (!stripeKey || !customerId) {
+          if (isProduction) {
+            res.status(503).json({
+              success: false,
+              error: 'Stripe Billing Portal no está configurado para esta suscripción.',
+            });
+            return;
+          }
+          res.json({
+            success: true,
+            mode: 'sandbox',
+            url: `${baseUrl ?? `http://localhost:${PORT}`}/dashboard`,
+          });
+          return;
+        }
+
+        const stripe = new Stripe(stripeKey);
+        const session = await stripe.billingPortal.sessions.create({
+          customer: customerId,
+          return_url: `${baseUrl ?? `http://localhost:${PORT}`}/dashboard`,
+        });
+        res.json({ success: true, url: session.url });
+      } catch {
+        res.status(500).json({
+          success: false,
+          error: 'No se pudo generar el portal de facturación Stripe.',
+        });
+      }
+    }
+  );
+
   app.post('/api/tickets', createRateLimiter(8, 60_000), async (req, res) => {
     if (!hasConfiguredSupabaseServer()) {
       res.status(503).json({ success: false, error: 'El registro seguro de tickets no está configurado.' });
