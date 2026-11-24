@@ -9,8 +9,17 @@
 --   5. Least-privilege column GRANTs on organizations, audit_logs, ticket_messages
 -- ============================================================================
 
--- 1. Client NDA traceability columns & ai_diagnosis jsonb alignment
+-- 1. Parity & client NDA traceability columns + ai_diagnosis jsonb alignment
+alter table public.organizations
+  add column if not exists subscription_auto_renew boolean not null default true,
+  add column if not exists subscription_canceled_at timestamptz;
+
 alter table public.tickets
+  add column if not exists organization_name text not null default 'Remote Support 365',
+  add column if not exists billing_mode text not null default 'one_time',
+  add column if not exists subscription_status text not null default 'none',
+  add column if not exists stripe_subscription_id text,
+  add column if not exists assigned_technician_specialty text,
   add column if not exists client_nda_version text,
   add column if not exists client_nda_accepted_at timestamptz;
 
