@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import fs from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
@@ -2719,27 +2720,33 @@ async function startServer() {
     });
   });
 
-  let viteServer: { close: () => Promise<void> } | null = null;
+  let viteServer: {
+    middlewares: express.RequestHandler;
+    close: () => Promise<void>;
+  } | null = null;
+  let vitePromise: Promise<{
+    middlewares: express.RequestHandler;
+    close: () => Promise<void>;
+  }> | null = null;
 
   if (!isProduction) {
-    const isPreviewEnv =
-      process.env.DISABLE_HMR === 'true' ||
-      Boolean(
-        process.env.K_SERVICE ||
-          process.env.K_REVISION ||
-          process.env.K_CONFIGURATION ||
-          process.env.CLOUD_RUN_TIMEOUT_SECONDS
-      );
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: {
-        middlewareMode: true,
-        ...(isPreviewEnv ? { hmr: false } : {}),
-      },
-      appType: 'spa',
+    app.use((req, res, next) => {
+      if (viteServer) {
+        viteServer.middlewares(req, res, next);
+        return;
+      }
+      if (!vitePromise) {
+        res.status(503).send('Inicializando servidor de desarrollo...');
+        return;
+      }
+      vitePromise
+        .then((vite) => {
+          vite.middlewares(req, res, next);
+        })
+        .catch((err) => {
+          next(err);
+        });
     });
-    viteServer = vite;
-    app.use(vite.middlewares);
   } else {
     const distDir = path.resolve(__dirname, 'dist');
     const indexHtmlPath = path.join(distDir, 'index.html');
@@ -2753,9 +2760,52 @@ async function startServer() {
     });
   }
 
-  const httpServer = app.listen(PORT, HOST, () => {
-    console.log(`Remote Support 365 server running on http://${HOST}:${PORT}`);
+  const httpServer = http.createServer(app);
+
+  if (!isProduction) {
+    const isPreviewEnv =
+      process.env.DISABLE_HMR === 'true' ||
+      Boolean(
+        process.env.K_SERVICE ||
+          process.env.K_REVISION ||
+          process.env.K_CONFIGURATION ||
+          process.env.CLOUD_RUN_TIMEOUT_SECONDS
+      );
+    vitePromise = import('vite')
+      .then(({ createServer: createViteServer }) =>
+        createViteServer({
+          server: {
+            middlewareMode: true,
+            ws: { server: httpServer },
+            hmr: isPreviewEnv ? false : { server: httpServer },
+          },
+          appType: 'spa',
+        })
+      )
+      .then((vite) => {
+        viteServer = vite;
+        return vite;
+      });
+    vitePromise.catch((err) => {
+      console.error('Failed to initialize Vite dev middleware:', err);
+    });
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const onError = (err: Error) => {
+      httpServer.off('listening', onListening);
+      reject(err);
+    };
+    const onListening = () => {
+      httpServer.off('error', onError);
+      resolve();
+    };
+    httpServer.once('error', onError);
+    httpServer.once('listening', onListening);
+    httpServer.listen(PORT, HOST);
   });
+
+  console.log(`Remote Support 365 server running on http://${HOST}:${PORT}`);
 
   const shutdown = (signal: string) => {
     httpServer.close(() => {

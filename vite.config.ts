@@ -51,12 +51,7 @@ export default defineConfig(() => {
         'lucide-react',
         '@supabase/supabase-js',
       ],
-      entries: [
-        'index.html',
-        'src/main.tsx',
-        'src/App.tsx',
-        'src/components/**/*.tsx',
-      ],
+      entries: ['index.html'],
     },
     build: {
       rolldownOptions: {

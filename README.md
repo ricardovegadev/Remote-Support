@@ -17,9 +17,9 @@ Aplicación web de soporte técnico remoto bajo demanda y gestión operativa mul
    ```bash
    npm ci
    ```
-2. Copia `.env.example` a `.env` y completa las credenciales necesarias:
+2. Copia `.env.support` a `.env` y completa las credenciales necesarias:
    ```bash
-   cp .env.example .env
+   cp .env.support .env
    ```
    - **Modo demo local (sin Supabase ni pasarelas reales):** deja sin configurar las variables de Supabase y ejecuta con `PAYMENTS_MODE=sandbox`.
    - **Producción:** requiere `PAYMENTS_MODE=live`, `APP_URL` (`https://...`), `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, y credenciales reales de Stripe/PayPal.
