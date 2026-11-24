@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  canAccessSection,
+  canManageMemberRole,
+  hasPermission,
+} from './rbac';
+import { computeOperationalTelemetry } from './telemetryLogic';
+import {
   ADULT_RESTRICTION_ERROR,
   buildRustDeskDeepLink,
   buildTechnicalResolutionSummary,
@@ -499,6 +505,98 @@ test('validateRegistrationPassword enforces min 8 chars, letters + numbers, and 
   assert.equal(validateRegistrationPassword('12345678', '12345678').valid, false);
   assert.equal(validateRegistrationPassword('Soporte2026', 'Otra2026').valid, false);
   assert.equal(validateRegistrationPassword('Soporte2026', 'Soporte2026').valid, true);
+});
+
+test('Phase 3 RBAC governance enforces role hierarchy and section permissions', () => {
+  assert.equal(hasPermission('owner', 'rbac:manage'), true);
+  assert.equal(hasPermission('admin', 'applications:review'), true);
+  assert.equal(hasPermission('technician', 'tickets:claim'), true);
+  assert.equal(hasPermission('technician', 'rbac:manage'), false);
+  assert.equal(hasPermission('technician', 'applications:review'), false);
+
+  assert.equal(canAccessSection('owner', 'security'), true);
+  assert.equal(canAccessSection('admin', 'settings'), true);
+  assert.equal(canAccessSection('technician', 'tickets'), true);
+  assert.equal(canAccessSection('technician', 'security'), false);
+  assert.equal(canAccessSection('technician', 'settings'), false);
+
+  assert.equal(canManageMemberRole('owner', 'admin', 'owner'), true);
+  assert.equal(canManageMemberRole('admin', 'technician', 'admin'), true);
+  assert.equal(canManageMemberRole('admin', 'owner', 'technician'), false);
+  assert.equal(canManageMemberRole('admin', 'technician', 'owner'), false);
+  assert.equal(canManageMemberRole('technician', 'technician', 'admin'), false);
+});
+
+test('Phase 3 computeOperationalTelemetry aggregates AI quota, sessions, and OS breakdown', () => {
+  const sampleTicket = createTicketFromDraft({
+    step: 3,
+    category: 'Windows lento o bajo rendimiento',
+    operatingSystem: 'Windows',
+    serviceTier: 'Optimización $29',
+    description: 'Equipo lento al iniciar',
+    clientName: 'Ana Pérez',
+    clientEmail: 'ana@example.com',
+    birthDate: '1992-05-10',
+    termsAccepted: true,
+    marketingOptIn: false,
+  });
+
+  const snapshot = computeOperationalTelemetry({
+    tickets: [sampleTicket],
+    sessions: [
+      {
+        id: '00000000-0000-4000-8000-000000000101',
+        organization_id: '00000000-0000-4000-8000-000000000001',
+        ticket_code: sampleTicket.ticket_code,
+        client_name: 'Ana Pérez',
+        technician_name: 'Carlos Mendoza',
+        rustdesk_id: '123456789',
+        agent_type: 'temporary',
+        status: 'active',
+        started_at: new Date().toISOString(),
+        ended_at: null,
+        duration_minutes: 18,
+      },
+    ],
+    devices: [
+      {
+        id: '00000000-0000-4000-8000-000000000201',
+        organization_id: '00000000-0000-4000-8000-000000000001',
+        client_name: 'Ana Pérez',
+        client_email: 'ana@example.com',
+        device_name: 'PC-ANA-01',
+        os_type: 'Windows',
+        rustdesk_id: '123456789',
+        agent_type: 'installed',
+        plan_name: 'Pyme Esencial',
+        is_online: true,
+        last_seen_at: new Date().toISOString(),
+      },
+    ],
+    aiAgents: [],
+    organization: {
+      id: '00000000-0000-4000-8000-000000000001',
+      name: 'Remote Support 365',
+      slug: 'remote-support-365',
+      plan_tier: 'internal_hq',
+      dispatch_mode: 'smart',
+      rustdesk_relay_domain: '',
+      payment_gateway: 'stripe_paypal',
+      ai_credits_monthly: 500,
+      ai_credits_used: 125,
+      created_at: new Date().toISOString(),
+    },
+  });
+
+  assert.equal(snapshot.totalTickets, 1);
+  assert.equal(snapshot.activeSessionsCount, 1);
+  assert.equal(snapshot.avgSessionDurationMin, 18);
+  assert.equal(snapshot.onlineDevicesCount, 1);
+  assert.equal(snapshot.aiCreditsUsed, 125);
+  assert.equal(snapshot.aiQuotaUtilizationPct, 25);
+  assert.deepEqual(snapshot.osBreakdown, [
+    { os: 'Windows', count: 1, pct: 100 },
+  ]);
 });
 
 

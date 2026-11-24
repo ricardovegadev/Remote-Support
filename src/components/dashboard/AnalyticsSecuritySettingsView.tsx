@@ -1,22 +1,74 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
+  Activity,
   CheckCircle2,
+  Cpu,
   CreditCard,
   Database,
   Download,
   Globe,
+  Lock,
+  RefreshCw,
   ShieldAlert,
+  ShieldCheck,
   Trash2,
+  Users,
 } from 'lucide-react';
 import { FEATURE_FLAGS } from '../../config/features';
+import {
+  computeOperationalTelemetry,
+  fetchServerTelemetrySummary,
+  type ServerTelemetrySummary,
+  type TelemetryEvent,
+} from '../../services/telemetryService';
 import type {
+  AiAgentConfig,
   AuditLogEntry,
+  ClientDevice,
   Organization,
+  OrganizationMember,
+  RemoteSessionRecord,
   SupportTicket,
 } from '../../types/support';
+import {
+  canManageMemberRole,
+  getRoleLabel,
+  hasPermission,
+  RBAC_PERMISSION_CATALOG,
+  type OrganizationRole,
+} from '../../utils/rbac';
 import { getServiceTierPriceUsd } from '../../utils/ticketLogic';
 
-export function AnalyticsView({ tickets }: { tickets: SupportTicket[] }) {
+export function AnalyticsView({
+  tickets,
+  sessions = [],
+  devices = [],
+  aiAgents = [],
+  organization,
+}: {
+  tickets: SupportTicket[];
+  sessions?: RemoteSessionRecord[];
+  devices?: ClientDevice[];
+  aiAgents?: AiAgentConfig[];
+  organization?: Organization;
+}) {
+  const [serverSummary, setServerSummary] =
+    useState<ServerTelemetrySummary | null>(null);
+  const [localEvents, setLocalEvents] = useState<TelemetryEvent[]>([]);
+  const [telemetryLoading, setTelemetryLoading] = useState(false);
+
+  const loadTelemetry = useCallback(async () => {
+    setTelemetryLoading(true);
+    const result = await fetchServerTelemetrySummary();
+    setServerSummary(result.summary);
+    setLocalEvents(result.localEvents);
+    setTelemetryLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void loadTelemetry();
+  }, [loadTelemetry]);
+
   const paidRevenue = tickets
     .filter((t) => t.payment_status === 'paid')
     .reduce((sum, t) => sum + getServiceTierPriceUsd(t.service_tier), 0);
@@ -25,6 +77,32 @@ export function AnalyticsView({ tickets }: { tickets: SupportTicket[] }) {
     tickets.length > 0 ? Math.round((resolvedCount / tickets.length) * 100) : 0;
 
   const categories = Array.from(new Set(tickets.map((t) => t.category)));
+
+  const fallbackOrg: Organization = organization ?? {
+    id: '00000000-0000-4000-8000-000000000001',
+    name: 'Remote Support 365',
+    slug: 'remote-support-365',
+    plan_tier: 'internal_hq',
+    dispatch_mode: 'smart',
+    rustdesk_relay_domain: '',
+    payment_gateway: 'stripe_paypal',
+    ai_credits_monthly: 500,
+    ai_credits_used: 0,
+    created_at: new Date().toISOString(),
+  };
+
+  const opTelemetry = computeOperationalTelemetry({
+    tickets,
+    sessions,
+    devices,
+    aiAgents,
+    organization: fallbackOrg,
+  });
+
+  const combinedEvents =
+    serverSummary && serverSummary.recentEvents.length > 0
+      ? serverSummary.recentEvents
+      : localEvents;
 
   return (
     <div data-testid="analytics-view" className="space-y-6">
@@ -63,6 +141,175 @@ export function AnalyticsView({ tickets }: { tickets: SupportTicket[] }) {
           <p className="text-[11px] text-[#64748B] mt-1">
             Confirmados en pasarela o periodo actual
           </p>
+        </div>
+      </div>
+
+      {/* Telemetría Operativa y Salud del Sistema (Fase 3) */}
+      <div
+        data-testid="telemetry-panel"
+        className="bg-white border border-[#E5E9F2] rounded-xl p-6 shadow-[0_1px_3px_rgba(15,23,42,0.03)] space-y-5"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="w-10 h-10 rounded-xl bg-[#EFF6FF] text-[#2563EB] flex items-center justify-center shrink-0">
+              <Activity className="w-5 h-5" aria-hidden="true" />
+            </span>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-[#0F172A]">
+                  Telemetría operativa y salud BFF
+                </h3>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                    serverSummary?.status === 'degraded'
+                      ? 'bg-amber-100 text-amber-800'
+                      : 'bg-[#D1FAE5] text-[#059669]'
+                  }`}
+                >
+                  {serverSummary?.status === 'degraded' ? 'Degradado' : 'En línea'}
+                </span>
+              </div>
+              <p className="text-xs text-[#64748B]">
+                Métricas en vivo de sesiones RustDesk, cuota Gemini IA, dispositivos y eventos RBAC.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => void loadTelemetry()}
+            disabled={telemetryLoading}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#E5E9F2] bg-[#F8FAFC] hover:bg-[#EFF6FF] text-xs font-semibold text-[#0F172A] transition-colors disabled:opacity-60 self-start sm:self-auto"
+          >
+            <RefreshCw
+              className={`w-3.5 h-3.5 ${telemetryLoading ? 'animate-spin' : ''}`}
+              aria-hidden="true"
+            />
+            Actualizar telemetría
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="rounded-xl bg-[#F8FAFC] border border-[#E5E9F2] p-3.5">
+            <p className="text-[11px] font-medium text-[#64748B]">
+              Cuota créditos IA
+            </p>
+            <p className="font-mono tabular-nums text-lg font-bold text-[#0F172A] mt-1">
+              {opTelemetry.aiCreditsUsed} / {opTelemetry.aiCreditsQuota}
+            </p>
+            <p className="text-[11px] text-[#2563EB] font-semibold mt-0.5">
+              {opTelemetry.aiQuotaUtilizationPct}% utilizado
+            </p>
+          </div>
+
+          <div className="rounded-xl bg-[#F8FAFC] border border-[#E5E9F2] p-3.5">
+            <p className="text-[11px] font-medium text-[#64748B]">
+              Duración media sesión
+            </p>
+            <p className="font-mono tabular-nums text-lg font-bold text-[#0F172A] mt-1">
+              {opTelemetry.avgSessionDurationMin} min
+            </p>
+            <p className="text-[11px] text-[#64748B] mt-0.5">
+              {opTelemetry.activeSessionsCount} activas · {opTelemetry.installedAgentRatioPct}% agente fijo
+            </p>
+          </div>
+
+          <div className="rounded-xl bg-[#F8FAFC] border border-[#E5E9F2] p-3.5">
+            <p className="text-[11px] font-medium text-[#64748B]">
+              Equipos monitoreados
+            </p>
+            <p className="font-mono tabular-nums text-lg font-bold text-[#059669] mt-1">
+              {opTelemetry.onlineDevicesCount} / {opTelemetry.totalDevicesCount}
+            </p>
+            <p className="text-[11px] text-[#64748B] mt-0.5">
+              Agentes RustDesk en línea
+            </p>
+          </div>
+
+          <div className="rounded-xl bg-[#F8FAFC] border border-[#E5E9F2] p-3.5">
+            <p className="text-[11px] font-medium text-[#64748B]">
+              Latencia IA · Uptime BFF
+            </p>
+            <p className="font-mono tabular-nums text-lg font-bold text-[#0F172A] mt-1">
+              {serverSummary ? `${serverSummary.metrics.avgAiLatencyMs} ms` : 'N/D'}
+            </p>
+            <p className="text-[11px] text-[#64748B] mt-0.5">
+              {serverSummary
+                ? `Uptime ${Math.floor(serverSummary.uptimeSeconds / 60)}m · RBAC ${serverSummary.metrics.rbacDeniedCount} bloqueos`
+                : 'Modo local sin BFF activo'}
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="rounded-xl border border-[#E5E9F2] p-4 space-y-3">
+            <p className="text-xs font-bold text-[#0F172A] flex items-center gap-1.5">
+              <Cpu className="w-3.5 h-3.5 text-[#2563EB]" aria-hidden="true" />
+              Distribución por Sistema Operativo
+            </p>
+            {opTelemetry.osBreakdown.length === 0 ? (
+              <p className="text-xs text-[#64748B]">Sin tickets registrados.</p>
+            ) : (
+              <div className="space-y-2">
+                {opTelemetry.osBreakdown.map((row) => (
+                  <div key={row.os} className="space-y-1">
+                    <div className="flex justify-between text-[11px]">
+                      <span className="font-semibold text-[#0F172A]">{row.os}</span>
+                      <span className="font-mono tabular-nums text-[#64748B]">
+                        {row.count} ({row.pct}%)
+                      </span>
+                    </div>
+                    <div className="w-full h-1.5 bg-[#EFF6FF] rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-[#2563EB] rounded-full"
+                        style={{ width: `${row.pct}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-[#E5E9F2] p-4 space-y-2.5">
+            <p className="text-xs font-bold text-[#0F172A]">
+              Flujo reciente de telemetría
+            </p>
+            {combinedEvents.length === 0 ? (
+              <p className="text-xs text-[#64748B] py-2">
+                Sin eventos recientes capturados en esta sesión.
+              </p>
+            ) : (
+              <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                {combinedEvents.slice(0, 8).map((ev) => (
+                  <div
+                    key={ev.id}
+                    className="flex items-center justify-between gap-2 text-[11px] py-1 border-b border-[#F1F5F9] last:border-b-0"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase shrink-0 ${
+                          ev.status === 'error'
+                            ? 'bg-red-100 text-red-700'
+                            : ev.status === 'warn'
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-[#EFF6FF] text-[#2563EB]'
+                        }`}
+                      >
+                        {ev.category}
+                      </span>
+                      <span className="font-medium text-[#0F172A] truncate">
+                        {ev.name}
+                      </span>
+                    </div>
+                    <span className="font-mono tabular-nums text-[#64748B] shrink-0">
+                      {ev.latencyMs !== undefined ? `${ev.latencyMs}ms` : ''}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -109,7 +356,21 @@ export function AnalyticsView({ tickets }: { tickets: SupportTicket[] }) {
   );
 }
 
-export function SecurityAuditView({ logs }: { logs: AuditLogEntry[] }) {
+export function SecurityAuditView({
+  logs,
+  members = [],
+  operatorRole = 'owner',
+  onUpdateMemberRole,
+  demoMode = false,
+  onChangeDemoRole,
+}: {
+  logs: AuditLogEntry[];
+  members?: OrganizationMember[];
+  operatorRole?: OrganizationRole;
+  onUpdateMemberRole?: (memberId: string, nextRole: OrganizationRole) => void;
+  demoMode?: boolean;
+  onChangeDemoRole?: (role: OrganizationRole) => void;
+}) {
   const actorBadge = (type: AuditLogEntry['actor_type']) => {
     switch (type) {
       case 'technician':
@@ -123,8 +384,155 @@ export function SecurityAuditView({ logs }: { logs: AuditLogEntry[] }) {
     }
   };
 
+  const canManageRbac = hasPermission(operatorRole, 'rbac:manage');
+
   return (
     <div data-testid="security-audit-view" className="space-y-6">
+      {/* Gobierno RBAC (Fase 3) */}
+      <div
+        data-testid="rbac-governance-panel"
+        className="bg-white border border-[#E5E9F2] rounded-xl p-6 shadow-[0_1px_3px_rgba(15,23,42,0.03)] space-y-5"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-3.5">
+            <span className="w-10 h-10 rounded-xl bg-[#EEF2FF] text-[#4F46E5] flex items-center justify-center shrink-0">
+              <ShieldCheck className="w-5 h-5" aria-hidden="true" />
+            </span>
+            <div>
+              <h2 className="text-lg font-bold text-[#0F172A]">
+                Gobierno RBAC y control de privilegios
+              </h2>
+              <p className="text-xs text-[#64748B] mt-0.5">
+                Matriz de acceso mínimo por rol ({getRoleLabel(operatorRole)}) aplicada en Sidebar, acciones operativas y API del servidor.
+              </p>
+            </div>
+          </div>
+
+          {demoMode && onChangeDemoRole && (
+            <div className="flex items-center gap-2 self-start sm:self-auto">
+              <label
+                htmlFor="demo-rbac-role-select"
+                className="text-[11px] font-semibold text-[#64748B]"
+              >
+                Simular rol:
+              </label>
+              <select
+                id="demo-rbac-role-select"
+                value={operatorRole}
+                onChange={(e) =>
+                  onChangeDemoRole(e.target.value as OrganizationRole)
+                }
+                className="px-2.5 py-1.5 rounded-lg border border-[#E5E9F2] bg-[#F8FAFC] text-xs font-semibold text-[#0F172A]"
+              >
+                <option value="owner">Owner · Propietario</option>
+                <option value="admin">Admin · Operaciones</option>
+                <option value="technician">Técnico Especialista</option>
+              </select>
+            </div>
+          )}
+        </div>
+
+        {/* Matriz de permisos */}
+        <div className="overflow-x-auto border border-[#E5E9F2] rounded-xl">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-[#F8FAFC] border-b border-[#E5E9F2] text-[#64748B]">
+              <tr>
+                <th className="py-2.5 px-3 font-semibold">Permiso</th>
+                <th className="py-2.5 px-3 font-semibold">Dominio</th>
+                <th className="py-2.5 px-3 font-semibold text-center">Owner</th>
+                <th className="py-2.5 px-3 font-semibold text-center">Admin</th>
+                <th className="py-2.5 px-3 font-semibold text-center">Técnico</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#E5E9F2]">
+              {RBAC_PERMISSION_CATALOG.map((perm) => (
+                <tr key={perm.id} className="hover:bg-[#F8FAFC]">
+                  <td className="py-2 px-3">
+                    <p className="font-semibold text-[#0F172A]">{perm.label}</p>
+                    <p className="text-[11px] text-[#64748B]">{perm.description}</p>
+                  </td>
+                  <td className="py-2 px-3 text-[#475569] whitespace-nowrap">
+                    {perm.domain}
+                  </td>
+                  {(['owner', 'admin', 'technician'] as const).map((r) => {
+                    const allowed = hasPermission(r, perm.id);
+                    return (
+                      <td key={r} className="py-2 px-3 text-center">
+                        {allowed ? (
+                          <CheckCircle2
+                            className="w-4 h-4 text-[#059669] inline-block"
+                            aria-label={`${r}: permitido`}
+                          />
+                        ) : (
+                          <Lock
+                            className="w-3.5 h-3.5 text-slate-300 inline-block"
+                            aria-label={`${r}: restringido`}
+                          />
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Gobierno de miembros */}
+        {members.length > 0 && (
+          <div className="space-y-3">
+            <p className="text-xs font-bold text-[#0F172A] flex items-center gap-1.5">
+              <Users className="w-4 h-4 text-[#2563EB]" aria-hidden="true" />
+              Miembros de la organización y asignación de rol
+            </p>
+            <div className="divide-y divide-[#E5E9F2] border border-[#E5E9F2] rounded-xl overflow-hidden">
+              {members.map((member) => (
+                <div
+                  key={member.id}
+                  className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs bg-white"
+                >
+                  <div>
+                    <p className="font-semibold text-[#0F172A]">
+                      {member.full_name}
+                    </p>
+                    <p className="text-[11px] text-[#64748B]">
+                      {member.email} · {member.member_type}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <select
+                      aria-label={`Rol RBAC para ${member.full_name}`}
+                      disabled={
+                        !canManageRbac ||
+                        !onUpdateMemberRole ||
+                        (member.role === 'owner' && operatorRole !== 'owner')
+                      }
+                      value={member.role}
+                      onChange={(e) => {
+                        const nextRole = e.target.value as OrganizationRole;
+                        if (
+                          onUpdateMemberRole &&
+                          canManageMemberRole(operatorRole, member.role, nextRole)
+                        ) {
+                          onUpdateMemberRole(member.id, nextRole);
+                        }
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg border border-[#E5E9F2] bg-[#F8FAFC] text-xs font-semibold text-[#0F172A] disabled:opacity-60"
+                    >
+                      <option value="owner" disabled={operatorRole !== 'owner'}>
+                        Owner
+                      </option>
+                      <option value="admin">Admin</option>
+                      <option value="technician">Técnico</option>
+                    </select>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="bg-white border border-[#E5E9F2] rounded-xl p-5 shadow-[0_1px_3px_rgba(15,23,42,0.03)] flex items-start gap-3.5">
         <span className="w-10 h-10 rounded-xl bg-[#EFF6FF] text-[#2563EB] flex items-center justify-center shrink-0">
           <ShieldAlert className="w-5 h-5" aria-hidden="true" />
@@ -135,7 +543,7 @@ export function SecurityAuditView({ logs }: { logs: AuditLogEntry[] }) {
           </h2>
           <p className="text-xs text-[#64748B] mt-0.5">
             Registro verificable de enlaces RustDesk, consentimientos explícitos,
-            despachos atómicos y acciones de agentes IA.
+            despachos atómicos, cambios RBAC y acciones de agentes IA.
           </p>
         </div>
       </div>

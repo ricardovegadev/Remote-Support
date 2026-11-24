@@ -21,6 +21,12 @@ import {
 } from 'lucide-react';
 import { FEATURE_FLAGS } from '../config/features';
 import type { DashboardSection, Organization } from '../types/support';
+import {
+  canAccessSection,
+  getRoleLabel,
+  type OrganizationRole,
+  type RbacPermission,
+} from '../utils/rbac';
 import { getInitials } from '../utils/ticketLogic';
 
 interface DashboardSidebarProps {
@@ -36,6 +42,8 @@ interface DashboardSidebarProps {
   onCloseMobile: () => void;
   operatorName?: string;
   operatorRoleLabel?: string;
+  operatorRole?: OrganizationRole;
+  customRbacMatrix?: Partial<Record<OrganizationRole, RbacPermission[]>>;
   onSignOut: () => void;
   onOpenPublicPortal?: () => void;
 }
@@ -53,6 +61,8 @@ export function DashboardSidebar({
   onCloseMobile,
   operatorName = 'Administrador',
   operatorRoleLabel = 'Cuenta de demostración',
+  operatorRole = 'owner',
+  customRbacMatrix,
   onSignOut,
   onOpenPublicPortal,
 }: DashboardSidebarProps) {
@@ -286,7 +296,15 @@ export function DashboardSidebar({
           aria-label="Navegación del Centro de Operaciones"
           className="flex-1 px-3 py-3 space-y-5 overflow-y-auto scrollbar-transparent"
         >
-          {navGroups.map((group) => (
+          {navGroups
+            .map((group) => ({
+              ...group,
+              items: group.items.filter((item) =>
+                canAccessSection(operatorRole, item.id, customRbacMatrix)
+              ),
+            }))
+            .filter((group) => group.items.length > 0)
+            .map((group) => (
             <div key={group.groupLabel} className="space-y-1">
               {!isCompact && (
                 <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[#94A3B8]">
@@ -389,6 +407,9 @@ export function DashboardSidebar({
                   <p className="text-[11px] text-[#94A3B8] truncate">
                     {operatorRoleLabel}
                   </p>
+                  <p className="text-[10px] font-semibold text-[#60A5FA] truncate mt-0.5">
+                    RBAC · {getRoleLabel(operatorRole)}
+                  </p>
                 </div>
               )}
             </div>
@@ -412,13 +433,17 @@ export function DashboardSidebar({
 
   return (
     <>
-      {/* Desktop Collapsible Sidebar (260px exact width) */}
+      {/* Desktop Fixed & Collapsible Sidebar (260px exact width) */}
       <aside
-        className={`hidden lg:flex flex-col shrink-0 transition-all duration-200 ${
+        className={`hidden lg:block shrink-0 transition-all duration-200 ${
           collapsed ? 'w-20' : 'w-[260px]'
         }`}
       >
-        <div className="sticky top-0 h-screen">
+        <div
+          className={`fixed top-0 left-0 h-screen z-30 transition-all duration-200 ${
+            collapsed ? 'w-20' : 'w-[260px]'
+          }`}
+        >
           {renderSidebarContent(false)}
         </div>
       </aside>

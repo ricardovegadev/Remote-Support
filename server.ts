@@ -105,6 +105,52 @@ function extractRoomToken(req: express.Request): string {
   return '';
 }
 
+type ServerOperatorRole = 'owner' | 'admin' | 'technician';
+
+interface ServerTelemetryEvent {
+  id: string;
+  category: 'ai' | 'rustdesk' | 'payment' | 'rbac' | 'system';
+  name: string;
+  status: 'ok' | 'warn' | 'error';
+  latencyMs?: number;
+  metadata?: Record<string, string | number | boolean>;
+  createdAt: string;
+}
+
+const serverStartTimeMs = Date.now();
+const serverTelemetryEvents: ServerTelemetryEvent[] = [];
+const serverTelemetryMetrics = {
+  totalRequestsTracked: 0,
+  aiRequestsCount: 0,
+  aiFallbackCount: 0,
+  aiTotalLatencyMs: 0,
+  rustdeskDownloadCount: 0,
+  paymentIntentsCount: 0,
+  rbacDeniedCount: 0,
+};
+
+function pushServerTelemetry(
+  event: Omit<ServerTelemetryEvent, 'id' | 'createdAt'>
+): void {
+  serverTelemetryMetrics.totalRequestsTracked += 1;
+  const full: ServerTelemetryEvent = {
+    ...event,
+    id: randomUUID(),
+    createdAt: new Date().toISOString(),
+  };
+  serverTelemetryEvents.unshift(full);
+  if (serverTelemetryEvents.length > 100) {
+    serverTelemetryEvents.length = 100;
+  }
+}
+
+type OperatorAuthedRequest = express.Request & {
+  operator?: {
+    userId: string;
+    role: ServerOperatorRole;
+  };
+};
+
 async function requireOperatorAuth(
   req: express.Request,
   res: express.Response,
@@ -112,6 +158,15 @@ async function requireOperatorAuth(
 ): Promise<void> {
   // Allow local demo preview when running in non-production without Supabase configured.
   if (!isProduction && !hasConfiguredSupabaseServer() && isLocalSandboxOnly()) {
+    const demoRoleRaw = String(req.headers['x-demo-role'] ?? '').trim();
+    const demoRole: ServerOperatorRole =
+      demoRoleRaw === 'admin' || demoRoleRaw === 'technician'
+        ? demoRoleRaw
+        : 'owner';
+    (req as OperatorAuthedRequest).operator = {
+      userId: '00000000-0000-4000-8000-000000000099',
+      role: demoRole,
+    };
     next();
     return;
   }
@@ -156,6 +211,7 @@ async function requireOperatorAuth(
       .maybeSingle();
 
     if (profile?.role === 'admin') {
+      (req as OperatorAuthedRequest).operator = { userId, role: 'owner' };
       next();
       return;
     }
@@ -163,7 +219,7 @@ async function requireOperatorAuth(
     const orgIdRaw = req.body?.organizationId;
     let memberQuery = supabase
       .from('organization_members')
-      .select('id')
+      .select('id, role')
       .eq('user_id', userId)
       .eq('status', 'active')
       .in('role', ['owner', 'admin', 'technician']);
@@ -174,6 +230,13 @@ async function requireOperatorAuth(
 
     const { data: memberships } = await memberQuery.limit(1);
     if (!memberships || memberships.length === 0) {
+      serverTelemetryMetrics.rbacDeniedCount += 1;
+      pushServerTelemetry({
+        category: 'rbac',
+        name: 'operator_auth_denied',
+        status: 'warn',
+        metadata: { path: req.path },
+      });
       res.status(403).json({
         success: false,
         error: 'Permisos de operador requeridos para esta herramienta.',
@@ -181,6 +244,14 @@ async function requireOperatorAuth(
       return;
     }
 
+    const memberRole = memberships[0].role as ServerOperatorRole;
+    (req as OperatorAuthedRequest).operator = {
+      userId,
+      role:
+        memberRole === 'owner' || memberRole === 'admin'
+          ? memberRole
+          : 'technician',
+    };
     next();
   } catch {
     res.status(503).json({
@@ -188,6 +259,29 @@ async function requireOperatorAuth(
       error: 'No se pudo validar la sesión de operador.',
     });
   }
+}
+
+function requireAdminOrOwnerRole(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+): void {
+  const role = (req as OperatorAuthedRequest).operator?.role;
+  if (role === 'owner' || role === 'admin') {
+    next();
+    return;
+  }
+  serverTelemetryMetrics.rbacDeniedCount += 1;
+  pushServerTelemetry({
+    category: 'rbac',
+    name: 'admin_role_denied',
+    status: 'warn',
+    metadata: { path: req.path, role: role ?? 'unknown' },
+  });
+  res.status(403).json({
+    success: false,
+    error: 'Gobierno RBAC: se requiere rol Owner o Admin para esta acción.',
+  });
 }
 
 const PUBLIC_ORGANIZATION_ID = '00000000-0000-4000-8000-000000000001';
@@ -869,6 +963,91 @@ async function startServer() {
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true });
   });
+
+  app.get('/api/telemetry/summary', requireOperatorAuth, (_req, res) => {
+    const avgAiLatencyMs =
+      serverTelemetryMetrics.aiRequestsCount > 0
+        ? Math.round(
+            serverTelemetryMetrics.aiTotalLatencyMs /
+              serverTelemetryMetrics.aiRequestsCount
+          )
+        : 0;
+    const geminiConfigured = Boolean(
+      (process.env.GEMINI_API_KEY ?? process.env.API_KEY)?.trim()
+    );
+    res.json({
+      status:
+        serverTelemetryMetrics.rbacDeniedCount > 25 ? 'degraded' : 'healthy',
+      uptimeSeconds: Math.round((Date.now() - serverStartTimeMs) / 1000),
+      nodeVersion: process.version,
+      paymentsMode: paymentMode,
+      geminiConfigured,
+      supabaseConfigured: hasConfiguredSupabaseServer(),
+      gmailConfigured: isGmailConfigured(),
+      rustdeskCacheWarm: serverTelemetryMetrics.rustdeskDownloadCount > 0,
+      metrics: {
+        totalRequestsTracked: serverTelemetryMetrics.totalRequestsTracked,
+        aiRequestsCount: serverTelemetryMetrics.aiRequestsCount,
+        aiFallbackCount: serverTelemetryMetrics.aiFallbackCount,
+        avgAiLatencyMs,
+        rustdeskDownloadCount: serverTelemetryMetrics.rustdeskDownloadCount,
+        paymentIntentsCount: serverTelemetryMetrics.paymentIntentsCount,
+        rbacDeniedCount: serverTelemetryMetrics.rbacDeniedCount,
+      },
+      recentEvents: serverTelemetryEvents.slice(0, 25),
+      collectedAt: new Date().toISOString(),
+    });
+  });
+
+  app.post(
+    '/api/telemetry/events',
+    createRateLimiter(60, 60_000),
+    (req, res) => {
+      const body = req.body ?? {};
+      const allowedCategories = new Set([
+        'ai',
+        'rustdesk',
+        'payment',
+        'rbac',
+        'system',
+      ]);
+      const allowedStatuses = new Set(['ok', 'warn', 'error']);
+      const category = allowedCategories.has(String(body.category))
+        ? (String(body.category) as ServerTelemetryEvent['category'])
+        : 'system';
+      const status = allowedStatuses.has(String(body.status))
+        ? (String(body.status) as ServerTelemetryEvent['status'])
+        : 'ok';
+      const name = String(body.name ?? 'ui_event')
+        .trim()
+        .slice(0, 80);
+      const latencyMs =
+        typeof body.latencyMs === 'number' && Number.isFinite(body.latencyMs)
+          ? Math.max(0, Math.min(120_000, Math.round(body.latencyMs)))
+          : undefined;
+
+      if (category === 'ai') {
+        serverTelemetryMetrics.aiRequestsCount += 1;
+        if (latencyMs) serverTelemetryMetrics.aiTotalLatencyMs += latencyMs;
+        if (status === 'warn') serverTelemetryMetrics.aiFallbackCount += 1;
+      } else if (category === 'rustdesk') {
+        serverTelemetryMetrics.rustdeskDownloadCount += 1;
+      } else if (category === 'payment') {
+        serverTelemetryMetrics.paymentIntentsCount += 1;
+      } else if (category === 'rbac' && status === 'warn') {
+        serverTelemetryMetrics.rbacDeniedCount += 1;
+      }
+
+      pushServerTelemetry({
+        category,
+        name: name || 'ui_event',
+        status,
+        latencyMs,
+      });
+
+      res.status(202).json({ ok: true });
+    }
+  );
 
   app.post('/api/tickets', createRateLimiter(8, 60_000), async (req, res) => {
     if (!hasConfiguredSupabaseServer()) {
@@ -2313,6 +2492,7 @@ async function startServer() {
   app.get(
     '/api/admin/technician-applications',
     requireOperatorAuth,
+    requireAdminOrOwnerRole,
     async (_req, res) => {
       try {
         const supabase = getSupabaseAdmin();
@@ -2353,6 +2533,7 @@ async function startServer() {
     '/api/admin/technician-applications/:id/decision',
     createRateLimiter(30, 60_000),
     requireOperatorAuth,
+    requireAdminOrOwnerRole,
     async (req, res) => {
       try {
         const appId = String(req.params.id ?? '').trim();

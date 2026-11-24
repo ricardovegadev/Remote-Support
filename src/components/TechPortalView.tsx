@@ -58,6 +58,11 @@ import {
   LEGAL_TERMS_VERSION,
   SERVICE_TIER_OPTIONS,
 } from '../utils/ticketLogic';
+import {
+  canAccessSection,
+  type OrganizationRole,
+} from '../utils/rbac';
+import { recordTelemetryEvent } from '../services/telemetryService';
 
 async function hasOperatorAccess(
   supabase: NonNullable<ReturnType<typeof getSupabaseClient>>,
@@ -347,14 +352,19 @@ export function TechPortalView({
   const activeOrg =
     organizations.find((o) => o.id === activeOrgId) ?? organizations[0];
 
+  const [demoRole, setDemoRole] = useState<OrganizationRole>('owner');
+
   const orgTickets = tickets.filter(
     (t) => !t.organization_id || t.organization_id === activeOrg.id
   );
   const orgMembers = members.filter((m) => m.organization_id === activeOrg.id);
-  const operatorDisplayName =
-    members.find(
-      (m) => m.email.toLowerCase() === operatorEmail.toLowerCase()
-    )?.full_name ?? 'Administrador';
+  const matchedMember = members.find(
+    (m) => m.email.toLowerCase() === operatorEmail.toLowerCase()
+  );
+  const operatorDisplayName = matchedMember?.full_name ?? 'Administrador';
+  const operatorRole: OrganizationRole = supabaseConfigured
+    ? (matchedMember?.role ?? 'owner')
+    : demoRole;
   const orgDevices = devices.filter((d) => d.organization_id === activeOrg.id);
   const orgSessions = sessions.filter(
     (s) => s.organization_id === activeOrg.id
@@ -369,6 +379,12 @@ export function TechPortalView({
   const openTicketsCount = orgTickets.filter(
     (t) => t.status !== 'resolved'
   ).length;
+
+  useEffect(() => {
+    if (!canAccessSection(operatorRole, activeSection)) {
+      setActiveSection('overview');
+    }
+  }, [operatorRole, activeSection]);
 
   useEffect(() => {
     if (orgMembers.length > 0) {
@@ -923,6 +939,7 @@ export function TechPortalView({
         mobileOpen={mobileDrawerOpen}
         onCloseMobile={() => setMobileDrawerOpen(false)}
         operatorName={operatorDisplayName}
+        operatorRole={operatorRole}
         operatorRoleLabel={
           supabaseConfigured ? operatorEmail : 'Cuenta de demostración'
         }
@@ -1201,11 +1218,30 @@ export function TechPortalView({
           )}
 
           {activeSection === 'analytics' && (
-            <AnalyticsView tickets={orgTickets} />
+            <AnalyticsView
+              tickets={orgTickets}
+              sessions={orgSessions}
+              devices={orgDevices}
+              aiAgents={orgAiAgents}
+              organization={activeOrg}
+            />
           )}
 
           {activeSection === 'security' && (
-            <SecurityAuditView logs={orgAuditLogs} />
+            <SecurityAuditView
+              logs={orgAuditLogs}
+              members={orgMembers}
+              operatorRole={operatorRole}
+              demoMode={!supabaseConfigured}
+              onChangeDemoRole={(nextRole) => {
+                setDemoRole(nextRole);
+                void recordTelemetryEvent({
+                  category: 'rbac',
+                  name: `demo_role_switched_to_${nextRole}`,
+                  status: 'ok',
+                });
+              }}
+            />
           )}
 
           {activeSection === 'settings' && (
