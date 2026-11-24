@@ -2734,7 +2734,7 @@ async function startServer() {
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
-        ...(isPreviewEnv ? { ws: false as const, hmr: false } : {}),
+        ...(isPreviewEnv ? { hmr: false } : {}),
       },
       appType: 'spa',
     });

@@ -39,6 +39,24 @@ export default defineConfig(() => {
       alias: {
         '@': path.resolve(import.meta.dirname, '.'),
       },
+      dedupe: ['react', 'react-dom'],
+    },
+    optimizeDeps: {
+      include: [
+        'react',
+        'react-dom',
+        'react-dom/client',
+        'react/jsx-runtime',
+        'react/jsx-dev-runtime',
+        'lucide-react',
+        '@supabase/supabase-js',
+      ],
+      entries: [
+        'index.html',
+        'src/main.tsx',
+        'src/App.tsx',
+        'src/components/**/*.tsx',
+      ],
     },
     build: {
       rolldownOptions: {
@@ -70,9 +88,8 @@ export default defineConfig(() => {
       // proxy hosts and Cloud Run's generated hostname.
       // Avoid `true`, which disables Vite's DNS-rebinding protection.
       allowedHosts: [...allowedHosts],
-      // Disable HMR and standalone Vite WebSocket server (port 24678) in AI Studio / Cloud Run
-      // preview proxy to avoid port conflicts on restart and WebSocket console errors.
-      ...(isPreviewEnv ? { ws: false as const } : {}),
+      // Disable HMR WebSocket in AI Studio / Cloud Run preview proxy to avoid
+      // `@vite/client` "WebSocket closed without opened" errors.
       hmr: isPreviewEnv ? false : true,
       // Disable file watching in preview/DISABLE_HMR mode to speed up cold start and save CPU.
       watch: isPreviewEnv ? null : {},

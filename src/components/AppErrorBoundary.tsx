@@ -60,6 +60,26 @@ export class AppErrorBoundary extends Component<
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error('[Remote Support 365 ErrorBoundary]', error, info);
+    if (typeof window === 'undefined') return;
+    const msg = error?.message ?? '';
+    const isStaleChunkOrReactMismatch =
+      msg.includes("reading 'useState'") ||
+      msg.includes("reading 'useEffect'") ||
+      msg.includes("reading 'useContext'") ||
+      msg.includes('Invalid hook call') ||
+      msg.includes('Failed to fetch dynamically imported module') ||
+      msg.includes('Importing a module script failed');
+    if (isStaleChunkOrReactMismatch) {
+      try {
+        const key = 'rs365_chunk_reload_once';
+        if (window.sessionStorage.getItem(key) !== '1') {
+          window.sessionStorage.setItem(key, '1');
+          window.location.reload();
+        }
+      } catch {
+        // Ignore sessionStorage errors
+      }
+    }
   }
 
   handleResetLocalData = (): void => {
