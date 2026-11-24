@@ -19,10 +19,10 @@ import {
 } from 'lucide-react';
 import type { IssueCategory } from '../types/support';
 import { AssistantOrbIcon } from './AssistantOrbIcon';
-import heroSpecialistMainImg from '../assets/images/hero_specialist_main.png';
-import heroRemoteSupportImg from '../assets/images/hero_remote_support_screens_1795192443338.jpg';
-import heroWindowsFixImg from '../assets/images/hero_windows_fix_screen_1795193579297.jpg';
-import heroCleanWorkstationImg from '../assets/images/hero_clean_workstation_1794958415031.jpg';
+import heroSpecialistMainImg from '../assets/images/hero_specialist_main.webp';
+import heroRemoteSupportImg from '../assets/images/hero_remote_support_screens_1795192443338.webp';
+import heroWindowsFixImg from '../assets/images/hero_windows_fix_screen_1795193579297.webp';
+import heroCleanWorkstationImg from '../assets/images/hero_clean_workstation_1794958415031.webp';
 
 interface HeroSectionProps {
   onStartDiagnostic: () => void;

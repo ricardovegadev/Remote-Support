@@ -177,3 +177,60 @@ export async function sendTechnicianRejectedEmail(input: {
 
   return sendGmailMessage({ to: input.to, subject, html, text });
 }
+
+export async function sendClientTicketCreatedEmail(input: {
+  to: string;
+  clientName: string;
+  ticketCode: string;
+  serviceTier: string;
+  category: string;
+  roomUrl: string;
+}): Promise<GmailDeliveryResult> {
+  const safeName = escapeHtml(input.clientName);
+  const safeCode = escapeHtml(input.ticketCode);
+  const safeTier = escapeHtml(input.serviceTier);
+  const safeCategory = escapeHtml(input.category);
+  const safeUrl = escapeHtml(input.roomUrl);
+
+  const subject = `Tu sala de soporte ${input.ticketCode} está lista — Remote Support 365`;
+
+  const text = [
+    `Hola ${input.clientName},`,
+    '',
+    `Registramos tu solicitud de soporte técnico (${input.ticketCode}).`,
+    `Servicio: ${input.serviceTier} · Categoría: ${input.category}`,
+    '',
+    'Accede a tu sala privada en cualquier momento (PC o móvil) desde:',
+    input.roomUrl,
+    '',
+    'Recuerda: nunca te pediremos contraseñas bancarias ni códigos 2FA.',
+    'Equipo Remote Support 365',
+  ].join('\n');
+
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<body style="margin:0;padding:24px;background-color:#F8FAFC;font-family:Inter,Segoe UI,Arial,sans-serif;color:#0B192C;">
+  <div style="max-width:560px;margin:0 auto;background:#FFFFFF;border:1px solid #E2E8F0;border-radius:16px;overflow:hidden;">
+    <div style="background:#0B192C;padding:24px 28px;color:#FFFFFF;">
+      <p style="margin:0;font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#10B981;">Remote Support 365 · Sala de Soporte</p>
+      <h1 style="margin:8px 0 0;font-size:20px;line-height:1.3;">Ticket ${safeCode} creado</h1>
+    </div>
+    <div style="padding:28px;font-size:14px;line-height:1.6;color:#334155;">
+      <p style="margin-top:0;">Hola <strong>${safeName}</strong>,</p>
+      <p>Tu sala privada de asistencia remota está lista. Guarda este correo para regresar cuando lo necesites.</p>
+      <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:12px;padding:16px;margin:18px 0;font-size:13px;">
+        <p style="margin:0 0 6px;"><strong>Código:</strong> ${safeCode}</p>
+        <p style="margin:0 0 6px;"><strong>Plan:</strong> ${safeTier}</p>
+        <p style="margin:0;"><strong>Categoría:</strong> ${safeCategory}</p>
+      </div>
+      <div style="text-align:center;margin:24px 0;">
+        <a href="${safeUrl}" style="display:inline-block;background:#2563EB;color:#FFFFFF;text-decoration:none;font-weight:600;font-size:14px;padding:13px 26px;border-radius:10px;">Abrir mi sala de soporte →</a>
+      </div>
+      <p style="font-size:12px;color:#64748B;margin:0;">Seguridad garantizada: ningún especialista puede conectarse sin tu aprobación manual en pantalla ni te pedirá contraseñas bancarias o códigos 2FA.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+
+  return sendGmailMessage({ to: input.to, subject, html, text });
+}

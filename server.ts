@@ -10,6 +10,7 @@ import Stripe from 'stripe';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
   isGmailConfigured,
+  sendClientTicketCreatedEmail,
   sendTechnicianApprovedEmail,
   sendTechnicianRejectedEmail,
 } from './src/server/gmailService.ts';
@@ -1306,6 +1307,21 @@ async function startServer() {
       res.status(500).json({ success: false, error: 'No fue posible crear el ticket de forma segura.' });
       return;
     }
+
+    const publicBaseUrl = getPublicBaseUrl();
+    if (isGmailConfigured() && publicBaseUrl) {
+      void sendClientTicketCreatedEmail({
+        to: clientEmail,
+        clientName,
+        ticketCode: ticket.ticket_code,
+        serviceTier,
+        category,
+        roomUrl: `${publicBaseUrl}/sesion/${encodeURIComponent(ticket.ticket_code)}`,
+      }).catch((err: unknown) => {
+        console.error('[tickets] Failed to send client confirmation email:', err);
+      });
+    }
+
     res.status(201).json({ success: true, ticket: data });
   });
 

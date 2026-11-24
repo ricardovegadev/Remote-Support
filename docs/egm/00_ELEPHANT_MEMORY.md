@@ -97,23 +97,20 @@ Definido en `src/types/support.ts`, `src/utils/ticketLogic.ts` y replicado en `s
 
 ---
 
-## 6. Estado de Seguridad, CI/CD y Equipo de Agentes (Actualizado 2026-11-22)
+## 6. Estado de Seguridad, CI/CD, Lanzamiento y Equipo de Agentes (Actualizado 2026-11-24)
 
-- **Seguridad Backend & Supabase (Fases 1–3 aplicadas y migradas a producción):**
-  - `POST /api/ai/report`, `POST /api/ai/assistant` y `POST /api/operator/tickets` protegidos con `requireOperatorAuth` (JWT de Supabase + rol activo de operador/admin).
-  - `stripe/create-session`, `stripe/verify-session`, `paypal/create-order` y `paypal/capture-order` validan el token de sala con `crypto.timingSafeEqual`.
-  - Webhook de Stripe (`/api/payments/stripe/webhook`) exento del rate limiter de usuario, con soporte para `charge.refunded` e `idempotencyKey` en checkout.
-  - `GET /api/rustdesk/official-download` con caché en memoria de 15 minutos y soporte Apple Silicon (`aarch64`).
-  - Rutas `/api/*` desconocidas devuelven `404` JSON.
-  - `supabase/migrations/20261121000000_security_and_schema_alignment.sql` aplicada en producción: `profiles` con `GRANT UPDATE` por columna (sin `role`, `is_verified` ni `is_adult_verified`), `anon` sin `INSERT` directo en `tickets`, `claim_ticket_atomically` corregido con `LEFT JOIN technician_profiles`, `update_ticket_as_staff` y `update_own_ticket_as_authenticated` desplegados.
-  - `supabase/schema.sql` ya **no** se empaqueta en el bundle público del cliente (`TechPortalView` usa guía de despliegue).
-- **Repositorio GitHub (`ricardovegadev/Remote-Support`):**
-  - Visibilidad: **Private**, `delete_branch_on_merge: true`, **Secret Scanning**, **Push Protection**, **Dependabot alerts** y **Dependabot security updates** activos.
-  - Workflows activos: `.github/workflows/ci.yml` (`Lint, Test & Build` en Node 24) y `.github/workflows/supabase-migrations.yml` (`supabase db push --remote --yes` automático en `main` para `supabase/migrations/**`).
-  - Gestor único: `npm` (`package-lock.json`; `bun.lock` y activos muertos eliminados).
+- **Plantilla de entorno (`.env.support`):** Renombrada desde `.env.example` (permitida en `.gitignore` vía `!.env.support`), incluyendo `TRUST_PROXY`, `APP_URL`, `GMAIL_USER` y `GMAIL_APP_PASSWORD`.
+- **Fases 1–3 y Compuertas P0/P1 Aplicadas en `main` y Migradas en Producción Supabase:**
+  - **Fase 1:** Standby no destructivo SaaS (`ENABLE_SAAS_MULTITENANT = false`), NDA dual (`NDA-CLIENT-v1.0-2026` / `NDA-TECH-v1.0-2026`), portal `/postular` con escala 65%–85% y evaluación cronometrada.
+  - **Fase 2:** `technician_applications` con RLS estricta, onboarding por correo SMTP, panel de aprobación admin y `/registro-tecnico` con auto-login Supabase Auth.
+  - **Fase 3:** Sidebar fijo colapsable (`DashboardSidebar`), gobierno RBAC fail-closed (`src/utils/rbac.ts`, `requireAdminOrOwnerRole`, `SecurityAuditView`) y telemetría operativa + salud BFF (`/api/telemetry/summary`, `/api/telemetry/events` autenticado).
+  - **Compuerta P0 (PR #10) & Migración `20261124000000_launch_hardening_and_parity.sql`:** `client_session_token` aislado de `authenticated` y `claim_ticket_atomically`, purga automática de `rustdesk_id` temporal al resolver, paridad de tablas (`remote_sessions`, `ai_agents_config`, `enterprise_leads`), `handle_new_user()` `+18` en SQL, calificación 100% server-side en `/api/technicians/apply`, cero fallbacks `sandbox`/Gmail `simulated` ni Host Header Injection en producción, regex hex en `TicketLookupModal` y fix de columnas en `AuthModal`.
+  - **Compuerta P1 (PR #12) & Migración `20261124010000_p1_payments_csat_and_commissions.sql`:** tabla ledger inmutable `public.payments` (65%–85%), panel `TechnicianEarningsCard`, módulo post-resolución `ResolutionFeedbackCard` (CSAT 1–5★, disputa/garantía, Imprimir/PDF y checklist RustDesk), tarjeta verificada del técnico, `resetPasswordForEmail` en `AuthModal`, endpoints `/api/tickets/:id/csat`, `/api/admin/tickets/:id/reassign` y `/api/payments/stripe/billing-portal`, y correos transaccionales al cliente con enlace a `/sesion/RS-XXXX`.
+  - **Rendimiento Móvil:** 5 imágenes hero optimizadas a **WebP** (`3,448 KB` → `309 KB`, **91% de reducción**).
+- **CI/CD y Despliegue Cloud Run (`ricardovegadev/Remote-Support`):**
+  - `npm test` ejecuta **23/23 pruebas** (`src/utils/ticketLogic.test.ts` + suite HTTP real `src/server/server.test.ts`) en `.github/workflows/ci.yml`.
+  - `.github/workflows/supabase-migrations.yml` restringido a `workflow_dispatch` manual.
+  - `Dockerfile` (Node 24 LTS, `PORT=8080`, `VITE_*` build args), `.dockerignore`, `.github/workflows/deploy-cloud-run.yml` (`workflow_dispatch`) y guía `docs/DEPLOY_CLOUD_RUN.md`.
 - **Equipo de Agentes Especializados (Skills en Antigravity):**
-  - `rs365-qa-auditor` (solo lectura: QA, seguridad y contratos API↔UI).
-  - `rs365-supabase-architect` (migraciones SQL, RLS y RPCs; requiere aprobación antes de push a `main`).
-  - `rs365-ui-polish` (React 19, Tailwind 4, WCAG, responsive y previews reales autocontenidos).
-  - `rs365-tech-ceo` (orquestador: consolida reportes en 3–4 decisiones prioritarias por impacto y riesgo).
+  - `rs365-qa-auditor`, `rs365-supabase-architect`, `rs365-ui-polish` y `rs365-tech-ceo`.
 

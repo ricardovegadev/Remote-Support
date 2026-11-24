@@ -41,7 +41,7 @@ import {
   validateStep3,
 } from '../utils/ticketLogic';
 import type { LegalDocTab } from './LegalDocsModal';
-import heroWarmSpecialistImg from '../assets/images/hero_warm_specialist_1795208080027.jpg';
+import heroWarmSpecialistImg from '../assets/images/hero_warm_specialist_1795208080027.webp';
 
 export interface ExternalTriageTrigger {
   id: number;
