@@ -49,6 +49,7 @@ export function AuthModal({
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [marketingOptIn, setMarketingOptIn] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authInfo, setAuthInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
@@ -57,6 +58,7 @@ export function AuthModal({
   useEffect(() => {
     if (!isOpen) return;
     setAuthError(null);
+    setAuthInfo(null);
     setConfirmDeleteOpen(false);
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -66,6 +68,38 @@ export function AuthModal({
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
+
+  const handlePasswordRecovery = async () => {
+    const cleanEmail = email.trim().toLowerCase();
+    setAuthError(null);
+    setAuthInfo(null);
+    if (!isValidEmail(cleanEmail)) {
+      setAuthError('Ingresa tu correo electrónico arriba para enviarte el enlace de recuperación.');
+      return;
+    }
+    if (!supabaseConfigured) {
+      setAuthInfo('En modo demostración local no se requiere recuperación por correo.');
+      return;
+    }
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setAuthError('Servicio de autenticación no disponible.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+        redirectTo: `${window.location.origin}/portal`,
+      });
+      if (error) {
+        setAuthError(`No se pudo enviar el enlace: ${error.message}`);
+        return;
+      }
+      setAuthInfo('Si el correo está registrado, recibirás un enlace para restablecer tu contraseña.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -246,7 +280,7 @@ export function AuthModal({
           return;
         }
         if (!data.session) {
-          setAuthError(
+          setAuthInfo(
             'Cuenta creada. Revisa tu correo electrónico para confirmar tu cuenta antes de iniciar sesión.'
           );
           setMode('login');
@@ -501,6 +535,26 @@ export function AuthModal({
                     className="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-[#0B192C] focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/15"
                   />
                 </div>
+
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => void handlePasswordRecovery()}
+                    className="text-xs font-semibold text-[#2563EB] hover:underline disabled:opacity-60"
+                  >
+                    ¿Olvidaste tu contraseña?
+                  </button>
+                </div>
+
+                {authInfo && (
+                  <p
+                    role="status"
+                    className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs font-medium text-emerald-800"
+                  >
+                    {authInfo}
+                  </p>
+                )}
 
                 {authError && (
                   <p role="alert" className="text-xs font-medium text-red-700">
