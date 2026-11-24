@@ -1,0 +1,127 @@
+name: Deploy to Google Cloud Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_name:
+        description: 'Cloud Run service name'
+        required: true
+        default: 'remote-support-365'
+      region:
+        description: 'GCP region'
+        required: true
+        default: 'us-central1'
+      payments_mode:
+        description: 'Payments mode (live | sandbox)'
+        required: true
+        default: 'live'
+        type: choice
+        options:
+          - live
+          - sandbox
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-cloud-run
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build & Deploy to Cloud Run
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        run: |
+          missing=0
+          for var in GCP_PROJECT_ID GCP_SA_KEY VITE_SUPABASE_URL VITE_SUPABASE_ANON_KEY SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY GEMINI_API_KEY APP_URL; do
+            if [ -z "${!var}" ]; then
+              echo "::error::Falta configurar el secret $var en GitHub (Settings -> Secrets and variables -> Actions)."
+              missing=1
+            fi
+          done
+          exit "$missing"
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          APP_URL: ${{ secrets.APP_URL }}
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker "${{ inputs.region }}-docker.pkg.dev" --quiet
+          gcloud artifacts repositories describe remote-support-365 \
+            --location="${{ inputs.region }}" >/dev/null 2>&1 || \
+          gcloud artifacts repositories create remote-support-365 \
+            --repository-format=docker \
+            --location="${{ inputs.region }}" \
+            --description="Remote Support 365 container images"
+
+      - name: Build and push Docker image
+        env:
+          IMAGE: "${{ inputs.region }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/remote-support-365/${{ inputs.service_name }}:${{ github.sha }}"
+        run: |
+          docker build \
+            --build-arg VITE_SUPABASE_URL="${{ secrets.VITE_SUPABASE_URL }}" \
+            --build-arg VITE_SUPABASE_ANON_KEY="${{ secrets.VITE_SUPABASE_ANON_KEY }}" \
+            --build-arg VITE_RUSTDESK_WINDOWS_URL="${{ secrets.VITE_RUSTDESK_WINDOWS_URL }}" \
+            --build-arg VITE_RUSTDESK_MAC_URL="${{ secrets.VITE_RUSTDESK_MAC_URL }}" \
+            -t "$IMAGE" .
+          docker push "$IMAGE"
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ inputs.service_name }}
+          region: ${{ inputs.region }}
+          image: "${{ inputs.region }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/remote-support-365/${{ inputs.service_name }}:${{ github.sha }}"
+          flags: >-
+            --allow-unauthenticated
+            --port=8080
+            --min-instances=0
+            --max-instances=10
+            --cpu=1
+            --memory=512Mi
+          env_vars: |
+            NODE_ENV=production
+            TRUST_PROXY=1
+            DISABLE_HMR=true
+            PAYMENTS_MODE=${{ inputs.payments_mode }}
+            APP_URL=${{ secrets.APP_URL }}
+            SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+            SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+            STRIPE_SECRET_KEY=${{ secrets.STRIPE_SECRET_KEY }}
+            STRIPE_WEBHOOK_SECRET=${{ secrets.STRIPE_WEBHOOK_SECRET }}
+            PAYPAL_CLIENT_ID=${{ secrets.PAYPAL_CLIENT_ID }}
+            PAYPAL_CLIENT_SECRET=${{ secrets.PAYPAL_CLIENT_SECRET }}
+            PAYPAL_MODE=${{ inputs.payments_mode }}
+            GMAIL_USER=${{ secrets.GMAIL_USER }}
+            GMAIL_APP_PASSWORD=${{ secrets.GMAIL_APP_PASSWORD }}
+
+      - name: Verify live HTTPS health endpoint
+        run: |
+          SERVICE_URL="${{ steps.deploy.outputs.url }}"
+          echo "Deployed URL: $SERVICE_URL"
+          curl -fsSL "$SERVICE_URL/api/health" | grep -q '"ok":true'
+          echo "Health check PASSED: $SERVICE_URL/api/health"

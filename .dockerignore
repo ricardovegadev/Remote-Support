@@ -1,0 +1,14 @@
+.git
+.github
+.agents
+.agent
+.env
+.env.*
+!.env.support
+node_modules
+dist
+coverage
+docs
+*.log
+.DS_Store
+bun.lock
