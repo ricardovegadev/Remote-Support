@@ -10,7 +10,7 @@ interface TicketLookupModalProps {
   onSelectTicketCode: (ticketCode: string) => void;
 }
 
-const TICKET_CODE_REGEX = /^RS-\d{4,}$/i;
+const TICKET_CODE_REGEX = /^RS-[A-F0-9]{4,}$/i;
 
 export function TicketLookupModal({
   isOpen,
@@ -43,9 +43,9 @@ export function TicketLookupModal({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = codeInput.trim().toUpperCase();
-    const normalized = /^\d{4,}$/.test(trimmed) ? `RS-${trimmed}` : trimmed;
+    const normalized = /^[A-F0-9]{4,}$/i.test(trimmed) ? `RS-${trimmed}` : trimmed;
     if (!TICKET_CODE_REGEX.test(normalized)) {
-      setError('Ingresa un código válido con formato RS-1234 (o los 4 dígitos de tu ticket).');
+      setError('Ingresa un código válido con formato RS-A3F9 (o los caracteres de tu ticket).');
       return;
     }
     setError(null);

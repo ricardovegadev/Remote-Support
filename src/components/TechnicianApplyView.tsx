@@ -214,9 +214,10 @@ export function TechnicianApplyView({
   };
 
   const finalizeAssessment = useCallback(
-    (triggeredByTimeout: boolean) => {
+    async (triggeredByTimeout: boolean) => {
       if (hasSubmittedRef.current) return;
       hasSubmittedRef.current = true;
+      setAssessmentNotice(null);
 
       const evaluation = evaluateTechnicianAssessment(answersRef.current);
       const elapsedSeconds = Math.min(
@@ -249,9 +250,21 @@ export function TechnicianApplyView({
         created_at: nowIso,
       };
 
-      void submitTechnicianApplicationToServer(application);
+      const result = await submitTechnicianApplicationToServer(
+        application,
+        answersRef.current
+      );
+      if (!result.ok) {
+        hasSubmittedRef.current = false;
+        setAssessmentNotice(
+          result.error ||
+            'No se pudo enviar tu postulación al servidor. Intenta nuevamente.'
+        );
+        return;
+      }
+
       setAutoSubmitted(triggeredByTimeout);
-      setSubmittedApplication(application);
+      setSubmittedApplication(result.application);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     },
     [

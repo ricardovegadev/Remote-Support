@@ -363,7 +363,7 @@ export function TechPortalView({
   );
   const operatorDisplayName = matchedMember?.full_name ?? 'Administrador';
   const operatorRole: OrganizationRole = supabaseConfigured
-    ? (matchedMember?.role ?? 'owner')
+    ? (matchedMember?.role ?? 'technician')
     : demoRole;
   const orgDevices = devices.filter((d) => d.organization_id === activeOrg.id);
   const orgSessions = sessions.filter(
@@ -1200,6 +1200,7 @@ export function TechPortalView({
               members={orgMembers}
               tickets={orgTickets}
               currentTechId={activeTechId}
+              operatorRole={operatorRole}
               onSelectActiveTech={setActiveTechId}
               onUpdateAvailability={onUpdateMemberAvailability}
               onChangeDispatchMode={onChangeDispatchMode}

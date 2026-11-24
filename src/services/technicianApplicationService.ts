@@ -28,42 +28,43 @@ async function buildOperatorAuthHeaders(): Promise<Record<string, string>> {
 }
 
 export async function submitTechnicianApplicationToServer(
-  application: TechnicianApplication
+  application: TechnicianApplication,
+  answers?: Record<string, string>
 ): Promise<{
   ok: boolean;
   persistedRemotely: boolean;
   application: TechnicianApplication;
   error?: string;
 }> {
-  // Respaldo inmediato en navegador para modo offline / preview
-  saveTechnicianApplication(application);
-
   try {
     const res = await fetch('/api/technicians/apply', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...application,
+        answers: answers ?? {},
         nda_signature_name: application.nda_signed_name,
         timed_out: application.elapsed_seconds >= 900,
       }),
     });
-    if (!res.ok) {
-      const payload = (await res.json().catch(() => ({}))) as { error?: string };
-      return {
-        ok: true,
-        persistedRemotely: false,
-        application,
-        error: payload.error,
-      };
-    }
-    const data = (await res.json()) as {
+    const payload = (await res.json().catch(() => ({}))) as {
       success?: boolean;
       application?: Partial<TechnicianApplication>;
+      error?: string;
     };
+    if (!res.ok || !payload.success) {
+      return {
+        ok: false,
+        persistedRemotely: false,
+        application,
+        error:
+          payload.error ||
+          'No se pudo registrar tu postulación en el servidor. Intenta nuevamente.',
+      };
+    }
     const merged: TechnicianApplication = {
       ...application,
-      ...(data.application ?? {}),
+      ...(payload.application ?? {}),
     };
     saveTechnicianApplication(merged);
     return {
@@ -73,9 +74,11 @@ export async function submitTechnicianApplicationToServer(
     };
   } catch {
     return {
-      ok: true,
+      ok: false,
       persistedRemotely: false,
       application,
+      error:
+        'Error de conexión al enviar tu postulación. Verifica tu internet e intenta nuevamente.',
     };
   }
 }
@@ -162,46 +165,34 @@ export async function decideTechnicianApplication(
         ...application,
         ...(data.application ?? {}),
         status: decision,
-        email_delivery_status: data.emailDeliveryStatus ?? 'simulated',
+        email_delivery_status: data.emailDeliveryStatus ?? 'sent',
         debug_register_url: data.debugRegisterUrl,
       };
       saveTechnicianApplication(updated);
       return {
         ok: true,
         application: updated,
-        emailDeliveryStatus: data.emailDeliveryStatus ?? 'simulated',
+        emailDeliveryStatus: data.emailDeliveryStatus ?? 'sent',
         debugRegisterUrl: data.debugRegisterUrl,
       };
     }
+    return {
+      ok: false,
+      application,
+      emailDeliveryStatus: 'failed',
+      error:
+        data.error ||
+        `No se pudo procesar la decisión en el servidor (HTTP ${res.status}).`,
+    };
   } catch {
-    // Fallback local preview
+    return {
+      ok: false,
+      application,
+      emailDeliveryStatus: 'failed',
+      error:
+        'Error de red al comunicarse con el servidor para registrar la decisión.',
+    };
   }
-
-  // Fallback local/preview: genera token local de prueba
-  const nowIso = new Date().toISOString();
-  const fakeToken = Array.from(
-    globalThis.crypto.getRandomValues(new Uint8Array(32)),
-    (b) => b.toString(16).padStart(2, '0')
-  ).join('');
-  const debugUrl =
-    decision === 'approved'
-      ? `${window.location.origin}/registro-tecnico?token=${fakeToken}`
-      : undefined;
-  const updated: TechnicianApplication = {
-    ...application,
-    status: decision,
-    reviewer_notes: reviewerNotes ?? null,
-    reviewed_at: nowIso,
-    email_delivery_status: 'simulated',
-    debug_register_url: debugUrl,
-  };
-  saveTechnicianApplication(updated);
-  return {
-    ok: true,
-    application: updated,
-    emailDeliveryStatus: 'simulated',
-    debugRegisterUrl: debugUrl,
-  };
 }
 
 export interface VerifiedTechnicianInvite {

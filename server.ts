@@ -13,6 +13,7 @@ import {
   sendTechnicianApprovedEmail,
   sendTechnicianRejectedEmail,
 } from './src/server/gmailService.ts';
+import { evaluateTechnicianAssessment } from './src/utils/techEvaluation.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -921,7 +922,11 @@ function buildFallbackAssistant(input: {
 
 async function startServer() {
   const app = express();
-  if (process.env.K_SERVICE) app.set('trust proxy', 1);
+  const trustProxyRaw = Number(process.env.TRUST_PROXY);
+  app.set(
+    'trust proxy',
+    Number.isFinite(trustProxyRaw) && trustProxyRaw >= 0 ? trustProxyRaw : 1
+  );
   app.disable('x-powered-by');
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -1002,6 +1007,7 @@ async function startServer() {
   app.post(
     '/api/telemetry/events',
     createRateLimiter(60, 60_000),
+    requireOperatorAuth,
     (req, res) => {
       const body = req.body ?? {};
       const allowedCategories = new Set([
@@ -2333,16 +2339,6 @@ async function startServer() {
   const hashInviteToken = (rawToken: string): string =>
     createHash('sha256').update(rawToken.trim(), 'utf8').digest('hex');
 
-  const resolvePublicBaseUrl = (req: express.Request): string => {
-    const configured = process.env.APP_PUBLIC_URL?.trim();
-    if (configured && /^https?:\/\//i.test(configured)) {
-      return configured.replace(/\/+$/, '');
-    }
-    const proto = (req.headers['x-forwarded-proto'] as string)?.split(',')[0]?.trim() || req.protocol || 'http';
-    const host = (req.headers['x-forwarded-host'] as string)?.split(',')[0]?.trim() || req.get('host') || `localhost:${PORT}`;
-    return `${proto}://${host}`;
-  };
-
   const isAdultBirthDateIso = (birthDate: string): boolean => {
     const match = birthDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (!match) return false;
@@ -2396,15 +2392,25 @@ async function startServer() {
             : typeof body.nda_signed_name === 'string'
             ? body.nda_signed_name.trim()
             : '';
-        const technicalScore = Math.max(0, Math.min(100, Math.round(Number(body.technical_score) || 0)));
-        const attitudeScore = Math.max(0, Math.min(100, Math.round(Number(body.attitude_score) || 0)));
-        const totalScore = Math.max(0, Math.min(100, Math.round(Number(body.total_score) || Math.round((technicalScore + attitudeScore) / 2))));
-        const recommendation =
-          totalScore >= 75 && attitudeScore >= 80
-            ? 'recommended_approve'
-            : totalScore >= 60
-            ? 'manual_review'
-            : 'recommended_reject';
+
+        // Calificación estricta en servidor (nunca confiar en puntajes enviados por el cliente)
+        const rawAnswers =
+          body.answers && typeof body.answers === 'object' && !Array.isArray(body.answers)
+            ? (body.answers as Record<string, unknown>)
+            : null;
+        const sanitizedAnswers: Record<string, string> = {};
+        if (rawAnswers) {
+          for (const [qId, optId] of Object.entries(rawAnswers)) {
+            if (typeof optId === 'string' && qId.length <= 32 && optId.length <= 32) {
+              sanitizedAnswers[qId] = optId;
+            }
+          }
+        }
+        const serverEval = evaluateTechnicianAssessment(sanitizedAnswers);
+        const technicalScore = serverEval.technicalScore;
+        const attitudeScore = serverEval.attitudeScore;
+        const totalScore = serverEval.totalScore;
+        const recommendation = serverEval.recommendation;
         const timedOut = Boolean(body.timed_out);
 
         if (fullName.length < 3 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || country.length < 2) {
@@ -2473,6 +2479,14 @@ async function startServer() {
           res.status(201).json({
             success: true,
             application: sanitizeAppForAdmin(data as StoredTechnicianApplication),
+          });
+          return;
+        }
+
+        if (isProduction) {
+          res.status(503).json({
+            success: false,
+            error: 'El almacenamiento seguro de postulaciones no está configurado en producción.',
           });
           return;
         }
@@ -2587,11 +2601,35 @@ async function startServer() {
         let inviteExpiresAt: string | null = null;
         let deliveryStatus: 'sent' | 'simulated' | 'failed' = 'simulated';
 
+        if (isProduction && !supabase) {
+          res.status(503).json({
+            success: false,
+            error: 'La base de datos de postulaciones no está configurada en producción.',
+          });
+          return;
+        }
+
+        if (isProduction && !isGmailConfigured()) {
+          res.status(503).json({
+            success: false,
+            error: 'El servicio de correo SMTP no está configurado en producción.',
+          });
+          return;
+        }
+
         if (decision === 'approved') {
+          const publicBaseUrl = getPublicBaseUrl();
+          if (!publicBaseUrl) {
+            res.status(503).json({
+              success: false,
+              error: 'APP_URL HTTPS es obligatoria en producción para generar enlaces de invitación seguros.',
+            });
+            return;
+          }
           rawToken = randomBytes(32).toString('hex');
           inviteTokenHash = hashInviteToken(rawToken);
           inviteExpiresAt = new Date(Date.now() + INVITE_TTL_HOURS * 3600_000).toISOString();
-          registerUrl = `${resolvePublicBaseUrl(req)}/registro-tecnico?token=${rawToken}`;
+          registerUrl = `${publicBaseUrl}/registro-tecnico?token=${rawToken}`;
 
           const emailRes = await sendTechnicianApprovedEmail({
             to: existing.email,
@@ -2602,6 +2640,13 @@ async function startServer() {
             expiresHours: INVITE_TTL_HOURS,
           });
           deliveryStatus = emailRes.status;
+          if (isProduction && deliveryStatus !== 'sent') {
+            res.status(502).json({
+              success: false,
+              error: 'No se pudo entregar el correo de invitación al técnico.',
+            });
+            return;
+          }
         } else {
           const emailRes = await sendTechnicianRejectedEmail({
             to: existing.email,
@@ -2619,7 +2664,7 @@ async function startServer() {
           invite_expires_at: inviteExpiresAt,
           invite_used_at: null,
           email_delivery_status: deliveryStatus,
-          email_sent_at: deliveryStatus === 'sent' || deliveryStatus === 'simulated' ? nowIso : null,
+          email_sent_at: deliveryStatus === 'sent' ? nowIso : null,
           updated_at: nowIso,
         };
 
@@ -2637,15 +2682,19 @@ async function startServer() {
           }
           updatedRecord = data as StoredTechnicianApplication;
 
-          void supabase.from('audit_logs').insert({
+          const { error: auditError } = await supabase.from('audit_logs').insert({
             organization_id: updatedRecord.organization_id,
-            actor_role: 'admin',
-            event_type:
+            actor_type: 'system',
+            actor_label: reviewedBy ? `Admin (${reviewedBy.slice(0, 8)})` : 'Admin Operaciones',
+            action:
               decision === 'approved'
-                ? 'TECHNICIAN_APPLICATION_APPROVED'
-                : 'TECHNICIAN_APPLICATION_REJECTED',
-            details: `Postulación de ${updatedRecord.full_name} (${updatedRecord.email}) marcada como ${decision}. Correo Gmail: ${deliveryStatus}.`,
+                ? `Aprobó postulación técnica de ${updatedRecord.full_name} (${updatedRecord.email}) · Correo: ${deliveryStatus}`
+                : `Rechazó postulación técnica de ${updatedRecord.full_name} (${updatedRecord.email}) · Correo: ${deliveryStatus}`,
+            target_ref: `APP-${updatedRecord.id.slice(0, 8).toUpperCase()}`,
           });
+          if (auditError) {
+            console.error('[decision] audit_logs insert error:', auditError.message);
+          }
         } else {
           sandboxTechApplications.set(appId, updatedRecord);
         }
@@ -2654,8 +2703,8 @@ async function startServer() {
           success: true,
           application: sanitizeAppForAdmin(updatedRecord),
           emailDeliveryStatus: deliveryStatus,
-          // Solo devolvemos el enlace de registro en modo simulado (sin Gmail configurado) para pruebas locales
-          ...(deliveryStatus === 'simulated' && registerUrl
+          // Solo devolvemos el enlace de registro en modo local no productivo (sin Gmail configurado)
+          ...(!isProduction && deliveryStatus === 'simulated' && registerUrl
             ? { debugRegisterUrl: registerUrl }
             : {}),
         });
@@ -2686,6 +2735,13 @@ async function startServer() {
             .eq('invite_token_hash', tokenHash)
             .maybeSingle();
           record = (data as StoredTechnicianApplication) ?? null;
+        } else if (isProduction) {
+          res.status(503).json({
+            success: false,
+            code: 'invalid',
+            error: 'La verificación de invitaciones no está configurada en producción.',
+          });
+          return;
         } else {
           record =
             Array.from(sandboxTechApplications.values()).find(
@@ -2788,7 +2844,37 @@ async function startServer() {
         const nowIso = new Date().toISOString();
         let createdUserId: string = randomUUID();
 
+        if (isProduction && !supabase) {
+          res.status(503).json({
+            success: false,
+            error: 'El registro técnico seguro no está configurado en producción.',
+          });
+          return;
+        }
+
         if (supabase) {
+          // Consumo atómico del token de invitación (evita condición de carrera TOCTOU)
+          const { data: claimedInvite, error: claimErr } = await supabase
+            .from('technician_applications')
+            .update({
+              status: 'registered',
+              invite_used_at: nowIso,
+              updated_at: nowIso,
+            })
+            .eq('id', record.id)
+            .eq('status', 'approved')
+            .is('invite_used_at', null)
+            .select('id')
+            .maybeSingle();
+
+          if (claimErr || !claimedInvite) {
+            res.status(410).json({
+              success: false,
+              error: 'Este enlace de invitación ya fue utilizado o no está disponible.',
+            });
+            return;
+          }
+
           const { data: authData, error: authError } = await supabase.auth.admin.createUser({
             email: record.email,
             password,
@@ -2803,6 +2889,15 @@ async function startServer() {
           });
 
           if (authError || !authData.user) {
+            // Revertir consumo del token si falla la creación de usuario
+            await supabase
+              .from('technician_applications')
+              .update({
+                status: 'approved',
+                invite_used_at: null,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', record.id);
             res.status(409).json({
               success: false,
               error: authError?.message || 'No se pudo crear la cuenta de técnico (¿el correo ya existe?).',
@@ -2811,7 +2906,7 @@ async function startServer() {
           }
           createdUserId = authData.user.id;
 
-          await supabase.from('profiles').upsert({
+          const { error: profileErr } = await supabase.from('profiles').upsert({
             id: createdUserId,
             full_name: record.full_name,
             email: record.email,
@@ -2822,8 +2917,13 @@ async function startServer() {
             terms_accepted_at: record.nda_accepted_at,
             terms_version: record.nda_version,
           });
+          if (profileErr) {
+            console.error('[complete-registration] profiles upsert error:', profileErr.message);
+            res.status(500).json({ success: false, error: 'Error al persistir perfil de técnico.' });
+            return;
+          }
 
-          await supabase.from('organization_members').insert({
+          const { error: memberErr } = await supabase.from('organization_members').insert({
             organization_id: record.organization_id,
             user_id: createdUserId,
             full_name: record.full_name,
@@ -2833,9 +2933,14 @@ async function startServer() {
             agreed_ticket_rate_usd: 15,
             status: 'active',
           });
+          if (memberErr) {
+            console.error('[complete-registration] organization_members insert error:', memberErr.message);
+            res.status(500).json({ success: false, error: 'Error al vincular el técnico a la organización.' });
+            return;
+          }
 
-          await supabase.from('technician_profiles').upsert({
-            id: createdUserId,
+          const { error: techProfileErr } = await supabase.from('technician_profiles').upsert({
+            user_id: createdUserId,
             organization_id: record.organization_id,
             full_name: record.full_name,
             email: record.email,
@@ -2843,24 +2948,26 @@ async function startServer() {
             availability_status: 'offline',
             accepting_requests: false,
             rating: 5.0,
-            resolved_count: 0,
+            is_verified: true,
+            active_sessions_count: 0,
+            updated_at: nowIso,
           });
+          if (techProfileErr) {
+            console.error('[complete-registration] technician_profiles upsert error:', techProfileErr.message);
+            res.status(500).json({ success: false, error: 'Error al crear perfil operativo del técnico.' });
+            return;
+          }
 
-          await supabase
-            .from('technician_applications')
-            .update({
-              status: 'registered',
-              invite_used_at: nowIso,
-              updated_at: nowIso,
-            })
-            .eq('id', record.id);
-
-          void supabase.from('audit_logs').insert({
+          const { error: auditErr } = await supabase.from('audit_logs').insert({
             organization_id: record.organization_id,
-            actor_role: 'technician',
-            event_type: 'TECHNICIAN_REGISTERED_VIA_INVITE',
-            details: `Técnico ${record.full_name} (${record.email}) activó su cuenta mediante invitación de un solo uso.`,
+            actor_type: 'technician',
+            actor_label: record.full_name,
+            action: `Activó cuenta de técnico (${record.email}) mediante invitación de un solo uso.`,
+            target_ref: `TECH-${createdUserId.slice(0, 8).toUpperCase()}`,
           });
+          if (auditErr) {
+            console.error('[complete-registration] audit_logs insert error:', auditErr.message);
+          }
         } else {
           sandboxTechApplications.set(record.id, {
             ...record,
