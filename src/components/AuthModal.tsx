@@ -100,7 +100,7 @@ export function AuthModal({
         const { data: dbProfile } = await supabase
           .from('profiles')
           .select(
-            'full_name,email,role,birth_date,is_adult_verified,terms_accepted_at,terms_version,marketing_opt_in,subscription_plan,subscription_status,created_at'
+            'full_name,email,role,birth_date,is_adult_verified,terms_accepted_at,terms_version,marketing_opt_in,created_at'
           )
           .eq('id', data.user.id)
           .maybeSingle();
@@ -111,14 +111,7 @@ export function AuthModal({
           dbRole === 'admin' || dbRole === 'technician' || dbRole === 'client'
             ? dbRole
             : 'client';
-        const dbSubStatus = dbProfile?.subscription_status;
-        const resolvedSubStatus: UserAccountProfile['subscription_status'] =
-          dbSubStatus === 'active' ||
-          dbSubStatus === 'past_due' ||
-          dbSubStatus === 'canceled' ||
-          dbSubStatus === 'none'
-            ? dbSubStatus
-            : 'none';
+        const resolvedSubStatus: UserAccountProfile['subscription_status'] = 'none';
 
         const profile: UserAccountProfile = {
           id: data.user.id,
@@ -153,10 +146,7 @@ export function AuthModal({
             typeof dbProfile?.marketing_opt_in === 'boolean'
               ? dbProfile.marketing_opt_in
               : Boolean(meta.marketing_opt_in),
-          subscription_plan:
-            typeof dbProfile?.subscription_plan === 'string'
-              ? dbProfile.subscription_plan
-              : null,
+          subscription_plan: null,
           subscription_status: resolvedSubStatus,
           created_at:
             (typeof dbProfile?.created_at === 'string' && dbProfile.created_at) ||

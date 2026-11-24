@@ -29,6 +29,10 @@ import {
   getTicketStatusLabel,
   isValidEmail,
 } from '../../utils/ticketLogic';
+import {
+  hasPermission,
+  type OrganizationRole,
+} from '../../utils/rbac';
 import { TechnicianApplicationsPanel } from './TechnicianApplicationsPanel';
 
 interface WorkforceDispatchViewProps {
@@ -36,6 +40,7 @@ interface WorkforceDispatchViewProps {
   members: OrganizationMember[];
   tickets: SupportTicket[];
   currentTechId: string;
+  operatorRole?: OrganizationRole;
   onSelectActiveTech?: (techId: string) => void;
   onUpdateAvailability: (
     memberId: string,
@@ -97,12 +102,18 @@ export function WorkforceDispatchView({
   members,
   tickets,
   currentTechId,
+  operatorRole = 'technician',
   onSelectActiveTech,
   onUpdateAvailability,
   onChangeDispatchMode,
   onInviteMember,
   onClaimTicketAtomically,
 }: WorkforceDispatchViewProps) {
+  const canManageWorkforce = hasPermission(operatorRole, 'workforce:manage');
+  const canReviewApplications = hasPermission(
+    operatorRole,
+    'applications:review'
+  );
   const [tierFilter, setTierFilter] = useState<'all' | MemberTierType>('all');
   const [claimingId, setClaimingId] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -668,7 +679,7 @@ export function WorkforceDispatchView({
       </div>
 
       {/* Panel de Postulantes Técnicos (Fase 2 — Aprobación 1-clic + Gmail) */}
-      <TechnicianApplicationsPanel />
+      {canReviewApplications && <TechnicianApplicationsPanel />}
     </div>
   );
 }
