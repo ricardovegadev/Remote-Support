@@ -5,8 +5,8 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { GoogleGenAI, Type } from '@google/genai';
-import Stripe from 'stripe';
+import type { GoogleGenAI } from '@google/genai';
+import type Stripe from 'stripe';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
   isGmailConfigured,
@@ -458,7 +458,27 @@ function normalizeGeminiApiKey(raw: string | undefined): string | null {
   return value;
 }
 
-function getGeminiClient(): GoogleGenAI | null {
+let genAiSdkPromise: Promise<typeof import('@google/genai')> | null = null;
+function loadGenAiSdk(): Promise<typeof import('@google/genai')> {
+  if (!genAiSdkPromise) {
+    genAiSdkPromise = import('@google/genai');
+  }
+  return genAiSdkPromise;
+}
+
+let stripeSdkPromise: Promise<typeof import('stripe')> | null = null;
+async function createStripeClient(apiKey: string): Promise<Stripe> {
+  if (!stripeSdkPromise) {
+    stripeSdkPromise = import('stripe');
+  }
+  const { default: StripeCtor } = await stripeSdkPromise;
+  return new StripeCtor(apiKey);
+}
+
+async function getGeminiClient(): Promise<{
+  ai: GoogleGenAI;
+  Type: typeof import('@google/genai').Type;
+} | null> {
   const apiKey = normalizeGeminiApiKey(
     process.env.GEMINI_API_KEY ?? process.env.API_KEY
   );
@@ -469,14 +489,18 @@ function getGeminiClient(): GoogleGenAI | null {
   if (geminiKeyStatus === 'unconfigured') {
     geminiKeyStatus = 'ready';
   }
-  return new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
+  const { GoogleGenAI: GoogleGenAICtor, Type } = await loadGenAiSdk();
+  return {
+    ai: new GoogleGenAICtor({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
       },
-    },
-  });
+    }),
+    Type,
+  };
 }
 
 function classifyGeminiError(error: unknown): {
@@ -1225,7 +1249,7 @@ async function startServer() {
           return;
         }
 
-        const stripe = new Stripe(stripeKey);
+        const stripe = await createStripeClient(stripeKey);
         const session = await stripe.billingPortal.sessions.create({
           customer: customerId,
           return_url: `${baseUrl ?? `http://localhost:${PORT}`}/dashboard`,
@@ -1520,11 +1544,12 @@ async function startServer() {
         })
       : [];
 
-    const ai = getGeminiClient();
-    if (!ai) {
+    const gemini = await getGeminiClient();
+    if (!gemini) {
       res.json(buildFallbackReceptionist({ category, osType, description }));
       return;
     }
+    const { ai, Type } = gemini;
 
     try {
       const fallbackBaseline = classifyLaunchScenario(category, description);
@@ -1676,8 +1701,8 @@ async function startServer() {
     const rawNotes = String(req.body?.rawNotes ?? '').slice(0, 5_000);
     const includePreventive = req.body?.includePreventive !== false;
 
-    const ai = getGeminiClient();
-    if (!ai) {
+    const gemini = await getGeminiClient();
+    if (!gemini) {
       res.json(
         buildFallbackReport({
           ticketCode,
@@ -1692,6 +1717,7 @@ async function startServer() {
       );
       return;
     }
+    const { ai } = gemini;
 
     try {
       const systemInstruction = includePreventive
@@ -1760,11 +1786,12 @@ async function startServer() {
     const osType = String(req.body?.osType ?? 'Windows').slice(0, 30);
     const problemDescription = String(req.body?.problemDescription ?? '').slice(0, 4_000);
 
-    const ai = getGeminiClient();
-    if (!ai) {
+    const gemini = await getGeminiClient();
+    if (!gemini) {
       res.json(buildFallbackAssistant({ category, osType, problemDescription }));
       return;
     }
+    const { ai, Type } = gemini;
 
     try {
       const response = await withGeminiRetry(() =>
@@ -1877,8 +1904,10 @@ async function startServer() {
     }
 
     let event: Stripe.Event;
+    let stripe: Stripe;
     try {
-      event = new Stripe(stripeKey).webhooks.constructEvent(req.body, signature, webhookSecret);
+      stripe = await createStripeClient(stripeKey);
+      event = stripe.webhooks.constructEvent(req.body, signature, webhookSecret);
     } catch {
       res.status(400).json({ success: false, error: 'Firma de webhook de Stripe inválida.' });
       return;
@@ -1948,7 +1977,7 @@ async function startServer() {
             : invoiceSubscription?.id ?? null
           : subscription.id;
         const latestSubscription = subscriptionId
-          ? await new Stripe(stripeKey).subscriptions.retrieve(subscriptionId)
+          ? await stripe.subscriptions.retrieve(subscriptionId)
           : null;
         const status = latestSubscription?.status === 'canceled'
           ? 'canceled'
@@ -1982,7 +2011,7 @@ async function startServer() {
           let sessionId: string | null = null;
           let ticketCode = String(charge.metadata?.ticketCode ?? '').trim().toUpperCase();
           if (paymentIntentId) {
-            const sessions = await new Stripe(stripeKey).checkout.sessions.list({
+            const sessions = await stripe.checkout.sessions.list({
               payment_intent: paymentIntentId,
               limit: 1,
             });
@@ -2086,7 +2115,7 @@ async function startServer() {
         res.status(503).json({ success: false, error: 'Falta configurar la URL pública segura de la aplicación.' });
         return;
       }
-      const stripe = new Stripe(stripeKey);
+      const stripe = await createStripeClient(stripeKey);
       const encodedCode = encodeURIComponent(cleanTicketCode);
       const isMonthly = ticket.billing_mode === 'pyme_monthly';
       const amountCents = Math.round(amountUsd * 100);
@@ -2178,7 +2207,7 @@ async function startServer() {
         res.status(403).json({ success: false, verified: false, error: 'No se pudo autorizar la verificación de pago para este ticket.' });
         return;
       }
-      const stripe = new Stripe(stripeKey);
+      const stripe = await createStripeClient(stripeKey);
       const session = await stripe.checkout.sessions.retrieve(sessionId);
       const metadata = session.metadata ?? {};
       const addonPerformance = metadata.addonPerformance === 'true';

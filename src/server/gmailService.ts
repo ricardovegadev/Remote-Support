@@ -1,5 +1,3 @@
-import nodemailer from 'nodemailer';
-
 export interface GmailDeliveryResult {
   status: 'sent' | 'simulated' | 'failed';
   messageId?: string;
@@ -40,6 +38,7 @@ async function sendGmailMessage(params: {
   const gmailPass = process.env.GMAIL_APP_PASSWORD!.trim().replace(/\s+/g, '');
 
   try {
+    const { default: nodemailer } = await import('nodemailer');
     const transporter = nodemailer.createTransport({
       host: 'smtp.gmail.com',
       port: 465,
