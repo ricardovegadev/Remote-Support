@@ -24,7 +24,6 @@ import type {
 } from '../types/support';
 import {
   ASSESSMENT_DURATION_SECONDS,
-  evaluateTechnicianAssessment,
   TECHNICIAN_ASSESSMENT_QUESTIONS,
 } from '../utils/techEvaluation';
 import {
@@ -219,7 +218,6 @@ export function TechnicianApplyView({
       hasSubmittedRef.current = true;
       setAssessmentNotice(null);
 
-      const evaluation = evaluateTechnicianAssessment(answersRef.current);
       const elapsedSeconds = Math.min(
         ASSESSMENT_DURATION_SECONDS,
         Math.max(1, ASSESSMENT_DURATION_SECONDS - secondsLeftRef.current)
@@ -241,10 +239,10 @@ export function TechnicianApplyView({
         nda_version: NDA_TECH_VERSION,
         nda_signed_name: ndaSignedName.trim(),
         nda_accepted_at: ndaAcceptedAt ?? nowIso,
-        technical_score: evaluation.technicalScore,
-        attitude_score: evaluation.attitudeScore,
-        total_score: evaluation.totalScore,
-        recommendation: evaluation.recommendation,
+        technical_score: 0,
+        attitude_score: 0,
+        total_score: 0,
+        recommendation: 'manual_review',
         elapsed_seconds: elapsedSeconds,
         status: 'pending_review',
         created_at: nowIso,

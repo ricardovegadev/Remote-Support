@@ -14,7 +14,7 @@ import {
   sendTechnicianApprovedEmail,
   sendTechnicianRejectedEmail,
 } from './src/server/gmailService.ts';
-import { evaluateTechnicianAssessment } from './src/utils/techEvaluation.ts';
+import { evaluateTechnicianAssessment } from './src/server/techAssessmentKey.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1414,7 +1414,7 @@ async function startServer() {
       service_tier: serviceTier,
       priority,
       problem_description: description,
-      ai_diagnosis: aiDiagnosis,
+      ai_diagnosis: aiDiagnosis ? { preDiagnosis: aiDiagnosis } : {},
       ai_diagnosis_summary: aiSummary,
       client_session_token: randomBytes(32).toString('hex'),
       payment_status: 'pending',

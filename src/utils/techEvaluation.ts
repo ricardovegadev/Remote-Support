@@ -1,5 +1,3 @@
-import type { AssessmentRecommendation } from '../types/support';
-
 export type AssessmentDimension = 'technical' | 'attitude';
 
 export interface TechnicianAssessmentOption {
@@ -13,19 +11,6 @@ export interface TechnicianAssessmentQuestion {
   topic: string;
   prompt: string;
   options: TechnicianAssessmentOption[];
-  correctOptionId: string;
-}
-
-export interface TechnicianAssessmentResult {
-  technicalScore: number;
-  attitudeScore: number;
-  totalScore: number;
-  correctTechnical: number;
-  totalTechnical: number;
-  correctAttitude: number;
-  totalAttitude: number;
-  unansweredCount: number;
-  recommendation: AssessmentRecommendation;
 }
 
 export const ASSESSMENT_DURATION_SECONDS = 900;
@@ -59,7 +44,6 @@ export const TECHNICIAN_ASSESSMENT_QUESTIONS: TechnicianAssessmentQuestion[] = [
           'Eliminar entradas aleatorias del Registro de Windows (regedit) sin respaldo previo.',
       },
     ],
-    correctOptionId: 'b',
   },
   {
     id: 'tech-2',
@@ -89,7 +73,6 @@ export const TECHNICIAN_ASSESSMENT_QUESTIONS: TechnicianAssessmentQuestion[] = [
           'Desinstalar toda la suite de Microsoft 365 como única opción sin diagnosticar el perfil.',
       },
     ],
-    correctOptionId: 'c',
   },
   {
     id: 'tech-3',
@@ -119,7 +102,6 @@ export const TECHNICIAN_ASSESSMENT_QUESTIONS: TechnicianAssessmentQuestion[] = [
           'Deshabilitar el cifrado WPA2/WPA3 del router del cliente para facilitar la conexión.',
       },
     ],
-    correctOptionId: 'a',
   },
   {
     id: 'tech-4',
@@ -149,7 +131,6 @@ export const TECHNICIAN_ASSESSMENT_QUESTIONS: TechnicianAssessmentQuestion[] = [
           'Cambiar la impresora a puerto LPT1 local aunque esté conectada por red.',
       },
     ],
-    correctOptionId: 'b',
   },
   {
     id: 'tech-5',
@@ -179,7 +160,6 @@ export const TECHNICIAN_ASSESSMENT_QUESTIONS: TechnicianAssessmentQuestion[] = [
           'Solo borrar el historial de navegación sin revisar extensiones ni programas instalados.',
       },
     ],
-    correctOptionId: 'c',
   },
   {
     id: 'att-1',
@@ -209,7 +189,6 @@ export const TECHNICIAN_ASSESSMENT_QUESTIONS: TechnicianAssessmentQuestion[] = [
           'Aceptas la contraseña solo si el cliente autoriza verbalmente en el chat.',
       },
     ],
-    correctOptionId: 'b',
   },
   {
     id: 'att-2',
@@ -239,7 +218,6 @@ export const TECHNICIAN_ASSESSMENT_QUESTIONS: TechnicianAssessmentQuestion[] = [
           'Revisar el documento brevemente para confirmar si está relacionado con el rendimiento del PC.',
       },
     ],
-    correctOptionId: 'c',
   },
   {
     id: 'att-3',
@@ -269,7 +247,6 @@ export const TECHNICIAN_ASSESSMENT_QUESTIONS: TechnicianAssessmentQuestion[] = [
           'Le pasas un correo alternativo personal para futuras consultas privadas.',
       },
     ],
-    correctOptionId: 'b',
   },
   {
     id: 'att-4',
@@ -299,7 +276,6 @@ export const TECHNICIAN_ASSESSMENT_QUESTIONS: TechnicianAssessmentQuestion[] = [
           'Le pides que busque a un familiar con conocimientos técnicos antes de continuar.',
       },
     ],
-    correctOptionId: 'c',
   },
   {
     id: 'att-5',
@@ -329,69 +305,5 @@ export const TECHNICIAN_ASSESSMENT_QUESTIONS: TechnicianAssessmentQuestion[] = [
           'Le prometes que el problema se solucionará reiniciando el equipo al día siguiente.',
       },
     ],
-    correctOptionId: 'b',
   },
 ];
-
-export function evaluateTechnicianAssessment(
-  answers: Record<string, string>
-): TechnicianAssessmentResult {
-  const technicalQuestions = TECHNICIAN_ASSESSMENT_QUESTIONS.filter(
-    (q) => q.dimension === 'technical'
-  );
-  const attitudeQuestions = TECHNICIAN_ASSESSMENT_QUESTIONS.filter(
-    (q) => q.dimension === 'attitude'
-  );
-
-  let correctTechnical = 0;
-  for (const question of technicalQuestions) {
-    if (answers[question.id] === question.correctOptionId) {
-      correctTechnical += 1;
-    }
-  }
-
-  let correctAttitude = 0;
-  for (const question of attitudeQuestions) {
-    if (answers[question.id] === question.correctOptionId) {
-      correctAttitude += 1;
-    }
-  }
-
-  const totalTechnical = technicalQuestions.length;
-  const totalAttitude = attitudeQuestions.length;
-  const totalQuestions = TECHNICIAN_ASSESSMENT_QUESTIONS.length;
-
-  const answeredCount = TECHNICIAN_ASSESSMENT_QUESTIONS.filter(
-    (q) => typeof answers[q.id] === 'string' && answers[q.id].trim().length > 0
-  ).length;
-
-  const technicalScore =
-    totalTechnical > 0 ? Math.round((correctTechnical / totalTechnical) * 100) : 0;
-  const attitudeScore =
-    totalAttitude > 0 ? Math.round((correctAttitude / totalAttitude) * 100) : 0;
-  const totalScore =
-    totalQuestions > 0
-      ? Math.round(((correctTechnical + correctAttitude) / totalQuestions) * 100)
-      : 0;
-
-  let recommendation: AssessmentRecommendation;
-  if (totalScore >= 75 && attitudeScore >= 80) {
-    recommendation = 'recommended_approve';
-  } else if (totalScore >= 60) {
-    recommendation = 'manual_review';
-  } else {
-    recommendation = 'recommended_reject';
-  }
-
-  return {
-    technicalScore,
-    attitudeScore,
-    totalScore,
-    correctTechnical,
-    totalTechnical,
-    correctAttitude,
-    totalAttitude,
-    unansweredCount: Math.max(0, totalQuestions - answeredCount),
-    recommendation,
-  };
-}

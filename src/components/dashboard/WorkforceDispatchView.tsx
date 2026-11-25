@@ -450,7 +450,8 @@ export function WorkforceDispatchView({
           )}
         </div>
 
-        {/* Right 35% (4 cols): Dispatch Mode Selector */}
+        {/* Right 35% (4 cols): Dispatch Mode Selector (Admin/Owner only) */}
+        {canManageWorkforce && (
         <div className="xl:col-span-4 bg-white border border-[#E5E9F2] rounded-xl p-6 shadow-[0_1px_3px_rgba(15,23,42,0.03)] space-y-4">
           <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#2563EB]">
             <Zap className="w-4 h-4" aria-hidden="true" />
@@ -503,6 +504,7 @@ export function WorkforceDispatchView({
             })}
           </div>
         </div>
+        )}
       </div>
 
       {/* 3-Tier Flexible Workforce Management */}
