@@ -42,9 +42,12 @@ import {
 } from './ticketLogic';
 import {
   ASSESSMENT_DURATION_SECONDS,
-  evaluateTechnicianAssessment,
   TECHNICIAN_ASSESSMENT_QUESTIONS,
 } from './techEvaluation';
+import {
+  evaluateTechnicianAssessment,
+  TECH_ASSESSMENT_ANSWER_KEY,
+} from '../server/techAssessmentKey';
 import type { SupportTicket, WizardDraft } from '../types/support';
 
 test('generateTicketCode produces RS-XXXX format', () => {
@@ -432,7 +435,7 @@ test('evaluateTechnicianAssessment scores technical/attitude dimensions and reco
   // 10/10 -> recommended_approve
   const allCorrect: Record<string, string> = {};
   for (const q of TECHNICIAN_ASSESSMENT_QUESTIONS) {
-    allCorrect[q.id] = q.correctOptionId;
+    allCorrect[q.id] = TECH_ASSESSMENT_ANSWER_KEY[q.id];
   }
   const perfect = evaluateTechnicianAssessment(allCorrect);
   assert.equal(perfect.technicalScore, 100);
@@ -444,10 +447,10 @@ test('evaluateTechnicianAssessment scores technical/attitude dimensions and reco
   // 4/5 technical (80%) + 4/5 attitude (80%) -> total 80% -> recommended_approve
   const solidAnswers: Record<string, string> = {};
   technicalQuestions.forEach((q, idx) => {
-    solidAnswers[q.id] = idx < 4 ? q.correctOptionId : 'wrong';
+    solidAnswers[q.id] = idx < 4 ? TECH_ASSESSMENT_ANSWER_KEY[q.id] : 'wrong';
   });
   attitudeQuestions.forEach((q, idx) => {
-    solidAnswers[q.id] = idx < 4 ? q.correctOptionId : 'wrong';
+    solidAnswers[q.id] = idx < 4 ? TECH_ASSESSMENT_ANSWER_KEY[q.id] : 'wrong';
   });
   const solid = evaluateTechnicianAssessment(solidAnswers);
   assert.equal(solid.technicalScore, 80);
@@ -458,10 +461,10 @@ test('evaluateTechnicianAssessment scores technical/attitude dimensions and reco
   // Edge case: 5/5 technical (100%) + 3/5 attitude (60%) -> total 80% >= 75, but attitude < 80 -> manual_review
   const lowAttitudeAnswers: Record<string, string> = {};
   technicalQuestions.forEach((q) => {
-    lowAttitudeAnswers[q.id] = q.correctOptionId;
+    lowAttitudeAnswers[q.id] = TECH_ASSESSMENT_ANSWER_KEY[q.id];
   });
   attitudeQuestions.forEach((q, idx) => {
-    lowAttitudeAnswers[q.id] = idx < 3 ? q.correctOptionId : 'wrong';
+    lowAttitudeAnswers[q.id] = idx < 3 ? TECH_ASSESSMENT_ANSWER_KEY[q.id] : 'wrong';
   });
   const lowAttitude = evaluateTechnicianAssessment(lowAttitudeAnswers);
   assert.equal(lowAttitude.technicalScore, 100);
@@ -472,10 +475,10 @@ test('evaluateTechnicianAssessment scores technical/attitude dimensions and reco
   // 3/5 technical + 3/5 attitude -> total 60% -> manual_review
   const midAnswers: Record<string, string> = {};
   technicalQuestions.forEach((q, idx) => {
-    midAnswers[q.id] = idx < 3 ? q.correctOptionId : 'wrong';
+    midAnswers[q.id] = idx < 3 ? TECH_ASSESSMENT_ANSWER_KEY[q.id] : 'wrong';
   });
   attitudeQuestions.forEach((q, idx) => {
-    midAnswers[q.id] = idx < 3 ? q.correctOptionId : 'wrong';
+    midAnswers[q.id] = idx < 3 ? TECH_ASSESSMENT_ANSWER_KEY[q.id] : 'wrong';
   });
   const mid = evaluateTechnicianAssessment(midAnswers);
   assert.equal(mid.totalScore, 60);

@@ -30,6 +30,11 @@ import {
   getTicketStatusLabel,
 } from '../../utils/ticketLogic';
 
+import {
+  canAccessSection,
+  type OrganizationRole,
+} from '../../utils/rbac';
+
 interface DashboardOverviewProps {
   organization: Organization;
   tickets: SupportTicket[];
@@ -37,6 +42,7 @@ interface DashboardOverviewProps {
   sessions: RemoteSessionRecord[];
   aiAgents: AiAgentConfig[];
   supabaseConfigured: boolean;
+  operatorRole?: OrganizationRole;
   searchQuery?: string;
   onNavigateSection: (section: DashboardSection) => void;
   onSelectTicket: (ticketId: string) => void;
@@ -117,6 +123,7 @@ export function DashboardOverview({
   sessions,
   aiAgents,
   supabaseConfigured,
+  operatorRole = 'technician',
   searchQuery = '',
   onNavigateSection,
   onSelectTicket,
@@ -451,6 +458,7 @@ export function DashboardOverview({
               />
             </button>
 
+            {canAccessSection(operatorRole, 'ai_workforce') && (
             <button
               type="button"
               onClick={() => onNavigateSection('ai_workforce')}
@@ -481,7 +489,9 @@ export function DashboardOverview({
                   : 'ACTIVO'}
               </span>
             </button>
+            )}
 
+            {canAccessSection(operatorRole, 'security') && (
             <button
               type="button"
               onClick={() => onNavigateSection('security')}
@@ -504,6 +514,7 @@ export function DashboardOverview({
                 ACTIVO
               </span>
             </button>
+            )}
           </div>
         </div>
       </div>

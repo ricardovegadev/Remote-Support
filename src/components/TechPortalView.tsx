@@ -1157,6 +1157,7 @@ export function TechPortalView({
                 sessions={orgSessions}
                 aiAgents={orgAiAgents}
                 supabaseConfigured={supabaseConfigured}
+                operatorRole={operatorRole}
                 searchQuery={globalSearchQuery}
                 onNavigateSection={setActiveSection}
                 onSelectTicket={(ticketId) => {

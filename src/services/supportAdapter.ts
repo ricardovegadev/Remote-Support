@@ -1609,7 +1609,9 @@ export const supportAdapter = {
       ] = await Promise.all([
         client
           .from('tickets')
-          .select('*')
+          .select(
+            'id,ticket_code,organization_id,organization_name,category,os_type,service_tier,billing_mode,priority,problem_description,ai_diagnosis_summary,ai_diagnosis,client_name,client_email,client_birth_date,is_adult_verified,terms_accepted_at,terms_version,marketing_opt_in,subscription_status,anonymized_at,rustdesk_id,agent_type,agent_downloaded,consent_accepted,consent_accepted_at,client_nda_version,client_nda_accepted_at,payment_status,payment_reference,paid_at,status,assigned_to,assigned_technician_id,assigned_technician_name,assigned_technician_specialty,resolution_notes,claimed_at,resolved_at,created_at,stripe_subscription_id,csat_rating,csat_comment,client_confirmed_at,dispute_reason,disputed_at'
+          )
           .order('created_at', { ascending: false })
           .order('ticket_code', { ascending: false }),
         client.from('ticket_messages').select('*').order('created_at', { ascending: true }),
@@ -1734,12 +1736,13 @@ export const supportAdapter = {
         writeLocalSilentIfChanged(MEMBERS_STORAGE_KEY, remoteMembers);
       }
 
-      const rawTickets = (ticketsQuery.data as SupportTicket[] | null) ?? undefined;
-      const hydratedRemoteTickets =
+      const rawTickets = ticketsQuery.data ?? undefined;
+      const hydratedRemoteTickets: SupportTicket[] =
         rawTickets?.map((t) => ({
-          ...t,
+          ...(t as unknown as Omit<SupportTicket, 'client_session_token'>),
+          client_session_token: '',
           organization_name:
-            (t.organization_name && t.organization_name.trim()) ||
+            (typeof t.organization_name === 'string' && t.organization_name.trim()) ||
             orgLookup.get(t.organization_id) ||
             'Mi organización',
         })) ?? [];
