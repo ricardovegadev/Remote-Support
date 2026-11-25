@@ -11,10 +11,9 @@ description: Compila la aplicación real de Remote Support 365 (React + Vite + T
 - **Prohibido** iniciar servidores en `localhost` o crear archivos `.url.json`.
 - **Prohibido** usar `<agent-embed>` dentro del chat/consola; la vista previa debe entregarse como artefacto `.html` para abrir en una pestaña nueva.
 - **Prohibido** crear maquetas HTML genéricas; siempre compilar el código real de `src/main.tsx` y los estilos reales de `dist/assets/index-*.css`.
-- El artefacto resultante debe ser **100% autocontenido** (CSS, JS e imágenes `.webp`/`.png`/`.jpg`/`.svg` embebidos) y guardarse en `<ArtifactDirectory>/app_preview.html` con `ArtifactMetadata` (`UserFacing: true`, `RequestFeedback: false`).
+- **Siempre** refrescar el artefacto `<ArtifactDirectory>/app_preview.html` mediante `write_to_file` (`UserFacing: true`, `RequestFeedback: false`) en cada invocación para que la tarjeta de apertura inmediata aparezca en el turno actual.
 
 ## 3. Pasos de ejecución
 1. **Asegurar CSS de producción:** Verificar que exista `dist/assets/index-*.css`; si no existe o hubo cambios recientes, ejecutar `npm run build`.
-2. **Registrar el artefacto HTML:** Usar `write_to_file` sobre `<ArtifactDirectory>/app_preview.html` con `UserFacing: true` y `RequestFeedback: false` para que se muestre la tarjeta de artefacto que abre en pestaña nueva.
-3. **Compilar el bundle autocontenido con `esbuild`:** Compilar `src/main.tsx` con `esbuild` (`bundle: true, minify: true, format: "iife", jsx: "automatic"`, loaders `dataurl` para imágenes) junto con un shim seguro para `history` y `/api/telemetry/*` en modo sandbox.
-4. **Entregar al usuario:** Compartir únicamente el enlace/tarjeta de `app_preview.html` para abrir en una pestaña nueva (sin `<agent-embed>`).
+2. **Compilar el bundle autocontenido con `esbuild`:** Compilar `src/main.tsx` con `esbuild` (`bundle: true, minify: true, format: "iife", jsx: "automatic"`, loaders `dataurl` para imágenes) junto con un shim seguro para `history` y `/api/telemetry/*` en modo sandbox, y registrar/actualizar `<ArtifactDirectory>/app_preview.html` con `write_to_file` (`UserFacing: true`, `RequestFeedback: false`) para disparar la tarjeta en el turno actual.
+3. **Entregar al usuario:** Compartir únicamente el enlace/tarjeta de `app_preview.html` para abrir en una pestaña nueva (sin `<agent-embed>`).
