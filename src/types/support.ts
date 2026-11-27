@@ -19,6 +19,8 @@ export type TechnicianAvailability = 'available' | 'busy' | 'paused' | 'offline'
 
 export type TechnicianSpecialty =
   | 'Windows & BSOD'
+  | 'Soporte macOS'
+  | 'Soporte Linux & Servidores'
   | 'Microsoft 365 & Outlook'
   | 'Impresoras'
   | 'Redes & VPN'
@@ -178,6 +180,8 @@ export interface SupportTicket {
   problem_description: string;
   ai_diagnosis_summary: string;
   ai_diagnosis?: AiReceptionistTriage | null;
+  human_reviewed_at?: string | null;
+  human_reviewed_by?: string | null;
   client_name: string;
   client_email: string;
   client_birth_date?: string | null;
@@ -201,6 +205,9 @@ export interface SupportTicket {
   assigned_technician_id: string | null;
   assigned_technician_name: string | null;
   assigned_technician_specialty?: string | null;
+  assigned_technician_verified?: boolean;
+  assigned_technician_sessions_count?: number | null;
+  assigned_technician_rating?: number | null;
   resolution_notes: string | null;
   client_session_token: string;
   claimed_at?: string | null;
@@ -375,3 +382,58 @@ export interface AdapterResult<T> {
   error?: string;
   warning?: string;
 }
+
+export interface BusinessFeeConfig {
+  paymentFeePercent: number;
+  paymentFeeFixedUsd: number;
+  operationalCostUsd: number;
+}
+
+export interface ServiceTierConfig {
+  id: ServiceTier;
+  priceUsd: number;
+  recommended?: boolean;
+  eyebrow: string;
+  summary: string;
+  features: string[];
+}
+
+export interface PymePlanConfig {
+  id: string;
+  name: string;
+  serviceTier: ServiceTier;
+  priceUsd: number;
+  devicesLimit: string;
+  summary: string;
+  features: string[];
+}
+
+export interface SaasPlanConfig {
+  id: string;
+  name: string;
+  priceUsd: number;
+  seats: string;
+  summary: string;
+  highlighted?: boolean;
+  features: string[];
+}
+
+export interface BusinessConfig {
+  currency: 'USD';
+  feeConfig: BusinessFeeConfig;
+  serviceTiers: ServiceTierConfig[];
+  pymePlans: PymePlanConfig[];
+  saasPlans: SaasPlanConfig[];
+  commissionTiers: TechnicianCommissionTier[];
+}
+
+export interface NetCommissionBreakdown {
+  grossUsd: number;
+  paymentFeeUsd: number;
+  operationalCostUsd: number;
+  netDistributableUsd: number;
+  commissionPercent: number;
+  technicianPayoutUsd: number;
+  platformMarginUsd: number;
+}
+

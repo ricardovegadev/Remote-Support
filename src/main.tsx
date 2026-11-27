@@ -1,7 +1,11 @@
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import { AppErrorBoundary } from './components/AppErrorBoundary.tsx';
+import { initFrontendMonitoring } from './services/frontendMonitoring.ts';
 import './index.css';
+
+// Initialize background frontend error and performance monitoring (Sentry + Web Vitals)
+initFrontendMonitoring();
 
 const rootElement = document.getElementById('root');
 

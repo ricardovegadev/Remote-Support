@@ -226,7 +226,9 @@ export function TechnicianRegisterView({
                     </span>
                     <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold text-[11px]">
                       <Briefcase className="w-3 h-3" aria-hidden="true" />
-                      {invite.modality === 'full_time' ? 'Full-time' : 'Half-time'}
+                      {invite.modality === 'full_time'
+                        ? 'Disponibilidad amplia'
+                        : 'Disponibilidad parcial'}
                     </span>
                   </div>
                   <p className="text-slate-600 font-mono">{invite.email}</p>

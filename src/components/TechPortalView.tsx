@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
-  ArrowUpRight,
   Bell,
   CheckCircle2,
   Copy,
@@ -53,7 +52,9 @@ import {
   ADULT_RESTRICTION_ERROR,
   calculateAgeFromBirthDate,
   CATEGORY_OPTIONS,
+  formatCategoryForOs,
   getInitials,
+  getOsCompatibleCategory,
   isValidEmail,
   LEGAL_TERMS_VERSION,
   SERVICE_TIER_OPTIONS,
@@ -64,10 +65,10 @@ import {
 } from '../utils/rbac';
 import { recordTelemetryEvent } from '../services/telemetryService';
 
-async function hasOperatorAccess(
+async function resolveOperatorSessionProfile(
   supabase: NonNullable<ReturnType<typeof getSupabaseClient>>,
   userId: string
-): Promise<boolean> {
+): Promise<{ allowed: boolean; profileRole: string | null }> {
   const [memberResult, profileResult] = await Promise.all([
     supabase
       .from('organization_members')
@@ -77,10 +78,15 @@ async function hasOperatorAccess(
       .limit(1),
     supabase.from('profiles').select('role').eq('id', userId).maybeSingle(),
   ]);
-  return Boolean(
+  const profileRole =
+    !profileResult.error && typeof profileResult.data?.role === 'string'
+      ? profileResult.data.role
+      : null;
+  const allowed = Boolean(
     (!memberResult.error && memberResult.data?.length) ||
-    (!profileResult.error && profileResult.data?.role === 'admin')
+    profileRole === 'admin'
   );
+  return { allowed, profileRole };
 }
 import type { LegalDocTab } from './LegalDocsModal';
 import { DashboardSidebar } from './DashboardSidebar';
@@ -113,7 +119,8 @@ interface TechPortalViewProps {
   persistenceError: string | null;
   onDismissPersistenceError: () => void;
   onStartSession: (ticketId: string) => Promise<void>;
-  onMarkPaymentPaid: (ticketId: string) => Promise<void>;
+  onMarkPaymentPaid: (ticketId: string) => Promise<boolean | void>;
+  onMarkHumanReviewed?: (ticketId: string, reviewerName?: string) => Promise<void>;
   onResolveTicket: (ticketId: string, resolutionNotes: string) => Promise<void>;
   onReopenTicket: (ticketId: string) => Promise<void>;
   onSendTechnicianMessage: (
@@ -153,12 +160,22 @@ interface TechPortalViewProps {
   onCreateQuickTicket: (draft: WizardDraft) => Promise<SupportTicket | null>;
   onOpenPublicPortal: () => void;
   onOpenLegalDoc?: (tab: LegalDocTab) => void;
-  onExportOrgData?: () => void;
-  onDeletePersonalData?: () => void;
+  onExportOrgData?: (verifiedExportPayload?: unknown) => void;
+  onDeletePersonalData?: (verified?: boolean) => void | Promise<void>;
 }
 
-const LOCAL_DEMO_AUTH_KEY = 'rs365_local_demo_operator_v1';
-const LOCAL_DEMO_SIGNED_OUT_KEY = 'rs365_local_demo_signed_out_v1';
+const FALLBACK_EMPTY_ORG: Organization = {
+  id: '00000000-0000-4000-8000-000000000001',
+  name: 'Remote Support 365',
+  slug: 'remote-support-365',
+  plan_tier: 'internal_hq',
+  dispatch_mode: 'smart',
+  rustdesk_relay_domain: 'relay.remotesupport365.com',
+  payment_gateway: 'stripe_paypal',
+  ai_credits_monthly: 5000,
+  ai_credits_used: 0,
+  created_at: new Date().toISOString(),
+};
 
 const SECTION_BREADCRUMBS: Record<DashboardSection, string> = {
   overview: 'Dashboard',
@@ -187,6 +204,7 @@ export function TechPortalView({
   onDismissPersistenceError,
   onStartSession,
   onMarkPaymentPaid,
+  onMarkHumanReviewed,
   onResolveTicket,
   onReopenTicket,
   onSendTechnicianMessage,
@@ -205,38 +223,14 @@ export function TechPortalView({
   onDeletePersonalData,
 }: TechPortalViewProps) {
   const supabaseConfigured = isSupabaseConfigured();
-  const demoModeEnabled = import.meta.env.DEV && !supabaseConfigured;
 
   const [authStatus, setAuthStatus] = useState<
     'checking' | 'unauthenticated' | 'authenticated'
-  >(() => {
-    if (supabaseConfigured) return 'checking';
-    if (!import.meta.env.DEV) return 'unauthenticated';
-    if (typeof window !== 'undefined') {
-      try {
-        const signedOut =
-          window.sessionStorage.getItem(LOCAL_DEMO_SIGNED_OUT_KEY) === '1';
-        return signedOut ? 'unauthenticated' : 'authenticated';
-      } catch {
-        return 'authenticated';
-      }
-    }
-    return 'authenticated';
-  });
+  >(() => (supabaseConfigured ? 'checking' : 'unauthenticated'));
 
-  const [operatorEmail, setOperatorEmail] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        return (
-          window.sessionStorage.getItem(LOCAL_DEMO_AUTH_KEY) ??
-          'cmendoza@remotesupport365.com'
-        );
-      } catch {
-        return 'cmendoza@remotesupport365.com';
-      }
-    }
-    return 'cmendoza@remotesupport365.com';
-  });
+  const [operatorEmail, setOperatorEmail] = useState<string>('');
+  const [operatorUserId, setOperatorUserId] = useState<string | null>(null);
+  const [operatorProfileRole, setOperatorProfileRole] = useState<string | null>(null);
 
   const [authTab, setAuthTab] = useState<'login' | 'signup'>('login');
   const [signupFullName, setSignupFullName] = useState('');
@@ -311,13 +305,17 @@ export function TechPortalView({
     let mounted = true;
 
     const acceptSession = async (user: { id: string; email?: string }) => {
-      const allowed = await hasOperatorAccess(supabase, user.id);
+      const access = await resolveOperatorSessionProfile(supabase, user.id);
       if (!mounted) return;
-      if (!allowed) {
+      if (!access.allowed) {
+        setOperatorUserId(null);
+        setOperatorProfileRole(null);
         setAuthError('Tu cuenta actual no tiene una membresía técnica activa. Inicia sesión con una cuenta de operador o solicita una invitación al administrador.');
         setAuthStatus('unauthenticated');
         return;
       }
+      setOperatorUserId(user.id);
+      setOperatorProfileRole(access.profileRole);
       setOperatorEmail(user.email ?? 'tecnico@remotesupport365.com');
       setAuthError(null);
       setAuthStatus('authenticated');
@@ -326,6 +324,8 @@ export function TechPortalView({
     void supabase.auth.getSession().then(({ data, error }) => {
       if (!mounted) return;
       if (error || !data.session) {
+        setOperatorUserId(null);
+        setOperatorProfileRole(null);
         setAuthStatus('unauthenticated');
       } else {
         void acceptSession(data.session.user);
@@ -339,6 +339,8 @@ export function TechPortalView({
           setAuthStatus('checking');
           queueMicrotask(() => void acceptSession(session.user));
         } else {
+          setOperatorUserId(null);
+          setOperatorProfileRole(null);
           setAuthStatus('unauthenticated');
         }
       }
@@ -351,21 +353,34 @@ export function TechPortalView({
   }, [supabaseConfigured]);
 
   const activeOrg =
-    organizations.find((o) => o.id === activeOrgId) ?? organizations[0];
-
-  const [demoRole, setDemoRole] = useState<OrganizationRole>('owner');
+    organizations.find((o) => o.id === activeOrgId) ??
+    organizations[0] ?? { ...FALLBACK_EMPTY_ORG, id: activeOrgId || FALLBACK_EMPTY_ORG.id };
 
   const orgTickets = tickets.filter(
     (t) => !t.organization_id || t.organization_id === activeOrg.id
   );
   const orgMembers = members.filter((m) => m.organization_id === activeOrg.id);
-  const matchedMember = members.find(
-    (m) => m.email.toLowerCase() === operatorEmail.toLowerCase()
-  );
-  const operatorDisplayName = matchedMember?.full_name ?? 'Administrador';
-  const operatorRole: OrganizationRole = supabaseConfigured
-    ? (matchedMember?.role ?? 'technician')
-    : demoRole;
+  const matchedMember =
+    members.find(
+      (m) =>
+        operatorUserId &&
+        m.user_id === operatorUserId &&
+        m.organization_id === activeOrg.id
+    ) ??
+    members.find(
+      (m) =>
+        operatorEmail &&
+        m.email.toLowerCase() === operatorEmail.toLowerCase() &&
+        m.organization_id === activeOrg.id
+    ) ??
+    members.find(
+      (m) => operatorEmail && m.email.toLowerCase() === operatorEmail.toLowerCase()
+    );
+  const operatorDisplayName = matchedMember?.full_name ?? 'Operador';
+  const operatorRole: OrganizationRole =
+    operatorProfileRole === 'admin'
+      ? 'owner'
+      : (matchedMember?.role ?? 'technician');
   const orgDevices = devices.filter((d) => d.organization_id === activeOrg.id);
   const orgSessions = sessions.filter(
     (s) => s.organization_id === activeOrg.id
@@ -410,8 +425,8 @@ export function TechPortalView({
 
   const handleSupabaseSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!supabaseConfigured && !demoModeEnabled) {
-      setAuthError('El portal no está disponible hasta configurar Supabase Auth.');
+    if (!supabaseConfigured) {
+      setAuthError('Configura Supabase Auth (VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY) para autenticar operadores.');
       return;
     }
     if (!isValidEmail(loginEmail) || loginPassword.trim().length < 6) {
@@ -422,57 +437,44 @@ export function TechPortalView({
     }
     setAuthError(null);
 
-    if (supabaseConfigured) {
-      const supabase = getSupabaseClient();
-      if (!supabase) {
-        setAuthError('No se pudo inicializar el cliente de Supabase.');
-        return;
-      }
-      setAuthLoading(true);
-      try {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: loginEmail.trim(),
-          password: loginPassword,
-        });
-        if (error) {
-          setAuthError(`Autenticación rechazada: ${error.message}`);
-          return;
-        }
-        if (data.user) {
-          const allowed = await hasOperatorAccess(supabase, data.user.id);
-          if (!allowed) {
-            await supabase.auth.signOut();
-            setAuthError('Cuenta creada. Un administrador debe invitarte a una organización antes de acceder al portal técnico.');
-            return;
-          }
-          setOperatorEmail(data.user.email ?? loginEmail.trim());
-          setAuthStatus('authenticated');
-        }
-      } catch {
-        setAuthError('Error de red al conectar con Supabase Auth.');
-      } finally {
-        setAuthLoading(false);
-      }
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setAuthError('No se pudo inicializar el cliente de Supabase.');
       return;
     }
-
-    const cleanEmail = loginEmail.trim().toLowerCase();
-    if (typeof window !== 'undefined') {
-      try {
-        window.sessionStorage.removeItem(LOCAL_DEMO_SIGNED_OUT_KEY);
-        window.sessionStorage.setItem(LOCAL_DEMO_AUTH_KEY, cleanEmail);
-      } catch {
-        // Ignore restricted sessionStorage
+    setAuthLoading(true);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: loginEmail.trim(),
+        password: loginPassword,
+      });
+      if (error) {
+        setAuthError(`Autenticación rechazada: ${error.message}`);
+        return;
       }
+      if (data.user) {
+        const access = await resolveOperatorSessionProfile(supabase, data.user.id);
+        if (!access.allowed) {
+          await supabase.auth.signOut();
+          setAuthError('Cuenta creada. Un administrador debe invitarte a una organización antes de acceder al portal técnico.');
+          return;
+        }
+        setOperatorUserId(data.user.id);
+        setOperatorProfileRole(access.profileRole);
+        setOperatorEmail(data.user.email ?? loginEmail.trim());
+        setAuthStatus('authenticated');
+      }
+    } catch {
+      setAuthError('Error de red al conectar con Supabase Auth.');
+    } finally {
+      setAuthLoading(false);
     }
-    setOperatorEmail(cleanEmail);
-    setAuthStatus('authenticated');
   };
 
   const handleSupabaseSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!supabaseConfigured && !demoModeEnabled) {
-      setAuthError('El registro técnico está deshabilitado hasta configurar Supabase Auth.');
+    if (!supabaseConfigured) {
+      setAuthError('El registro técnico está deshabilitado hasta configurar Supabase Auth (VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY).');
       return;
     }
     if (signupFullName.trim().length < 2) {
@@ -507,77 +509,49 @@ export function TechPortalView({
     const cleanEmail = loginEmail.trim().toLowerCase();
     const nowIso = new Date().toISOString();
 
-    if (supabaseConfigured) {
-      const supabase = getSupabaseClient();
-      if (!supabase) {
-        setAuthError('No se pudo inicializar el cliente de Supabase.');
-        return;
-      }
-      setAuthLoading(true);
-      try {
-        const { error } = await supabase.auth.signUp({
-          email: cleanEmail,
-          password: loginPassword,
-          options: {
-            data: {
-              full_name: signupFullName.trim(),
-              birth_date: signupBirthDate,
-              is_adult_verified: true,
-              terms_accepted_at: nowIso,
-              terms_version: LEGAL_TERMS_VERSION,
-              marketing_opt_in: signupMarketingOptIn,
-            },
-          },
-        });
-        if (error) {
-          setAuthError(`Registro rechazado: ${error.message}`);
-          return;
-        }
-        const { data: currentUser } = await supabase.auth.getUser();
-        const allowed = currentUser.user
-          ? await hasOperatorAccess(supabase, currentUser.user.id)
-          : false;
-        if (!allowed) {
-          await supabase.auth.signOut();
-          setAuthError('Cuenta creada. Un administrador debe invitarte a una organización antes de acceder al portal técnico.');
-          return;
-        }
-        setOperatorEmail(cleanEmail);
-        setAuthStatus('authenticated');
-      } catch {
-        setAuthError('Error de red al conectar con Supabase Auth.');
-      } finally {
-        setAuthLoading(false);
-      }
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setAuthError('No se pudo inicializar el cliente de Supabase.');
       return;
     }
-
-    if (typeof window !== 'undefined') {
-      try {
-        window.sessionStorage.removeItem(LOCAL_DEMO_SIGNED_OUT_KEY);
-        window.sessionStorage.setItem(LOCAL_DEMO_AUTH_KEY, cleanEmail);
-      } catch {
-        // Ignore restricted sessionStorage
+    setAuthLoading(true);
+    try {
+      const { error } = await supabase.auth.signUp({
+        email: cleanEmail,
+        password: loginPassword,
+        options: {
+          data: {
+            full_name: signupFullName.trim(),
+            birth_date: signupBirthDate,
+            is_adult_verified: true,
+            terms_accepted_at: nowIso,
+            terms_version: LEGAL_TERMS_VERSION,
+            marketing_opt_in: signupMarketingOptIn,
+          },
+        },
+      });
+      if (error) {
+        setAuthError(`Registro rechazado: ${error.message}`);
+        return;
       }
-    }
-    setOperatorEmail(cleanEmail);
-    setAuthStatus('authenticated');
-  };
-
-  const handleEnterLocalDemoMode = () => {
-    if (!demoModeEnabled) return;
-    const demoEmail = 'cmendoza@remotesupport365.com';
-    if (typeof window !== 'undefined') {
-      try {
-        window.sessionStorage.removeItem(LOCAL_DEMO_SIGNED_OUT_KEY);
-        window.sessionStorage.setItem(LOCAL_DEMO_AUTH_KEY, demoEmail);
-      } catch {
-        // Ignore restricted sessionStorage
+      const { data: currentUser } = await supabase.auth.getUser();
+      const access = currentUser.user
+        ? await resolveOperatorSessionProfile(supabase, currentUser.user.id)
+        : { allowed: false, profileRole: null };
+      if (!access.allowed || !currentUser.user) {
+        await supabase.auth.signOut();
+        setAuthError('Cuenta creada. Un administrador debe invitarte a una organización antes de acceder al portal técnico.');
+        return;
       }
+      setOperatorUserId(currentUser.user.id);
+      setOperatorProfileRole(access.profileRole);
+      setOperatorEmail(cleanEmail);
+      setAuthStatus('authenticated');
+    } catch {
+      setAuthError('Error de red al conectar con Supabase Auth.');
+    } finally {
+      setAuthLoading(false);
     }
-    setOperatorEmail(demoEmail);
-    setAuthError(null);
-    setAuthStatus('authenticated');
   };
 
   const handleSignOut = async () => {
@@ -587,14 +561,9 @@ export function TechPortalView({
         await supabase.auth.signOut();
       }
     }
-    if (typeof window !== 'undefined') {
-      try {
-        window.sessionStorage.removeItem(LOCAL_DEMO_AUTH_KEY);
-        window.sessionStorage.setItem(LOCAL_DEMO_SIGNED_OUT_KEY, '1');
-      } catch {
-        // Ignore restricted sessionStorage
-      }
-    }
+    setOperatorUserId(null);
+    setOperatorProfileRole(null);
+    setOperatorEmail('');
     setLoginPassword('');
     setAuthStatus('unauthenticated');
   };
@@ -631,7 +600,7 @@ export function TechPortalView({
     try {
       const created = await onCreateQuickTicket({
         step: 3,
-        category: qtCategory,
+        category: getOsCompatibleCategory(qtCategory, qtOs),
         operatingSystem: qtOs,
         serviceTier: qtTier,
         billingMode: 'one_time',
@@ -693,9 +662,20 @@ export function TechPortalView({
               <p className="text-xs text-[#64748B] mt-2 leading-relaxed">
                 {supabaseConfigured
                   ? 'Inicia sesión con tu cuenta registrada en Supabase Auth.'
-                  : 'Modo demostración listo para operar o inicia sesión con credenciales locales.'}
+                  : 'Autenticación real requerida: configura Supabase Auth (VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY) para autenticar operadores.'}
               </p>
             </div>
+
+            {!supabaseConfigured && (
+              <div
+                role="alert"
+                data-testid="tech-auth-unconfigured"
+                className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-950 leading-relaxed"
+              >
+                Configura Supabase Auth (<span className="font-mono">VITE_SUPABASE_URL</span> y{' '}
+                <span className="font-mono">VITE_SUPABASE_ANON_KEY</span>) para autenticar operadores con RBAC real.
+              </div>
+            )}
 
             {authStatus === 'checking' ? (
               <p className="text-xs font-medium text-[#64748B] py-4">
@@ -893,7 +873,7 @@ export function TechPortalView({
 
                   <button
                     type="submit"
-                    disabled={authLoading}
+                    disabled={authLoading || !supabaseConfigured}
                     className="w-full px-4 py-2.5 text-sm font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] disabled:bg-slate-400 rounded-xl transition-colors"
                   >
                     {authLoading
@@ -903,18 +883,6 @@ export function TechPortalView({
                       : 'Crear cuenta técnica (+18)'}
                   </button>
                 </form>
-
-                {!supabaseConfigured && (
-                  <div className="pt-4 border-t border-[#E5E9F2] space-y-2.5">
-                  {demoModeEnabled && <button
-                      type="button"
-                      onClick={handleEnterLocalDemoMode}
-                      className="w-full px-4 py-2.5 text-xs font-semibold text-[#0F172A] bg-[#F8FAFC] hover:bg-slate-100 border border-[#E5E9F2] rounded-xl transition-colors"
-                    >
-                      Entrar con Cuenta de demostración
-                  </button>}
-                  </div>
-                )}
               </>
             )}
           </div>
@@ -941,9 +909,7 @@ export function TechPortalView({
         onCloseMobile={() => setMobileDrawerOpen(false)}
         operatorName={operatorDisplayName}
         operatorRole={operatorRole}
-        operatorRoleLabel={
-          supabaseConfigured ? operatorEmail : 'Cuenta de demostración'
-        }
+        operatorRoleLabel={operatorEmail || 'Operador autenticado'}
         onSignOut={() => void handleSignOut()}
         onOpenPublicPortal={onOpenPublicPortal}
       />
@@ -1005,28 +971,19 @@ export function TechPortalView({
               </kbd>
             </div>
 
-            <button
-              type="button"
-              onClick={onOpenPublicPortal}
-              className="hidden lg:inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-[#E5E9F2] bg-white hover:bg-[#F8FAFC] hover:border-[#2563EB] text-xs font-semibold text-[#0F172A] transition-colors whitespace-nowrap shrink-0"
-            >
-              <span>Portal Cliente</span>
-              <ArrowUpRight className="w-3.5 h-3.5 text-[#2563EB]" aria-hidden="true" />
-            </button>
-
             <div className="relative shrink-0">
               <button
                 type="button"
                 aria-label="Notificaciones"
                 aria-expanded={notificationsOpen}
                 onClick={() => setNotificationsOpen((prev) => !prev)}
-                className="relative w-10 h-10 rounded-full hover:bg-[#F8FAFC] flex items-center justify-center text-[#334155] transition-colors"
+                className="relative w-11 h-11 rounded-full hover:bg-[#F8FAFC] flex items-center justify-center text-[#334155] transition-colors"
               >
                 <Bell className="w-[19px] h-[19px]" strokeWidth={1.8} aria-hidden="true" />
                 {openTicketsCount > 0 && (
                   <span
                     aria-hidden="true"
-                    className="absolute top-2 right-2 w-2 h-2 rounded-full bg-[#F97316] ring-2 ring-white"
+                    className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-[#F97316] ring-2 ring-white"
                   />
                 )}
               </button>
@@ -1066,8 +1023,8 @@ export function TechPortalView({
             <details className="relative shrink-0">
               <summary
                 aria-label="Menú de cuenta de operador"
-                title={`${operatorDisplayName} · ${supabaseConfigured ? operatorEmail : 'Cuenta de demostración'}`}
-                className="list-none cursor-pointer w-10 h-10 rounded-full bg-[#EFF6FF] hover:bg-[#DBEAFE] text-[#2563EB] text-[12px] font-bold flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+                title={`${operatorDisplayName} · ${operatorEmail}`}
+                className="list-none cursor-pointer w-11 h-11 rounded-full bg-[#EFF6FF] hover:bg-[#DBEAFE] text-[#2563EB] text-[12px] font-bold flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
               >
                 {getInitials(operatorDisplayName)}
               </summary>
@@ -1075,7 +1032,7 @@ export function TechPortalView({
                 <div className="px-2.5 py-2 border-b border-[#E5E9F2]">
                   <p className="font-bold text-[#0F172A] truncate">{operatorDisplayName}</p>
                   <p className="text-[11px] text-[#64748B] truncate">
-                    {supabaseConfigured ? operatorEmail : 'Modo demostración'}
+                    {operatorEmail}
                   </p>
                 </div>
                 {FEATURE_FLAGS.ENABLE_SAAS_MULTITENANT && organizations.length > 1 && (
@@ -1088,7 +1045,7 @@ export function TechPortalView({
                         key={org.id}
                         type="button"
                         onClick={() => onSelectOrg(org.id)}
-                        className={`w-full text-left px-2.5 py-1.5 rounded-lg truncate transition-colors ${
+                        className={`w-full text-left px-2.5 py-2 rounded-lg truncate transition-colors ${
                           org.id === activeOrgId
                             ? 'bg-[#EFF6FF] text-[#2563EB] font-semibold'
                             : 'text-[#334155] hover:bg-[#F8FAFC]'
@@ -1101,15 +1058,8 @@ export function TechPortalView({
                 )}
                 <button
                   type="button"
-                  onClick={onOpenPublicPortal}
-                  className="w-full text-left px-2.5 py-2 rounded-lg text-[#0F172A] hover:bg-[#F8FAFC] font-medium"
-                >
-                  Ir al Portal Cliente
-                </button>
-                <button
-                  type="button"
                   onClick={() => void handleSignOut()}
-                  className="w-full text-left px-2.5 py-2 rounded-lg text-red-700 hover:bg-red-50 font-semibold"
+                  className="w-full min-h-[44px] text-left px-2.5 py-2 rounded-lg text-red-700 hover:bg-red-50 font-semibold"
                 >
                   Cerrar sesión
                 </button>
@@ -1120,11 +1070,6 @@ export function TechPortalView({
 
         {/* Main Viewport */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 space-y-6 max-w-[1400px] w-full mx-auto">
-          {demoModeEnabled && (
-            <div role="status" className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-950">
-              DEMO LOCAL · No autentica operadores ni sincroniza cambios con Supabase.
-            </div>
-          )}
           {persistenceError && (
             <div
               role="alert"
@@ -1184,6 +1129,11 @@ export function TechPortalView({
               onSelectTicket={setSelectedTicketId}
               onStartSession={onStartSession}
               onMarkPaymentPaid={onMarkPaymentPaid}
+              onMarkHumanReviewed={
+                onMarkHumanReviewed
+                  ? (ticketId) => onMarkHumanReviewed(ticketId, operatorDisplayName)
+                  : undefined
+              }
               onResolveTicket={onResolveTicket}
               onReopenTicket={onReopenTicket}
               onSendTechnicianMessage={onSendTechnicianMessage}
@@ -1260,15 +1210,7 @@ export function TechPortalView({
                   });
                 })();
               }}
-              demoMode={!supabaseConfigured}
-              onChangeDemoRole={(nextRole) => {
-                setDemoRole(nextRole);
-                void recordTelemetryEvent({
-                  category: 'rbac',
-                  name: `demo_role_switched_to_${nextRole}`,
-                  status: 'ok',
-                });
-              }}
+              demoMode={false}
             />
           )}
 
@@ -1281,9 +1223,9 @@ export function TechPortalView({
               onOpenSqlModal={() => setSqlModalOpen(true)}
               onSignOut={() => void handleSignOut()}
               onExportOrgData={onExportOrgData}
-              onDeletePersonalData={() => {
+              onDeletePersonalData={(verified) => {
                 void (async () => {
-                  await onDeletePersonalData?.();
+                  await onDeletePersonalData?.(verified);
                   await handleSignOut();
                 })();
               }}
@@ -1390,7 +1332,7 @@ export function TechPortalView({
                   >
                     {CATEGORY_OPTIONS.map((c) => (
                       <option key={c.id} value={c.id}>
-                        {c.label}
+                        {formatCategoryForOs(c.id, qtOs)}
                       </option>
                     ))}
                   </select>

@@ -44,7 +44,7 @@ export const RBAC_PERMISSION_CATALOG: RbacPermissionMeta[] = [
   },
   {
     id: 'tickets:claim',
-    label: 'Tomar tickets (RPC atómico)',
+    label: 'Tomar tickets de la cola',
     domain: 'Operaciones',
     description: 'Autoasignación y ejecución de sesiones remotas RustDesk.',
   },

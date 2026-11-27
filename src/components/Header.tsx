@@ -27,13 +27,11 @@ const NAV_ITEMS = [
 ];
 
 export function Header({
-  activeView,
   currentUser,
   onNavigateSection,
   onOpenTechPortal,
   onOpenAuthModal,
   onOpenTicketLookup,
-  onOpenTechnicianApply,
   onReturnHome,
 }: HeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -98,25 +96,6 @@ export function Header({
               {item.label}
             </a>
           ))}
-          {FEATURE_FLAGS.ENABLE_TECHNICIAN_RECRUITMENT && onOpenTechnicianApply && (
-            <a
-              href="/postular"
-              onClick={(e) => {
-                e.preventDefault();
-                setMobileMenuOpen(false);
-                onOpenTechnicianApply();
-              }}
-              data-testid="header-tech-apply-link"
-              aria-current={activeView === 'technician_apply' ? 'page' : undefined}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap shrink-0 border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] ${
-                activeView === 'technician_apply'
-                  ? 'bg-emerald-600 text-white border-emerald-600'
-                  : 'bg-emerald-50 text-emerald-800 border-emerald-200/90 hover:bg-emerald-100'
-              }`}
-            >
-              <span>Sé Técnico</span>
-            </a>
-          )}
         </nav>
 
         {/* Zone 3: Account access + Primary Diagnostic CTA + Secondary Tech Portal + Mobile Menu Button */}
@@ -193,31 +172,17 @@ export function Header({
                   e.preventDefault();
                   handleNavClick(item.id);
                 }}
-                className="px-3 py-2.5 text-sm font-medium text-slate-700 hover:text-[#0B1528] hover:bg-slate-50 rounded-lg transition-colors"
+                className="min-h-[44px] flex items-center px-3 py-2.5 text-sm font-medium text-slate-700 hover:text-[#0B1528] hover:bg-slate-50 rounded-lg transition-colors"
               >
                 {item.label}
               </a>
             ))}
-            {FEATURE_FLAGS.ENABLE_TECHNICIAN_RECRUITMENT && onOpenTechnicianApply && (
-              <a
-                href="/postular"
-                onClick={(e) => {
-                  e.preventDefault();
-                  setMobileMenuOpen(false);
-                  onOpenTechnicianApply();
-                }}
-                data-testid="mobile-tech-apply-link"
-                className="px-3 py-2.5 text-sm font-semibold text-emerald-800 bg-emerald-50/80 hover:bg-emerald-100/80 border border-emerald-200/80 rounded-lg transition-colors"
-              >
-                Sé Técnico (Gana 65% – 85%)
-              </a>
-            )}
           </nav>
           <div className="pt-2 border-t border-slate-100 space-y-2">
             <button
               type="button"
               onClick={() => handleNavClick('diagnostico')}
-              className="w-full px-4 py-2.5 text-sm font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-lg transition-colors"
+              className="w-full min-h-[44px] px-4 py-2.5 text-sm font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-lg transition-colors"
             >
               Iniciar diagnóstico gratuito
             </button>
@@ -228,7 +193,7 @@ export function Header({
                   setMobileMenuOpen(false);
                   onOpenTicketLookup();
                 }}
-                className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-[#0B1528] bg-emerald-50/70 hover:bg-emerald-50 border border-emerald-200 rounded-lg transition-colors"
+                className="w-full min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-[#0B1528] bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors"
               >
                 <Ticket className="w-4 h-4 text-emerald-700" aria-hidden="true" />
                 <span>Retomar mi ticket (RS-XXXX)</span>
@@ -240,7 +205,7 @@ export function Header({
                 setMobileMenuOpen(false);
                 onOpenAuthModal();
               }}
-              className="w-full px-4 py-2.5 text-sm font-semibold text-[#0B1528] bg-white hover:bg-slate-50 border border-slate-300 rounded-lg transition-colors"
+              className="w-full min-h-[44px] px-4 py-2.5 text-sm font-semibold text-[#0B1528] bg-white hover:bg-slate-50 border border-slate-300 rounded-lg transition-colors"
             >
               {currentUser ? `Cuenta (${userShortLabel})` : 'Acceder / Registrarse (+18)'}
             </button>
@@ -250,9 +215,9 @@ export function Header({
                 setMobileMenuOpen(false);
                 onOpenTechPortal();
               }}
-              className="w-full px-4 py-2.5 text-sm font-medium text-slate-600 hover:text-[#0B1528] bg-slate-50 hover:bg-slate-100 rounded-lg transition-colors"
+              className="w-full min-h-[44px] px-4 py-2.5 text-sm font-medium text-slate-700 hover:text-[#0B1528] bg-slate-50 hover:bg-slate-100 rounded-lg transition-colors"
             >
-              Centro de Operaciones (Técnicos)
+              Centro de Operaciones (Especialistas)
             </button>
           </div>
         </div>

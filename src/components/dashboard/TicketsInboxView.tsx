@@ -26,6 +26,7 @@ import {
   buildRustDeskDeepLink,
   buildTechnicalResolutionSummary,
   deriveTicketPriority,
+  formatCategoryForOs,
   formatRustDeskId,
   getInitials,
   getPaymentStatusLabel,
@@ -33,6 +34,7 @@ import {
   getServiceTierPriceUsd,
   getStatusBadgeClass,
   getTicketStatusLabel,
+  sortTicketsByUrgencyAndSla,
 } from '../../utils/ticketLogic';
 import { TicketChatPanel } from '../TicketChatPanel';
 
@@ -45,7 +47,8 @@ interface TicketsInboxViewProps {
   externalSearchQuery?: string;
   onSelectTicket: (ticketId: string) => void;
   onStartSession: (ticketId: string) => Promise<void>;
-  onMarkPaymentPaid: (ticketId: string) => Promise<void>;
+  onMarkPaymentPaid: (ticketId: string) => Promise<boolean | void>;
+  onMarkHumanReviewed?: (ticketId: string) => Promise<void>;
   onResolveTicket: (ticketId: string, resolutionNotes: string) => Promise<void>;
   onReopenTicket: (ticketId: string) => Promise<void>;
   onSendTechnicianMessage: (ticketId: string, text: string) => Promise<void>;
@@ -62,6 +65,7 @@ export function TicketsInboxView({
   onSelectTicket,
   onStartSession,
   onMarkPaymentPaid,
+  onMarkHumanReviewed,
   onResolveTicket,
   onReopenTicket,
   onSendTechnicianMessage,
@@ -93,18 +97,20 @@ export function TicketsInboxView({
     setAssistantData(null);
   }, [organizationId]);
 
-  const filteredTickets = tickets.filter((ticket) => {
-    const matchesStatus =
-      statusFilter === 'all' || ticket.status === statusFilter;
-    const q = searchQuery.trim().toLowerCase();
-    const matchesQuery =
-      !q ||
-      ticket.ticket_code.toLowerCase().includes(q) ||
-      ticket.client_name.toLowerCase().includes(q) ||
-      ticket.category.toLowerCase().includes(q) ||
-      ticket.problem_description.toLowerCase().includes(q);
-    return matchesStatus && matchesQuery;
-  });
+  const filteredTickets = sortTicketsByUrgencyAndSla(
+    tickets.filter((ticket) => {
+      const matchesStatus =
+        statusFilter === 'all' || ticket.status === statusFilter;
+      const q = searchQuery.trim().toLowerCase();
+      const matchesQuery =
+        !q ||
+        ticket.ticket_code.toLowerCase().includes(q) ||
+        ticket.client_name.toLowerCase().includes(q) ||
+        ticket.category.toLowerCase().includes(q) ||
+        ticket.problem_description.toLowerCase().includes(q);
+      return matchesStatus && matchesQuery;
+    })
+  );
 
   const activeTicket =
     tickets.find((t) => t.id === selectedTicketId) ?? filteredTickets[0] ?? null;
@@ -281,7 +287,7 @@ export function TicketsInboxView({
                 role="tab"
                 aria-selected={active}
                 onClick={() => setStatusFilter(tab.id)}
-                className={`px-3.5 py-1.5 text-xs font-semibold rounded-full border transition-colors whitespace-nowrap ${
+                className={`min-h-[44px] sm:min-h-0 px-3.5 py-2 sm:py-1.5 text-xs font-semibold rounded-full border transition-colors whitespace-nowrap ${
                   active
                     ? 'bg-[#2563EB] text-white border-[#2563EB] shadow-sm'
                     : 'bg-white text-[#64748B] border-[#E5E9F2] hover:text-[#0F172A] hover:border-slate-300'
@@ -304,7 +310,7 @@ export function TicketsInboxView({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Filtrar RS-XXXX, cliente o falla..."
-            className="w-full rounded-full border border-[#E5E9F2] bg-white pl-10 pr-4 py-2 text-xs text-[#0F172A] placeholder:text-slate-500 focus:border-[#2563EB] focus:outline-none"
+            className="w-full min-h-[44px] sm:min-h-0 rounded-full border border-[#E5E9F2] bg-white pl-10 pr-4 py-2 text-xs text-[#0F172A] placeholder:text-slate-500 focus:border-[#2563EB] focus:outline-none"
           />
         </div>
       </div>
@@ -313,6 +319,12 @@ export function TicketsInboxView({
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
         {/* Left List */}
         <div className="xl:col-span-5 space-y-3">
+          <div className="flex items-center justify-between px-1 text-[11px] text-[#64748B]">
+            <span className="font-semibold text-[#0F172A]">
+              Cola priorizada por urgencia y SLA
+            </span>
+            <span className="tabular-nums">{filteredTickets.length} solicitudes</span>
+          </div>
           {filteredTickets.length === 0 ? (
             <div className="bg-white border border-[#E5E9F2] rounded-xl p-8 text-center text-xs text-[#64748B] shadow-[0_1px_3px_rgba(15,23,42,0.03)]">
               No hay solicitudes que coincidan con este filtro.
@@ -343,8 +355,11 @@ export function TicketsInboxView({
                         <p className="text-sm font-semibold text-[#0F172A] truncate">
                           {ticket.client_name}
                         </p>
-                        <p className="font-mono tabular-nums text-[11px] font-semibold text-[#64748B]">
-                          {ticket.ticket_code} · {ticket.os_type}
+                        <p className="text-[11px] font-medium text-[#64748B]">
+                          <span className="font-mono font-semibold text-[#0F172A]">
+                            {ticket.ticket_code}
+                          </span>{' '}
+                          · {ticket.os_type}
                         </p>
                       </div>
                     </div>
@@ -368,7 +383,13 @@ export function TicketsInboxView({
                     >
                       {getTicketStatusLabel(ticket.status)}
                     </span>
-                    <span className="font-mono tabular-nums text-[#64748B]">
+                    <span
+                      className={
+                        ticket.rustdesk_id
+                          ? 'font-mono tabular-nums text-[#475569]'
+                          : 'text-[#64748B]'
+                      }
+                    >
                       {ticket.rustdesk_id
                         ? formatRustDeskId(ticket.rustdesk_id)
                         : 'Sin ID RustDesk'}
@@ -416,6 +437,7 @@ export function TicketsInboxView({
 
                   <p className="text-xs text-[#64748B]">
                     {activeTicket.client_email} · {activeTicket.os_type} ·{' '}
+                    {formatCategoryForOs(activeTicket.category, activeTicket.os_type)} ·{' '}
                     {activeTicket.service_tier} ($
                     {getServiceTierPriceUsd(activeTicket.service_tier)} USD ·{' '}
                     {getPaymentStatusLabel(activeTicket.payment_status)})
@@ -457,30 +479,52 @@ export function TicketsInboxView({
                         <span>Diagnóstico AI Receptionist</span>
                       </span>
                       <span className="inline-flex items-center px-2 py-0.5 rounded bg-blue-50 border border-blue-200 text-[10px] font-semibold text-[#1D4ED8]">
-                        ✦ Generado por IA · Revisado por especialista
+                        ✦ Generado por IA
                       </span>
+                      {activeTicket.human_reviewed_at && activeTicket.human_reviewed_by && (
+                        <span
+                          data-testid="inbox-human-reviewed-badge"
+                          className="inline-flex items-center px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-[10px] font-semibold text-emerald-800"
+                        >
+                          Revisado por {activeTicket.human_reviewed_by}
+                        </span>
+                      )}
                     </div>
 
-                    <button
-                      type="button"
-                      disabled={assistantLoading || !assistantEnabled}
-                      onClick={() => void handleAskTechnicianAssistant()}
-                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#2563EB] hover:text-[#1D4ED8] disabled:text-slate-500"
-                    >
-                      {assistantLoading ? (
-                        <Loader2
-                          className="w-3.5 h-3.5 animate-spin"
-                          aria-hidden="true"
-                        />
-                      ) : (
-                        <Bot className="w-3.5 h-3.5" aria-hidden="true" />
+                    <div className="flex flex-wrap items-center gap-3">
+                      {onMarkHumanReviewed && !activeTicket.human_reviewed_at && (
+                        <button
+                          type="button"
+                          data-testid="mark-human-reviewed-btn"
+                          onClick={() => void onMarkHumanReviewed(activeTicket.id)}
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 hover:text-emerald-900"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
+                          <span>Marcar como revisado</span>
+                        </button>
                       )}
-                      <span>
-                        {assistantEnabled
-                          ? 'AI Technician Assistant'
-                          : 'Asistente IA pausado'}
-                      </span>
-                    </button>
+
+                      <button
+                        type="button"
+                        disabled={assistantLoading || !assistantEnabled}
+                        onClick={() => void handleAskTechnicianAssistant()}
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#2563EB] hover:text-[#1D4ED8] disabled:text-slate-500"
+                      >
+                        {assistantLoading ? (
+                          <Loader2
+                            className="w-3.5 h-3.5 animate-spin"
+                            aria-hidden="true"
+                          />
+                        ) : (
+                          <Bot className="w-3.5 h-3.5" aria-hidden="true" />
+                        )}
+                        <span>
+                          {assistantEnabled
+                            ? 'AI Technician Assistant'
+                            : 'Asistente IA pausado'}
+                        </span>
+                      </button>
+                    </div>
                   </div>
 
                   <p className="text-xs text-[#475569] leading-relaxed">
@@ -494,7 +538,7 @@ export function TicketsInboxView({
                           Checklist sugerido:
                         </p>
                         <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-50 border border-blue-200 text-[10px] font-semibold text-[#1D4ED8]">
-                          ✦ Generado por IA · Revisado por especialista
+                          ✦ Generado por IA
                         </span>
                       </div>
                       <ul className="space-y-1 text-xs text-[#475569] list-disc pl-4">
@@ -623,8 +667,13 @@ export function TicketsInboxView({
                       Cierre e Informe IA
                     </h3>
                     <span className="inline-flex items-center px-2 py-0.5 rounded bg-blue-50 border border-blue-200 text-[10px] font-semibold text-[#1D4ED8]">
-                      ✦ Generado por IA · Revisado por especialista
+                      ✦ Generado por IA
                     </span>
+                    {activeTicket.human_reviewed_at && activeTicket.human_reviewed_by && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-[10px] font-semibold text-emerald-800">
+                        Revisado por {activeTicket.human_reviewed_by}
+                      </span>
+                    )}
                   </div>
 
                   {activeTicket.status !== 'resolved' && (

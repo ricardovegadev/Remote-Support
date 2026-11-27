@@ -20,6 +20,8 @@ import {
 } from '../utils/ticketLogic';
 import type { LegalDocTab } from './LegalDocsModal';
 
+import { supportAdapter } from '../services/supportAdapter';
+
 interface AuthModalProps {
   isOpen: boolean;
   currentUser: UserAccountProfile | null;
@@ -27,8 +29,8 @@ interface AuthModalProps {
   onAuthenticated: (profile: UserAccountProfile) => void;
   onSignOut: () => void;
   onOpenLegalDoc: (tab: LegalDocTab) => void;
-  onExportUserData: () => void;
-  onDeleteUserData: () => void;
+  onExportUserData: (verifiedExportPayload?: unknown) => void;
+  onDeleteUserData: (verified?: boolean) => void;
 }
 
 export function AuthModal({
@@ -52,6 +54,15 @@ export function AuthModal({
   const [authInfo, setAuthInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [otpChallenge, setOtpChallenge] = useState<{
+    action: 'export' | 'erase';
+    challengeId: string;
+    maskedEmail: string;
+    devOtpPreview?: string;
+  } | null>(null);
+  const [otpInput, setOtpInput] = useState('');
+  const [otpBusy, setOtpBusy] = useState(false);
+  const [otpError, setOtpError] = useState<string | null>(null);
 
   const supabaseConfigured = isSupabaseConfigured();
 
@@ -60,6 +71,9 @@ export function AuthModal({
     setAuthError(null);
     setAuthInfo(null);
     setConfirmDeleteOpen(false);
+    setOtpChallenge(null);
+    setOtpInput('');
+    setOtpError(null);
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
@@ -390,51 +404,220 @@ export function AuthModal({
             </div>
 
             <div className="space-y-2.5">
-              <button
-                type="button"
-                onClick={onExportUserData}
-                className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-[#0B192C] bg-white hover:bg-slate-50 border border-slate-300 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
-              >
-                <Download className="w-4 h-4 text-[#2563EB]" aria-hidden="true" />
-                <span>Descargar mis datos (JSON)</span>
-              </button>
-
-              {confirmDeleteOpen ? (
-                <div className="p-3.5 rounded-lg bg-red-50 border border-red-200 space-y-2.5 text-xs">
-                  <p className="font-semibold text-red-900">
-                    ¿Confirmas eliminar y anonimizar tus datos personales? Esta acción
-                    se registra en auditoría y cierra tu sesión.
+              {otpChallenge ? (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (otpBusy) return;
+                    setOtpBusy(true);
+                    setOtpError(null);
+                    void (async () => {
+                      try {
+                        const supabase = supabaseConfigured ? getSupabaseClient() : null;
+                        const sessionRes = supabase ? await supabase.auth.getSession() : null;
+                        const accessToken = sessionRes?.data.session?.access_token ?? null;
+                        if (otpChallenge.action === 'export') {
+                          const verifyRes = await supportAdapter.exportPrivacyDataWithOtp({
+                            challengeId: otpChallenge.challengeId,
+                            otpCode: otpInput,
+                            email: currentUser.email,
+                            accessToken,
+                          });
+                          if (!verifyRes.ok) {
+                            setOtpError(verifyRes.error ?? 'Código OTP inválido.');
+                            return;
+                          }
+                          onExportUserData(verifyRes.exportPayload);
+                          setOtpChallenge(null);
+                          setOtpInput('');
+                          setAuthInfo('Verificación OTP completada. Archivo JSON exportado.');
+                        } else {
+                          const verifyRes = await supportAdapter.erasePrivacyDataWithOtp({
+                            challengeId: otpChallenge.challengeId,
+                            otpCode: otpInput,
+                            email: currentUser.email,
+                            accessToken,
+                          });
+                          if (!verifyRes.ok) {
+                            setOtpError(verifyRes.error ?? 'Código OTP inválido.');
+                            return;
+                          }
+                          onDeleteUserData(true);
+                          setOtpChallenge(null);
+                          setConfirmDeleteOpen(false);
+                          onClose();
+                        }
+                      } finally {
+                        setOtpBusy(false);
+                      }
+                    })();
+                  }}
+                  className="p-3.5 rounded-xl bg-[#F8FAFC] border border-slate-300 space-y-2.5 text-xs"
+                >
+                  <p className="font-semibold text-[#0B192C]">
+                    Código OTP enviado a <span className="font-mono">{otpChallenge.maskedEmail}</span>
                   </p>
+                  {otpChallenge.devOtpPreview && (
+                    <p className="text-[11px] font-mono bg-amber-50 border border-amber-200 text-amber-950 rounded px-2 py-1">
+                      Sandbox OTP: {otpChallenge.devOtpPreview}
+                    </p>
+                  )}
+                  <div>
+                    <label htmlFor="auth-privacy-otp-input" className="block text-[11px] font-medium text-slate-700 mb-1">
+                      Ingresa el código de 6 dígitos
+                    </label>
+                    <input
+                      id="auth-privacy-otp-input"
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={6}
+                      value={otpInput}
+                      onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      placeholder="000000"
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm tracking-widest text-[#0B192C]"
+                    />
+                  </div>
+                  {otpError && (
+                    <p role="alert" className="text-[11px] font-medium text-red-700">{otpError}</p>
+                  )}
                   <div className="flex items-center justify-end gap-2">
                     <button
                       type="button"
-                      onClick={() => setConfirmDeleteOpen(false)}
+                      onClick={() => {
+                        setOtpChallenge(null);
+                        setOtpInput('');
+                        setOtpError(null);
+                      }}
                       className="px-3 py-1.5 font-medium text-slate-700 bg-white border border-slate-300 rounded-lg"
                     >
                       Cancelar
                     </button>
                     <button
-                      type="button"
-                      onClick={() => {
-                        onDeleteUserData();
-                        setConfirmDeleteOpen(false);
-                        onClose();
-                      }}
-                      className="px-3 py-1.5 font-semibold text-white bg-red-700 hover:bg-red-800 rounded-lg"
+                      type="submit"
+                      disabled={otpBusy || otpInput.length !== 6}
+                      className="px-3 py-1.5 font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] disabled:bg-slate-400 rounded-lg"
                     >
-                      Confirmar eliminación
+                      {otpBusy
+                        ? 'Verificando...'
+                        : otpChallenge.action === 'export'
+                        ? 'Verificar y descargar'
+                        : 'Verificar y eliminar'}
                     </button>
                   </div>
-                </div>
+                </form>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => setConfirmDeleteOpen(true)}
-                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-red-700 bg-white hover:bg-red-50 border border-red-200 rounded-lg transition-colors"
-                >
-                  <Trash2 className="w-4 h-4" aria-hidden="true" />
-                  <span>Eliminar mis datos personales</span>
-                </button>
+                <>
+                  <button
+                    type="button"
+                    disabled={otpBusy}
+                    onClick={() => {
+                      setOtpBusy(true);
+                      setOtpError(null);
+                      setAuthInfo(null);
+                      void (async () => {
+                        try {
+                          const supabase = supabaseConfigured ? getSupabaseClient() : null;
+                          const sessionRes = supabase ? await supabase.auth.getSession() : null;
+                          const accessToken = sessionRes?.data.session?.access_token ?? null;
+                          const res = await supportAdapter.requestPrivacyOtp({
+                            action: 'export',
+                            email: currentUser.email,
+                            fullName: currentUser.full_name,
+                            accessToken,
+                          });
+                          if (!res.ok || !res.challengeId) {
+                            setOtpError(res.error ?? 'No se pudo enviar el código OTP.');
+                            return;
+                          }
+                          setOtpInput('');
+                          setOtpChallenge({
+                            action: 'export',
+                            challengeId: res.challengeId,
+                            maskedEmail: res.maskedEmail ?? '***',
+                            devOtpPreview: res.devOtpPreview,
+                          });
+                        } finally {
+                          setOtpBusy(false);
+                        }
+                      })();
+                    }}
+                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-[#0B192C] bg-white hover:bg-slate-50 border border-slate-300 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] disabled:opacity-60"
+                  >
+                    <Download className="w-4 h-4 text-[#2563EB]" aria-hidden="true" />
+                    <span>Descargar mis datos (JSON)</span>
+                  </button>
+
+                  {confirmDeleteOpen ? (
+                    <div className="p-3.5 rounded-lg bg-red-50 border border-red-200 space-y-2.5 text-xs">
+                      <p className="font-semibold text-red-900">
+                        Para eliminar y anonimizar tus datos personales enviaremos un código OTP a tu correo.
+                      </p>
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteOpen(false)}
+                          className="px-3 py-1.5 font-medium text-slate-700 bg-white border border-slate-300 rounded-lg"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          disabled={otpBusy}
+                          onClick={() => {
+                            setOtpBusy(true);
+                            setOtpError(null);
+                            void (async () => {
+                              try {
+                                const supabase = supabaseConfigured ? getSupabaseClient() : null;
+                                const sessionRes = supabase ? await supabase.auth.getSession() : null;
+                                const accessToken = sessionRes?.data.session?.access_token ?? null;
+                                const res = await supportAdapter.requestPrivacyOtp({
+                                  action: 'erase',
+                                  email: currentUser.email,
+                                  fullName: currentUser.full_name,
+                                  accessToken,
+                                });
+                                if (!res.ok || !res.challengeId) {
+                                  setOtpError(res.error ?? 'No se pudo enviar el código OTP.');
+                                  return;
+                                }
+                                setOtpInput('');
+                                setConfirmDeleteOpen(false);
+                                setOtpChallenge({
+                                  action: 'erase',
+                                  challengeId: res.challengeId,
+                                  maskedEmail: res.maskedEmail ?? '***',
+                                  devOtpPreview: res.devOtpPreview,
+                                });
+                              } finally {
+                                setOtpBusy(false);
+                              }
+                            })();
+                          }}
+                          className="px-3 py-1.5 font-semibold text-white bg-red-700 hover:bg-red-800 disabled:bg-slate-400 rounded-lg"
+                        >
+                          Enviar código OTP
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteOpen(true)}
+                      className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-red-700 bg-white hover:bg-red-50 border border-red-200 rounded-lg transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" aria-hidden="true" />
+                      <span>Eliminar mis datos personales</span>
+                    </button>
+                  )}
+                </>
+              )}
+
+              {!otpChallenge && otpError && (
+                <p role="alert" className="text-xs font-medium text-red-700">{otpError}</p>
+              )}
+              {authInfo && (
+                <p className="text-xs font-medium text-emerald-700">{authInfo}</p>
               )}
             </div>
 

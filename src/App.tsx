@@ -5,10 +5,13 @@ import {
   type ExternalTriageTrigger,
 } from './components/DiagnosticWizard';
 import { Footer } from './components/Footer';
+import { FaqSection } from './components/FaqSection';
 import { Header } from './components/Header';
 import { HeroSection } from './components/HeroSection';
 import { LandingSections } from './components/LandingSections';
 import type { LegalDocTab } from './components/LegalDocsModal';
+import { ScrollReveal } from './components/ScrollReveal';
+import { StickySectionNav } from './components/StickySectionNav';
 import { FEATURE_FLAGS } from './config/features';
 import { getSupabaseClient, isSupabaseConfigured } from './lib/supabaseClient';
 
@@ -104,6 +107,19 @@ function resolveAppRoute(pathname: string): { view: AppView; ticketCode: string 
   return parsed;
 }
 
+function consumeRoomTokenFromUrl(ticketCode: string | null): void {
+  if (typeof window === 'undefined' || !ticketCode) return;
+  const params = new URLSearchParams(window.location.search);
+  if (params.has('payment') || params.get('gateway') === 'paypal') return;
+  const urlToken = params.get('token')?.trim();
+  if (!urlToken) return;
+  supportAdapter.saveRoomToken(ticketCode, urlToken);
+  params.delete('token');
+  const nextQuery = params.toString();
+  const cleanUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ''}${window.location.hash}`;
+  window.history.replaceState(window.history.state, '', cleanUrl);
+}
+
 export default function App() {
   const initialRoute =
     typeof window !== 'undefined'
@@ -146,10 +162,21 @@ export default function App() {
   const [messages, setMessages] = useState<TicketMessage[]>(() =>
     supportAdapter.loadMessages()
   );
-  const [activeTicketCode, setActiveTicketCode] = useState<string | null>(
-    initialRoute.ticketCode
-  );
+  const [activeTicketCode, setActiveTicketCode] = useState<string | null>(() => {
+    if (initialRoute.view === 'connection_room' && initialRoute.ticketCode) {
+      consumeRoomTokenFromUrl(initialRoute.ticketCode);
+    }
+    return initialRoute.ticketCode;
+  });
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
+  const [roomAccessState, setRoomAccessState] = useState<
+    'idle' | 'checking' | 'authorized' | 'denied'
+  >(() =>
+    initialRoute.view === 'connection_room' && initialRoute.ticketCode
+      ? 'checking'
+      : 'idle'
+  );
+  const [roomAccessError, setRoomAccessError] = useState<string | null>(null);
 
   const [currentUser, setCurrentUser] = useState<UserAccountProfile | null>(() =>
     supportAdapter.loadUserProfile()
@@ -162,6 +189,58 @@ export default function App() {
   );
 
   const [isHydratingSession, setIsHydratingSession] = useState<boolean>(false);
+  const heroSectionRef = useRef<HTMLDivElement | null>(null);
+  const wizardSectionRef = useRef<HTMLDivElement | null>(null);
+  const landingSectionRef = useRef<HTMLDivElement | null>(null);
+  const faqSectionRef = useRef<HTMLDivElement | null>(null);
+
+  const [visibleSections, setVisibleSections] = useState({
+    hero: true,
+    wizard: false,
+    landing: false,
+    faq: false,
+  });
+
+  useEffect(() => {
+    if (activeView !== 'landing') return;
+    if (typeof window === 'undefined' || typeof IntersectionObserver !== 'function') {
+      setVisibleSections({ hero: true, wizard: true, landing: true, faq: true });
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const id = entry.target.getAttribute('data-section-id');
+            if (id) {
+              setVisibleSections((prev) => ({ ...prev, [id]: true }));
+            }
+          }
+        });
+      },
+      {
+        threshold: 0.05,
+        rootMargin: '0px 0px -40px 0px',
+      }
+    );
+
+    const nodes = [
+      heroSectionRef.current,
+      wizardSectionRef.current,
+      landingSectionRef.current,
+      faqSectionRef.current,
+    ];
+
+    nodes.forEach((node) => {
+      if (node) observer.observe(node);
+    });
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [activeView]);
+
   const syncRequestSeqRef = useRef(0);
   const ticketsRef = useRef<SupportTicket[]>(tickets);
   ticketsRef.current = tickets;
@@ -215,12 +294,79 @@ export default function App() {
 
     const onPopState = () => {
       const parsed = resolveAppRoute(window.location.pathname);
+      if (parsed.view === 'connection_room' && parsed.ticketCode) {
+        consumeRoomTokenFromUrl(parsed.ticketCode);
+      }
       setActiveView(parsed.view);
       setActiveTicketCode(parsed.ticketCode);
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
+
+  useEffect(() => {
+    if (activeView !== 'connection_room' || !activeTicketCode) {
+      setRoomAccessState('idle');
+      setRoomAccessError(null);
+      return;
+    }
+    consumeRoomTokenFromUrl(activeTicketCode);
+    let cancelled = false;
+    setRoomAccessState('checking');
+    setRoomAccessError(null);
+
+    void (async () => {
+      const storedToken = supportAdapter.getRoomToken(activeTicketCode);
+      let operatorAccessToken: string | null = null;
+      if (!storedToken && isSupabaseConfigured()) {
+        const supabase = getSupabaseClient();
+        const sessionRes = supabase ? await supabase.auth.getSession() : null;
+        operatorAccessToken = sessionRes?.data.session?.access_token ?? null;
+      }
+
+      const authRes = await supportAdapter.fetchAuthorizedRoomTicket(
+        activeTicketCode,
+        storedToken,
+        operatorAccessToken
+      );
+      if (cancelled) return;
+
+      if (!authRes.ok || !authRes.ticket) {
+        setRoomAccessState('denied');
+        setRoomAccessError(
+          authRes.error ?? 'Acceso denegado: se requiere el token privado válido de esta sala.'
+        );
+        return;
+      }
+
+      const serverTicket = authRes.ticket;
+      setTickets((prev) => {
+        const merged = sortTicketsDeterministically([
+          serverTicket,
+          ...prev.filter(
+            (t) =>
+              t.id !== serverTicket.id &&
+              String(t.ticket_code).toUpperCase() !==
+                String(serverTicket.ticket_code).toUpperCase()
+          ),
+        ]);
+        supportAdapter.saveTickets(merged);
+        return merged;
+      });
+      if (authRes.messages && authRes.messages.length > 0) {
+        const incoming = authRes.messages;
+        setMessages((prev) => {
+          const incomingIds = new Set(incoming.map((m) => m.id));
+          return [...prev.filter((m) => !incomingIds.has(m.id)), ...incoming];
+        });
+      }
+      setRoomAccessState('authorized');
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeView, activeTicketCode]);
 
   useEffect(() => {
     let isMounted = true;
@@ -643,13 +789,14 @@ export default function App() {
     return true;
   };
 
-  const handleConfirmPayment = async (ticketId: string) => {
+  const handleConfirmPayment = async (ticketId: string): Promise<boolean> => {
+    const target = tickets.find((ticket) => ticket.id === ticketId);
+    if (!target) {
+      setPersistenceError('No se encontró el ticket para verificar el estado de pago.');
+      return false;
+    }
+
     if (isSupabaseConfigured()) {
-      const target = tickets.find((ticket) => ticket.id === ticketId);
-      if (!target) {
-        setPersistenceError('No se encontró el ticket para verificar el estado de pago.');
-        return;
-      }
       const isOperatorPortal = activeViewRef.current === 'tech_portal';
       const refreshed = await supportAdapter.syncFromSupabaseIfConfigured(
         isOperatorPortal ? undefined : { ticketCode: target.ticket_code }
@@ -668,12 +815,12 @@ export default function App() {
           refreshed.error ??
             (isOperatorPortal
               ? 'El pago aún figura pendiente en el servidor. El cliente debe completar el checkout antes de iniciar la sesión.'
-              : 'El pago aún no aparece confirmado en el servidor. Intenta verificar nuevamente en unos segundos.')
+              : 'El pago aún no aparece confirmado por el webhook en el servidor. Intenta verificar nuevamente en unos segundos.')
         );
-        return;
+        return false;
       }
       setPersistenceError(null);
-      return;
+      return true;
     }
 
     const result = await supportAdapter.confirmPaymentAndReady(
@@ -682,11 +829,12 @@ export default function App() {
       getTicketScope(ticketId)
     );
     if (!result.ok) {
-      setPersistenceError(result.error ?? 'Error al confirmar el pago.');
-      return;
+      setPersistenceError(result.error ?? 'El pago aún no está confirmado por webhook.');
+      return false;
     }
     setPersistenceError(null);
     setTickets(result.data);
+    return true;
   };
 
   const handleStartSession = async (ticketId: string) => {
@@ -806,14 +954,60 @@ export default function App() {
     setAuditLogs(supportAdapter.loadAuditLogs());
   };
 
+  const handleMarkHumanReviewed = async (
+    ticketId: string,
+    reviewerName?: string
+  ) => {
+    const target = tickets.find((t) => t.id === ticketId);
+    const nowIso = new Date().toISOString();
+    const reviewedBy =
+      reviewerName?.trim() ||
+      target?.assigned_technician_name ||
+      'Especialista de soporte';
+    const result = await supportAdapter.updateTicket(
+      ticketId,
+      {
+        human_reviewed_at: nowIso,
+        human_reviewed_by: reviewedBy,
+      },
+      tickets
+    );
+    if (!result.ok) {
+      setPersistenceError(
+        result.error ?? 'No se pudo registrar la revisión del especialista.'
+      );
+      return;
+    }
+    if (target) {
+      setAuditLogs(
+        supportAdapter.appendAuditLog({
+          organization_id: target.organization_id,
+          actor_type: 'technician',
+          actor_label: reviewedBy,
+          action: 'Validó manualmente el pre-diagnóstico del ticket',
+          target_ref: target.ticket_code,
+        })
+      );
+    }
+    setPersistenceError(null);
+    setTickets(result.data);
+  };
+
   const handleResolveTicket = async (ticketId: string, resolutionNotes: string) => {
     const target = tickets.find((t) => t.id === ticketId);
+    const nowIso = new Date().toISOString();
+    const reviewer =
+      target?.human_reviewed_by ??
+      target?.assigned_technician_name ??
+      'Especialista de soporte';
     const result = await supportAdapter.updateTicket(
       ticketId,
       {
         status: 'resolved',
         resolution_notes: resolutionNotes,
-        resolved_at: new Date().toISOString(),
+        resolved_at: nowIso,
+        human_reviewed_at: target?.human_reviewed_at ?? nowIso,
+        human_reviewed_by: reviewer,
       },
       tickets
     );
@@ -831,9 +1025,9 @@ export default function App() {
       setAuditLogs(
         supportAdapter.appendAuditLog({
           organization_id: target.organization_id,
-          actor_type: 'ai_agent',
-          actor_label: 'AI Report Generator',
-          action: 'Emitió informe técnico final y cerró la sesión remota',
+          actor_type: 'technician',
+          actor_label: reviewer,
+          action: 'Revisó y cerró la sesión remota con informe final',
           target_ref: target.ticket_code,
         })
       );
@@ -998,108 +1192,91 @@ export default function App() {
     setCurrentUser(null);
   };
 
-  const handleExportClientData = (ticketId: string) => {
+  const handleExportClientData = (ticketId: string, verifiedExportPayload?: unknown) => {
     const ticket = tickets.find((t) => t.id === ticketId);
-    if (!ticket) return;
-    const ticketMsgs = messages.filter((m) => m.ticket_id === ticketId);
-    const ticketLogs = auditLogs.filter(
-      (l) => l.target_ref === ticket.ticket_code
+    if (!ticket || !verifiedExportPayload) {
+      setPersistenceError('Se requiere verificación por código OTP enviado al correo para descargar tus datos.');
+      return;
+    }
+    triggerJsonDownload(
+      `datos-rs365-${ticket.ticket_code}.json`,
+      JSON.stringify(verifiedExportPayload, null, 2)
     );
-    const jsonPayload = supportAdapter.buildClientDataExportPayload({
-      ticket,
-      messages: ticketMsgs,
-      auditLogs: ticketLogs,
-      userProfile: currentUser,
-    });
-    triggerJsonDownload(`datos-rs365-${ticket.ticket_code}.json`, jsonPayload);
   };
 
-  const handleExportUserOrOrgData = () => {
-    const activeOrg =
-      organizations.find((o) => o.id === activeOrgId) ?? organizations[0];
-    const orgTickets = tickets.filter((t) => t.organization_id === activeOrgId);
-    const matchingUserTickets = currentUser
-      ? tickets.filter(
-          (t) =>
-            String(t?.client_email ?? '').toLowerCase() ===
-            String(currentUser.email ?? '').toLowerCase()
-        )
-      : orgTickets;
-    const exportPayload = JSON.stringify(
-      {
-        exported_at: new Date().toISOString(),
-        platform: 'Remote Support 365',
-        legal_framework: 'GDPR / LOPDP - Portabilidad de Datos (JSON)',
-        user_profile: currentUser,
-        organization: activeOrg,
-        tickets: matchingUserTickets.map((ticket) => {
-          const { client_session_token: _sessionToken, payment_reference: _paymentReference, ...safeTicket } = ticket;
-          return safeTicket;
-        }),
-        cookie_preferences: readCookieConsent(),
-        audit_logs: auditLogs.filter((l) => l.organization_id === activeOrgId),
-      },
-      null,
-      2
-    );
+  const handleExportUserOrOrgData = (verifiedExportPayload?: unknown) => {
+    if (!verifiedExportPayload) {
+      setPersistenceError('Se requiere verificación por código OTP enviado al correo para exportar datos.');
+      return;
+    }
     triggerJsonDownload(
       `portabilidad-rs365-${new Date().toISOString().slice(0, 10)}.json`,
-      exportPayload
+      JSON.stringify(verifiedExportPayload, null, 2)
     );
   };
 
-  const handleAnonymizeClientData = async (ticketId: string): Promise<boolean> => {
-    const result = await supportAdapter.anonymizeTicketClientData(
-      ticketId,
-      tickets,
-      getTicketScope(ticketId)
-    );
-    if (!result.ok) {
-      setPersistenceError(
-        result.error ?? 'No se pudieron anonimizar los datos personales.'
-      );
+  const handleAnonymizeClientData = async (
+    ticketId: string,
+    anonymizedAt?: string
+  ): Promise<boolean> => {
+    if (!anonymizedAt) {
+      setPersistenceError('Se requiere verificación por código OTP enviado al correo para eliminar tus datos.');
       return false;
     }
+    const target = tickets.find((t) => t.id === ticketId);
+    const next = tickets.map((t) =>
+      t.id === ticketId
+        ? {
+            ...t,
+            client_name: 'Usuario Anonimizado',
+            client_email: 'eliminado@anonimizado.invalid',
+            client_birth_date: null,
+            rustdesk_id: null,
+            marketing_opt_in: false,
+            anonymized_at: anonymizedAt,
+          }
+        : t
+    );
+    supportAdapter.saveTickets(next);
+    setTickets(next);
+    if (target) {
+      supportAdapter.appendAuditLog({
+        organization_id: target.organization_id,
+        actor_type: 'client',
+        actor_label: 'Titular de Datos (OTP Verificado)',
+        action: 'Solicitó eliminación y anonimización de datos personales verificada por OTP',
+        target_ref: target.ticket_code,
+      });
+    }
     setPersistenceError(null);
-    setTickets(result.data);
     setAuditLogs(supportAdapter.loadAuditLogs());
     return true;
   };
 
-  const handleDeletePersonalData = async () => {
+  const handleDeletePersonalData = async (verified?: boolean) => {
+    if (!verified) {
+      setPersistenceError('Se requiere verificación por código OTP enviado al correo para eliminar datos personales.');
+      return;
+    }
     const actorLabel = currentUser?.full_name ?? 'Usuario / Operador';
+    const nowIso = new Date().toISOString();
     if (currentUser) {
       const normalizedEmail = String(currentUser.email ?? '').toLowerCase();
-      const matchingIds = tickets
-        .filter(
-          (t) =>
-            String(t?.client_email ?? '').toLowerCase() === normalizedEmail
-        )
-        .map((t) => t.id);
-
-      let workingTickets = tickets;
-      for (const id of matchingIds) {
-        const target = workingTickets.find((item) => item.id === id);
-        const scope = target
+      const next = tickets.map((t) =>
+        String(t?.client_email ?? '').toLowerCase() === normalizedEmail
           ? {
-              ticketCode: target.ticket_code,
-              sessionToken: target.client_session_token,
+              ...t,
+              client_name: 'Usuario Anonimizado',
+              client_email: 'eliminado@anonimizado.invalid',
+              client_birth_date: null,
+              rustdesk_id: null,
+              marketing_opt_in: false,
+              anonymized_at: nowIso,
             }
-          : undefined;
-        const result = await supportAdapter.anonymizeTicketClientData(
-          id,
-          workingTickets,
-          scope
-        );
-        if (result.ok) {
-          workingTickets = result.data;
-        } else if (result.error) {
-          setPersistenceError(result.error);
-        }
-      }
-      if (workingTickets !== tickets) {
-        setTickets(workingTickets);
-      }
+          : t
+      );
+      supportAdapter.saveTickets(next);
+      setTickets(next);
     }
     setAuditLogs(
       supportAdapter.appendAuditLog({
@@ -1107,7 +1284,7 @@ export default function App() {
         actor_type: 'client',
         actor_label: actorLabel,
         action:
-          'Solicitó eliminación y anonimización de datos personales de cuenta',
+          'Solicitó eliminación y anonimización de datos personales verificada por OTP',
         target_ref: currentUser?.email ?? activeOrgId,
       })
     );
@@ -1143,11 +1320,13 @@ export default function App() {
           />
         </Suspense>
       )}
-      <CookieConsentBanner
-        isOpen={cookieBannerOpen}
-        onClose={() => setCookieBannerOpen(false)}
-        onOpenPrivacyPolicy={() => setLegalDocTab('privacy')}
-      />
+      {activeView !== 'tech_portal' && (
+        <CookieConsentBanner
+          isOpen={cookieBannerOpen}
+          onClose={() => setCookieBannerOpen(false)}
+          onOpenPrivacyPolicy={() => setLegalDocTab('privacy')}
+        />
+      )}
       {authModalOpen && (
         <Suspense fallback={null}>
           <AuthModal
@@ -1206,6 +1385,7 @@ export default function App() {
             onDismissPersistenceError={() => setPersistenceError(null)}
             onStartSession={handleStartSession}
             onMarkPaymentPaid={handleConfirmPayment}
+            onMarkHumanReviewed={handleMarkHumanReviewed}
             onResolveTicket={handleResolveTicket}
             onReopenTicket={handleReopenTicket}
             onSendTechnicianMessage={(ticketId, text) =>
@@ -1257,31 +1437,71 @@ export default function App() {
       <main className="flex-1">
         {activeView === 'landing' && (
           <>
-            <HeroSection
-              onStartDiagnostic={handleStartDiagnostic}
-              onHowItWorks={() => handleNavigateSection('como-funciona')}
-              onQuickStartSymptom={handleQuickStartSymptom}
-            />
-            <DiagnosticWizard
-              draft={wizardDraft}
-              errors={wizardErrors}
-              persistenceError={persistenceError}
-              aiAgents={aiAgents.filter(
-                (a) => a.organization_id === PUBLIC_PORTAL_ORG_ID
-              )}
-              externalTrigger={externalTriageTrigger}
-              onChangeDraft={handleChangeWizardDraft}
-              onSetErrors={setWizardErrors}
-              onSubmitTicket={handleSubmitTicket}
-              onOpenLegalDoc={setLegalDocTab}
-              onOpenTicketLookup={() => setTicketLookupOpen(true)}
-            />
-            <LandingSections
-              onSelectCategoryForWizard={handleSelectCategoryFromLanding}
-              onSubmitEnterpriseLead={handleSubmitEnterpriseLead}
-              onStartDiagnostic={handleStartDiagnostic}
-              onOpenTechnicianApply={handleOpenTechnicianApply}
-            />
+            <StickySectionNav />
+            <div
+              ref={heroSectionRef}
+              data-section-id="hero"
+              className={`transition-all duration-1000 ease-out will-change-[opacity,transform] ${
+                visibleSections.hero ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-6'
+              }`}
+            >
+              <HeroSection
+                onStartDiagnostic={handleStartDiagnostic}
+                onHowItWorks={() => handleNavigateSection('como-funciona')}
+                onQuickStartSymptom={handleQuickStartSymptom}
+              />
+            </div>
+            <div
+              ref={wizardSectionRef}
+              data-section-id="wizard"
+              className={`transition-all duration-1000 ease-out will-change-[opacity,transform] ${
+                visibleSections.wizard ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8'
+              }`}
+            >
+              <ScrollReveal direction="up">
+                <DiagnosticWizard
+                  draft={wizardDraft}
+                  errors={wizardErrors}
+                  persistenceError={persistenceError}
+                  aiAgents={aiAgents.filter(
+                    (a) => a.organization_id === PUBLIC_PORTAL_ORG_ID
+                  )}
+                  externalTrigger={externalTriageTrigger}
+                  onChangeDraft={handleChangeWizardDraft}
+                  onSetErrors={setWizardErrors}
+                  onSubmitTicket={handleSubmitTicket}
+                  onOpenLegalDoc={setLegalDocTab}
+                  onOpenTicketLookup={() => setTicketLookupOpen(true)}
+                />
+              </ScrollReveal>
+            </div>
+            <div
+              ref={landingSectionRef}
+              data-section-id="landing"
+              className={`transition-all duration-1000 ease-out will-change-[opacity,transform] ${
+                visibleSections.landing ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8'
+              }`}
+            >
+              <ScrollReveal direction="up">
+                <LandingSections
+                  onSelectCategoryForWizard={handleSelectCategoryFromLanding}
+                  onSubmitEnterpriseLead={handleSubmitEnterpriseLead}
+                  onStartDiagnostic={handleStartDiagnostic}
+                  onOpenTechnicianApply={handleOpenTechnicianApply}
+                />
+              </ScrollReveal>
+            </div>
+            <div
+              ref={faqSectionRef}
+              data-section-id="faq"
+              className={`transition-all duration-1000 ease-out will-change-[opacity,transform] ${
+                visibleSections.faq ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-8'
+              }`}
+            >
+              <ScrollReveal direction="up">
+                <FaqSection />
+              </ScrollReveal>
+            </div>
           </>
         )}
 
@@ -1338,7 +1558,18 @@ export default function App() {
         )}
 
         {activeView === 'connection_room' && (
-          activeTicket ? (
+          roomAccessState === 'checking' || (!activeTicket && isHydratingSession) ? (
+            <section className="py-16 bg-[#F8FAFC] min-h-[calc(100vh-12rem)]">
+              <div className="max-w-xl mx-auto px-4 text-center space-y-3 bg-white border border-slate-200 rounded-xl p-8">
+                <p className="text-sm font-semibold text-[#0B192C]">
+                  Verificando autorización de la Sala {activeTicketCode}...
+                </p>
+                <p className="text-xs text-slate-600">
+                  Validando el token privado de sesión en el servidor.
+                </p>
+              </div>
+            </section>
+          ) : roomAccessState === 'authorized' && activeTicket ? (
             <Suspense fallback={lazyFallback}>
               <ConnectionRoom
                 ticket={activeTicket}
@@ -1357,27 +1588,18 @@ export default function App() {
                 onAnonymizeClientData={handleAnonymizeClientData}
               />
             </Suspense>
-          ) : isHydratingSession ? (
-            <section className="py-16 bg-[#F8FAFC] min-h-[calc(100vh-12rem)]">
-              <div className="max-w-xl mx-auto px-4 text-center space-y-3 bg-white border border-slate-200 rounded-xl p-8">
-                <p className="text-sm font-semibold text-[#0B192C]">
-                  Sincronizando Sala de Conexión {activeTicketCode}...
-                </p>
-                <p className="text-xs text-slate-600">
-                  Verificando el estado del ticket y el comprobante de pago.
-                </p>
-              </div>
-            </section>
           ) : (
-            <section className="py-16 bg-[#F8FAFC] min-h-[calc(100vh-12rem)]">
+            <section
+              data-testid="room-access-denied"
+              className="py-16 bg-[#F8FAFC] min-h-[calc(100vh-12rem)]"
+            >
               <div className="max-w-xl mx-auto px-4 text-center space-y-4 bg-white border border-slate-200 rounded-xl p-8">
                 <h1 className="text-lg font-bold text-[#0B192C]">
-                  No encontramos la sala {activeTicketCode ?? 'solicitada'} en este navegador
+                  Acceso denegado · Token de sala inválido o faltante
                 </h1>
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  Si abriste el enlace desde otra sesión, cerraste esta pestaña o limpiaste
-                  el almacenamiento del navegador, vuelve al portal para iniciar una nueva
-                  solicitud de soporte.
+                  {roomAccessError ??
+                    `No se pudo verificar el token privado para la sala ${activeTicketCode ?? 'solicitada'}. Abre el enlace completo enviado a tu correo o inicia una nueva solicitud.`}
                 </p>
                 <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
                   <button

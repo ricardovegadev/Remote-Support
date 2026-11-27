@@ -37,7 +37,11 @@ import {
   RBAC_PERMISSION_CATALOG,
   type OrganizationRole,
 } from '../../utils/rbac';
+import { getConfiguredTierPriceUsd } from '../../config/businessConfig';
+import { useBusinessConfig } from '../../hooks/useBusinessConfig';
 import { getServiceTierPriceUsd } from '../../utils/ticketLogic';
+import { getSupabaseClient, isSupabaseConfigured } from '../../lib/supabaseClient';
+import { supportAdapter } from '../../services/supportAdapter';
 
 export function AnalyticsView({
   tickets,
@@ -52,6 +56,7 @@ export function AnalyticsView({
   aiAgents?: AiAgentConfig[];
   organization?: Organization;
 }) {
+  const businessConfig = useBusinessConfig();
   const [serverSummary, setServerSummary] =
     useState<ServerTelemetrySummary | null>(null);
   const [localEvents, setLocalEvents] = useState<TelemetryEvent[]>([]);
@@ -71,7 +76,13 @@ export function AnalyticsView({
 
   const paidRevenue = tickets
     .filter((t) => t.payment_status === 'paid')
-    .reduce((sum, t) => sum + getServiceTierPriceUsd(t.service_tier), 0);
+    .reduce(
+      (sum, t) =>
+        sum +
+        (getConfiguredTierPriceUsd(t.service_tier, t.billing_mode, businessConfig) ??
+          getServiceTierPriceUsd(t.service_tier)),
+      0
+    );
   const resolvedCount = tickets.filter((t) => t.status === 'resolved').length;
   const resolutionRate =
     tickets.length > 0 ? Math.round((resolvedCount / tickets.length) * 100) : 0;
@@ -168,9 +179,14 @@ export function AnalyticsView({
                 >
                   {serverSummary?.status === 'degraded' ? 'Degradado' : 'En línea'}
                 </span>
+                {!isSupabaseConfigured() && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-amber-100 text-amber-900">
+                    DEMO
+                  </span>
+                )}
               </div>
               <p className="text-xs text-[#64748B]">
-                Métricas en vivo de sesiones RustDesk, cuota Gemini IA, dispositivos y eventos RBAC.
+                En memoria (instancia actual) de sesiones RustDesk, cuota IA, dispositivos y eventos RBAC.
               </p>
             </div>
           </div>
@@ -228,7 +244,7 @@ export function AnalyticsView({
 
           <div className="rounded-xl bg-[#F8FAFC] border border-[#E5E9F2] p-3.5">
             <p className="text-[11px] font-medium text-[#64748B]">
-              Latencia IA · Uptime BFF
+              Latencia IA · En memoria (instancia actual)
             </p>
             <p className="font-mono tabular-nums text-lg font-bold text-[#0F172A] mt-1">
               {serverSummary ? `${serverSummary.metrics.avgAiLatencyMs} ms` : 'N/D'}
@@ -236,7 +252,7 @@ export function AnalyticsView({
             <p className="text-[11px] text-[#64748B] mt-0.5">
               {serverSummary
                 ? `Uptime ${Math.floor(serverSummary.uptimeSeconds / 60)}m · RBAC ${serverSummary.metrics.rbacDeniedCount} bloqueos`
-                : 'Modo local sin BFF activo'}
+                : 'Sin conexión al endpoint de telemetría BFF'}
             </p>
           </div>
         </div>
@@ -327,7 +343,13 @@ export function AnalyticsView({
               const catTickets = tickets.filter((t) => t.category === cat);
               const catRev = catTickets
                 .filter((t) => t.payment_status === 'paid')
-                .reduce((s, t) => s + getServiceTierPriceUsd(t.service_tier), 0);
+                .reduce(
+                  (s, t) =>
+                    s +
+                    (getConfiguredTierPriceUsd(t.service_tier, t.billing_mode, businessConfig) ??
+                      getServiceTierPriceUsd(t.service_tier)),
+                  0
+                );
               const pct =
                 tickets.length > 0
                   ? Math.round((catTickets.length / tickets.length) * 100)
@@ -543,7 +565,7 @@ export function SecurityAuditView({
           </h2>
           <p className="text-xs text-[#64748B] mt-0.5">
             Registro verificable de enlaces RustDesk, consentimientos explícitos,
-            despachos atómicos, cambios RBAC y acciones de agentes IA.
+            asignaciones de tickets, cambios RBAC y acciones de agentes IA.
           </p>
         </div>
       </div>
@@ -606,8 +628,8 @@ interface OrganizationSettingsViewProps {
   ) => void;
   onOpenSqlModal: () => void;
   onSignOut: () => void;
-  onExportOrgData?: () => void;
-  onDeletePersonalData?: () => void;
+  onExportOrgData?: (verifiedExportPayload?: unknown) => void;
+  onDeletePersonalData?: (verified?: boolean) => void;
 }
 
 export function OrganizationSettingsView({
@@ -628,6 +650,15 @@ export function OrganizationSettingsView({
   const [savedNotice, setSavedNotice] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [privacyNotice, setPrivacyNotice] = useState<string | null>(null);
+  const [otpChallenge, setOtpChallenge] = useState<{
+    action: 'export' | 'erase';
+    challengeId: string;
+    maskedEmail: string;
+    devOtpPreview?: string;
+  } | null>(null);
+  const [otpInput, setOtpInput] = useState('');
+  const [otpBusy, setOtpBusy] = useState(false);
+  const [otpError, setOtpError] = useState<string | null>(null);
 
   useEffect(() => {
     setOrgName(organization.name);
@@ -840,59 +871,220 @@ export function OrganizationSettingsView({
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5">
-            {onExportOrgData && (
-              <button
-                type="button"
-                onClick={() => {
-                  onExportOrgData();
-                  setPrivacyNotice('Datos exportados en formato JSON.');
-                }}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-[#0F172A] bg-white hover:bg-[#F8FAFC] border border-[#E5E9F2] rounded-xl transition-colors"
-              >
-                <Download className="w-3.5 h-3.5 text-[#2563EB]" aria-hidden="true" />
-                <span>Descargar mis datos (JSON)</span>
-              </button>
-            )}
-
-            {onDeletePersonalData && !confirmDeleteOpen && (
-              <button
-                type="button"
-                onClick={() => setConfirmDeleteOpen(true)}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-[#DC2626] bg-white hover:bg-red-50 border border-red-200 rounded-xl transition-colors"
-              >
-                <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>Eliminar mis datos personales</span>
-              </button>
-            )}
-          </div>
-
-          {confirmDeleteOpen && onDeletePersonalData && (
-            <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 space-y-2.5 text-xs">
-              <p className="font-semibold text-red-900">
-                ¿Confirmas eliminar y anonimizar tus datos personales de operador y cerrar
-                sesión?
+          {otpChallenge ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (otpBusy) return;
+                setOtpBusy(true);
+                setOtpError(null);
+                void (async () => {
+                  try {
+                    const supabase = supabaseConfigured ? getSupabaseClient() : null;
+                    const sessionRes = supabase ? await supabase.auth.getSession() : null;
+                    const accessToken = sessionRes?.data.session?.access_token ?? null;
+                    if (otpChallenge.action === 'export') {
+                      const verifyRes = await supportAdapter.exportPrivacyDataWithOtp({
+                        challengeId: otpChallenge.challengeId,
+                        otpCode: otpInput,
+                        email: operatorEmail,
+                        accessToken,
+                      });
+                      if (!verifyRes.ok) {
+                        setOtpError(verifyRes.error ?? 'Código OTP inválido.');
+                        return;
+                      }
+                      onExportOrgData?.(verifyRes.exportPayload);
+                      setOtpChallenge(null);
+                      setOtpInput('');
+                      setPrivacyNotice('Verificación OTP completada. Datos exportados en formato JSON.');
+                    } else {
+                      const verifyRes = await supportAdapter.erasePrivacyDataWithOtp({
+                        challengeId: otpChallenge.challengeId,
+                        otpCode: otpInput,
+                        email: operatorEmail,
+                        accessToken,
+                      });
+                      if (!verifyRes.ok) {
+                        setOtpError(verifyRes.error ?? 'Código OTP inválido.');
+                        return;
+                      }
+                      onDeletePersonalData?.(true);
+                      setOtpChallenge(null);
+                      setConfirmDeleteOpen(false);
+                    }
+                  } finally {
+                    setOtpBusy(false);
+                  }
+                })();
+              }}
+              className="p-3.5 rounded-xl bg-[#F8FAFC] border border-[#E5E9F2] space-y-2.5 text-xs"
+            >
+              <p className="font-semibold text-[#0F172A]">
+                Código OTP enviado a <span className="font-mono">{otpChallenge.maskedEmail}</span>
               </p>
-              <div className="flex items-center justify-end gap-2">
+              {otpChallenge.devOtpPreview && (
+                <p className="text-[11px] font-mono bg-amber-50 border border-amber-200 text-amber-950 rounded px-2 py-1">
+                  Sandbox OTP: {otpChallenge.devOtpPreview}
+                </p>
+              )}
+              <div>
+                <label htmlFor="org-privacy-otp-input" className="block text-[11px] font-medium text-[#475569] mb-1">
+                  Ingresa el código de 6 dígitos
+                </label>
+                <input
+                  id="org-privacy-otp-input"
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={otpInput}
+                  onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="000000"
+                  className="w-full max-w-xs rounded-lg border border-[#E5E9F2] bg-white px-3 py-1.5 font-mono text-sm tracking-widest text-[#0F172A]"
+                />
+              </div>
+              {otpError && (
+                <p role="alert" className="text-[11px] font-medium text-[#DC2626]">{otpError}</p>
+              )}
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setConfirmDeleteOpen(false)}
+                  onClick={() => {
+                    setOtpChallenge(null);
+                    setOtpInput('');
+                    setOtpError(null);
+                  }}
                   className="px-3 py-1.5 font-medium text-[#475569] bg-white border border-[#E5E9F2] rounded-lg"
                 >
                   Cancelar
                 </button>
                 <button
-                  type="button"
-                  onClick={() => {
-                    onDeletePersonalData();
-                    setConfirmDeleteOpen(false);
-                  }}
-                  className="px-3 py-1.5 font-semibold text-white bg-red-700 hover:bg-red-800 rounded-lg"
+                  type="submit"
+                  disabled={otpBusy || otpInput.length !== 6}
+                  className="px-3 py-1.5 font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] disabled:bg-slate-400 rounded-lg"
                 >
-                  Confirmar eliminación
+                  {otpBusy
+                    ? 'Verificando...'
+                    : otpChallenge.action === 'export'
+                    ? 'Verificar y descargar'
+                    : 'Verificar y eliminar'}
                 </button>
               </div>
-            </div>
+            </form>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center gap-2.5">
+                {onExportOrgData && (
+                  <button
+                    type="button"
+                    disabled={otpBusy}
+                    onClick={() => {
+                      setOtpBusy(true);
+                      setOtpError(null);
+                      setPrivacyNotice(null);
+                      void (async () => {
+                        try {
+                          const supabase = supabaseConfigured ? getSupabaseClient() : null;
+                          const sessionRes = supabase ? await supabase.auth.getSession() : null;
+                          const accessToken = sessionRes?.data.session?.access_token ?? null;
+                          const res = await supportAdapter.requestPrivacyOtp({
+                            action: 'export',
+                            email: operatorEmail,
+                            accessToken,
+                          });
+                          if (!res.ok || !res.challengeId) {
+                            setOtpError(res.error ?? 'No se pudo enviar el código OTP.');
+                            return;
+                          }
+                          setOtpInput('');
+                          setOtpChallenge({
+                            action: 'export',
+                            challengeId: res.challengeId,
+                            maskedEmail: res.maskedEmail ?? '***',
+                            devOtpPreview: res.devOtpPreview,
+                          });
+                        } finally {
+                          setOtpBusy(false);
+                        }
+                      })();
+                    }}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-[#0F172A] bg-white hover:bg-[#F8FAFC] border border-[#E5E9F2] rounded-xl transition-colors disabled:opacity-60"
+                  >
+                    <Download className="w-3.5 h-3.5 text-[#2563EB]" aria-hidden="true" />
+                    <span>Descargar mis datos (JSON)</span>
+                  </button>
+                )}
+
+                {onDeletePersonalData && !confirmDeleteOpen && (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDeleteOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-[#DC2626] bg-white hover:bg-red-50 border border-red-200 rounded-xl transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Eliminar mis datos personales</span>
+                  </button>
+                )}
+              </div>
+
+              {confirmDeleteOpen && onDeletePersonalData && (
+                <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 space-y-2.5 text-xs">
+                  <p className="font-semibold text-red-900">
+                    Para eliminar y anonimizar tus datos personales enviaremos un código OTP a tu correo.
+                  </p>
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteOpen(false)}
+                      className="px-3 py-1.5 font-medium text-[#475569] bg-white border border-[#E5E9F2] rounded-lg"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={otpBusy}
+                      onClick={() => {
+                        setOtpBusy(true);
+                        setOtpError(null);
+                        void (async () => {
+                          try {
+                            const supabase = supabaseConfigured ? getSupabaseClient() : null;
+                            const sessionRes = supabase ? await supabase.auth.getSession() : null;
+                            const accessToken = sessionRes?.data.session?.access_token ?? null;
+                            const res = await supportAdapter.requestPrivacyOtp({
+                              action: 'erase',
+                              email: operatorEmail,
+                              accessToken,
+                            });
+                            if (!res.ok || !res.challengeId) {
+                              setOtpError(res.error ?? 'No se pudo enviar el código OTP.');
+                              return;
+                            }
+                            setOtpInput('');
+                            setConfirmDeleteOpen(false);
+                            setOtpChallenge({
+                              action: 'erase',
+                              challengeId: res.challengeId,
+                              maskedEmail: res.maskedEmail ?? '***',
+                              devOtpPreview: res.devOtpPreview,
+                            });
+                          } finally {
+                            setOtpBusy(false);
+                          }
+                        })();
+                      }}
+                      className="px-3 py-1.5 font-semibold text-white bg-red-700 hover:bg-red-800 disabled:bg-slate-400 rounded-lg"
+                    >
+                      Enviar código OTP
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {!otpChallenge && otpError && (
+            <p role="alert" className="text-xs font-medium text-[#DC2626]">{otpError}</p>
           )}
 
           {privacyNotice && (

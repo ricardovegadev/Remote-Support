@@ -4,6 +4,271 @@
 
 ---
 
+## [2026-11-27] · v2.26 Verificación y Blindaje Final del Core (Pre-Template · Estaciones 3 y 4)
+### Auditoría y correcciones aplicadas (4 bloques)
+- **Bloque 1 · Base de Datos y RLS (`supabase/schema.sql`) — Corregido:**
+  - Confirmado `OK`: sin cláusulas `tg_op`/`return new` fuera de funciones `RETURNS trigger`, `audit_ticket_security_changes()` valida `if tg_op = 'INSERT'` antes de leer `OLD.*`, y todos los UUIDs semilla cumplen RFC 4122 v4.
+  - Corregido: `tickets.client_session_token` alineado de `gen_random_bytes(24)` a `gen_random_bytes(32)` (64 hex); incorporadas en el esquema canónico las tablas operativas `public.payments` y `public.technician_payouts` con PKs UUID v4, `organization_id`, `enable row level security`, `revoke all` y políticas RLS estrictas.
+- **Bloque 2 · Tokens Criptográficos y Privacidad de Sesión (`src/utils/ticketLogic.ts`, `src/App.tsx`, `src/services/supportAdapter.ts`) — OK:**
+  - Verificado sin cambios necesarios: `createTicketFromDraft` usa `crypto.getRandomValues(new Uint8Array(32))` (64 hex) en runtime reservando `randomFn` solo para tests; `/sesion/:code` inexistente muestra acceso denegado sin exponer `tickets[0]`; `supportAdapter.ts` limpia `client_session_token` antes de persistir en `localStorage` y almacena `rs365_room_tokens_v1` únicamente en `sessionStorage`.
+- **Bloque 3 · Seguridad de Endpoints en Servidor (`server.ts`) — Corregido:**
+  - Confirmado `OK`: `crypto.timingSafeEqual` en `/api/payments/stripe/verify-session` y `/api/payments/paypal/capture-order`; validación de sesión/rol de operador en `/api/ai/report`, `/api/ai/assistant` y rutas admin de postulantes; `TRUST_PROXY` configurable; caché de 15 min + macOS `aarch64` en `/api/rustdesk/official-download`; `/api/health` mínimo (`{ ok: true }`).
+  - Corregido: separación explícita **Android (`.apk`) vs iOS (App Store oficial)** en `/api/rustdesk/official-download` para `os=Mobile`, y aislamiento `systemInstruction` + delimitador `<user_input>...</user_input>` contra inyección de prompts en `/api/ai/receptionist`.
+- **Bloque 4 · Rendimiento del Bundle y Assets (`src/services/frontendMonitoring.ts`, `src/components/HeroSection.tsx`, `public/`) — Corregido:**
+  - Confirmado `OK`: vistas y modales pesados (`TechPortalView`, `ConnectionRoom`, `AuthModal`, `LegalDocsModal`, `TicketLookupModal`, `TechnicianApplyView`, `TechnicianRegisterView`) ya lazy-loaded con `React.lazy()` + `Suspense`.
+  - Corregido: carga diferida dinámica de `@sentry/react` en `src/services/frontendMonitoring.ts` reduciendo el chunk inicial `index-*.js` de `610.19 kB` a **`316.35 kB`** (`gzip: 73.92 kB`, 0 advertencias `> 500 kB`); añadido `loading={index === 0 ? 'eager' : 'lazy'}` + `decoding="async"` en los slides de `HeroSection.tsx`; eliminadas 2 capturas huérfanas en `public/assets/aistudio/` conservando el activo OG activo.
+
+### Verificación técnica (Quality Gates)
+- `npm run lint` (`tsc --noEmit`): **0 errores**.
+- `npm test`: **31/31 pruebas aprobadas** (`fail 0`).
+- `npm run build` (`vite build`): **0 errores, 0 advertencias** · chunk principal `dist/assets/index-CiJ-ocnu.js` = **`316.35 kB`** (`gzip: 73.92 kB`).
+
+---
+
+## [2026-11-27] · v2.25 Instalación de Estructura Documental Software Factory (`.agent/rules/` y `.agent/FACTORY_PROTOCOL.md`)
+### Cambios implementados
+- **Separación de Estándares Universales vs Contexto del Proyecto (sin cambios en `src/`, `server.ts` ni `supabase/schema.sql`):**
+  - **`.agent/rules/00-factory-standards.md`:** Creadas las reglas universales 100 % reutilizables de la Software Factory (stack de referencia React 19 + TS `strict` + Vite 8 + Tailwind v4 + Express + Supabase + Gemini `gemini-2.5-flash` + `Dockerfile` multi-etapa; arquitectura `src/core/` vs `src/modules/`, feature flags no destructivos, `React.lazy()`; seguridad UUID v4 RFC 4122, RLS Multi-Tenant, tokens criptográficos 32 bytes / 64 hex sin `Math.random()`, cero secretos en `VITE_*`, validación JWT/sesión en servidor y prohibición de fallback `items[0]`; UI/UX mobile-first, WCAG AA, +18, casillas legales desmarcadas, cookies, ARCO, etiquetado IA, PCI-DSS y Quality Gates).
+  - **`.agent/FACTORY_PROTOCOL.md`:** Documentado el protocolo operativo repetible de **5 Estaciones** (EGM/ADR → Contratos/SQL/Flags/Tests → Construcción Modular + Skills + *Goldfish Reset* → Quality Gates + `qa-auditor` solo lectura → Despliegue `Dockerfile` con aprobación humana + *Backporting* a `saas-factory-starter`), incluyendo la **Plantilla de Arranque para Sesión Limpia (*Goldfish Reset*)** lista para copiar.
+  - **`.agent/rules/01-project-context.md`:** Creado el contexto exclusivo de **Remote Support 365** (referencia EGM obligatoria, paleta corporativa `#0B192C`/`#0B1528`, `#2563EB`, `#10B981`, `#F8FAFC`, dispositivos Desktop / Lenovo Tab P12 / Motorola Signature, catálogo comercial separado Puntual `$15/$29/$39` + complementos `+$12`/`+$9`, Pyme `$39/$79`, SaaS `$29/$49/$79`, motor RustDesk vía `/api/rustdesk/official-download` en red pública oficial y pasarelas Google Pay, PayPal, Stripe y Tarjeta VISA/MC/AMEX sin "Link").
+
+### Verificación técnica
+- `npm run lint` (`tsc --noEmit`): **0 errores**.
+- `npm test`: **31/31 pruebas aprobadas**.
+- `npm run build` (`vite build`): **0 errores**.
+
+---
+
+## [2026-11-25] · v2.24 Refinamiento Final UX/UI Móvil: Título en 2 Líneas, Subtítulo en 3 Líneas, Márgenes y Categorías en 2 Columnas (`HeroSection.tsx`)
+### Cambios implementados
+- **Optimización Móvil Avanzada (`src/components/HeroSection.tsx`):**
+  - **Jerarquía y Espaciado General:** Título en 2 líneas exactas (`text-[36px]`) y subtítulo en 3 líneas limpias (`text-[14.5px]`) abarcando todo el ancho de la pantalla (`w-full max-w-none`). Margen vertical consistente entre secciones.
+  - **Controles de Carrusel y CTAs:** Indicadores semitransparentes y botonera uniforme de acciones principales (`grid grid-cols-2`).
+  - **Agrupación de Categorías:** Iconos de ayuda en cuadrícula simétrica de 2 columnas (`grid grid-cols-2 sm:grid-cols-3`) con botones en ancho completo (`w-full`) adaptados en 2 líneas sin desbordes.
+
+### Verificación técnica
+- `npm test` (`31/31` pruebas aprobadas).
+- `npm run build` (`vite build`) y `npm run lint` (`tsc --noEmit`): **0 errores**.
+
+---
+
+## [2026-11-25] · v2.23 Cumplimiento Integral de Directrices UX/UI Móvil (`HeroSection.tsx`)
+### Cambios implementados
+- **Refinamiento UX/UI Móvil (`src/components/HeroSection.tsx`):**
+  - **Jerarquía y Espaciado:** Añadido margen superior e inferior al minitítulo (`my-3 sm:my-4`) y espaciados de intersección consistentes entre bloques.
+  - **Tipografía y Contenedor:** Aumentada la fuente del título principal a `text-[34px]` y del subtítulo a `text-sm`, optimizando el aprovechamiento del ancho de pantalla.
+  - **Carrusel y CTAs:** Controles semitransparentes y botones de acción principais estandarizados en ancho uniforme (`grid grid-cols-2`).
+  - **Agrupación de Categorías:** Iconos de ayuda distribuidos en una cuadrícula simétrica de 2 columnas (`grid grid-cols-2 sm:grid-cols-3`) con botones flexibles en ancho completo, asegurando que textos largos como *"Impresoras y Wi-Fi"* se adapten a dos líneas sin cortes.
+
+### Verificación técnica
+- `npm test` (`31/31` pruebas aprobadas).
+- `npm run build` (`vite build`) y `npm run lint` (`tsc --noEmit`): **0 errores**.
+
+---
+
+## [2026-11-25] · v2.22 Ajuste Full-Width y Aumento de Fuente en Título y Subtítulo Móvil (`HeroSection.tsx`)
+### Cambios implementados
+- **Optimización Tipográfica y de Ancho (`src/components/HeroSection.tsx`):**
+  - **Título Principal:** Aumentada la fuente a `text-[32px]` y ajustado con `w-full max-w-none` para ocupar el ancho total de la pantalla en 2 líneas.
+  - **Subtítulo:** Aumentada la fuente a `text-sm` (~14px) con `w-full max-w-none` y `text-balance` para ajustarse y llenar perfectamente todo el ancho de la pantalla en exactamente **3 líneas**.
+
+### Verificación técnica
+- `npm test` (`31/31` pruebas aprobadas).
+- `npm run build` (`vite build`) y `npm run lint` (`tsc --noEmit`): **0 errores**.
+
+---
+
+## [2026-11-25] · v2.21 Aumento de Tamaño de Fuente en Subtítulo Móvil (`HeroSection.tsx`)
+### Cambios implementados
+- **Optimización Tipográfica del Subtítulo (`src/components/HeroSection.tsx`):**
+  - Aumentado el tamaño de fuente móvil a `text-[13.5px]` con `w-full max-w-none` y `text-balance` para que el texto se ajuste y llene perfectamente todo el ancho de la pantalla en exactamente **3 líneas** limpias.
+
+### Verificación técnica
+- `npm test` (`31/31` pruebas aprobadas).
+- `npm run build` (`vite build`) y `npm run lint` (`tsc --noEmit`): **0 errores**.
+
+---
+
+## [2026-11-25] · v2.20 Ajuste Full-Width de Subtítulo en 3 Líneas (`HeroSection.tsx`)
+### Cambios implementados
+- **Optimización de Ancho Completo para Subtítulo Móvil (`src/components/HeroSection.tsx`):**
+  - Configurado el subtítulo con `w-full max-w-none sm:max-w-xl` y `text-[12px] sm:text-lg` junto a `text-balance` para que ocupe de forma uniforme todo el ancho de la pantalla en exactamente **3 líneas** limpias sin desbordes.
+
+### Verificación técnica
+- `npm test` (`31/31` pruebas aprobadas).
+- `npm run build` (`vite build`) y `npm run lint` (`tsc --noEmit`): **0 errores**.
+
+---
+
+## [2026-11-25] · v2.19 Optimización de Padding, Título en 2 Líneas y Subtítulo en 3 Líneas (`HeroSection.tsx`)
+### Cambios implementados
+- **Estructura y Tipografía Móvil (`src/components/HeroSection.tsx`):**
+  - **Título Principal:** Ajustado para distribuirse exactamente en **2 líneas** limpias (`"Tu problema IT, un paso / más cerca de resolverse."`) adaptado al ancho de la pantalla.
+  - **Subtítulo:** Configurado para ocupar exactamente **3 líneas** fluidas con espaciado optimizado (`text-[11px] sm:text-lg w-full leading-snug sm:leading-relaxed text-balance py-0.5`).
+  - **Espaciado y Padding:** Reorganizados los márgenes y separaciones entre elementos para una experiencia visual móvil impecable.
+
+### Verificación técnica
+- `npm test` (`31/31` pruebas aprobadas).
+- `npm run build` (`vite build`) y `npm run lint` (`tsc --noEmit`): **0 errores**.
+
+---
+
+## [2026-11-25] · v2.18 Optimización de Rendimiento y Desarrollo (`package.json`, `vite.config.ts`)
+### Cambios implementados
+- **Script de Limpieza (`package.json`):**
+  - Actualizado el script `"clean"` para borrar de forma completa `dist`, `node_modules/.vite` y `server.js`.
+- **Caché de Validaciones de Archivos (`vite.config.ts`):**
+  - Añadida la configuración `server.fs.cachedChecks: true` para reducir el impacto de las validaciones de archivos en el sistema de ficheros durante el desarrollo local.
+
+### Verificación técnica
+- `npm test` (`31/31` pruebas aprobadas).
+- `npm run build` (`vite build`) y `npm run lint` (`tsc --noEmit`): **0 errores**.
+
+---
+
+## [2026-11-25] · v2.17 Refinamiento de Subtítulo Móvil en Hero (`HeroSection.tsx`)
+### Cambios implementados
+- **Optimización de Subtítulo (`src/components/HeroSection.tsx`):**
+  - Reducido ligeramente el tamaño de fuente en móvil (`text-[11px] sm:text-lg`) y ajustado el padding/ancho (`w-full py-0`) para garantizar que el texto se distribuya en máximo dos líneas limpias sin desbordar el contenedor ni generar saltos de línea irregulares, cubriendo todo el ancho de la pantalla con perfecta coherencia visual.
+
+### Verificación técnica
+- `npm test` (`31/31` pruebas aprobadas).
+- `npm run build` (`vite build`) y `npm run lint` (`tsc --noEmit`): **0 errores**.
+
+---
+
+## [2026-11-25] · v2.16 Cumplimiento de Directrices de Diseño UX/UI Móvil (`HeroSection.tsx`)
+### Cambios implementados
+- **Ajustes de Interfaz Móvil (`src/components/HeroSection.tsx`):**
+  - **Jerarquía y Espaciado:** Añadido margen superior e inferior al minitítulo (`my-2.5 sm:my-3`) para separarlo limpiamente del título principal.
+  - **Ajuste de Texto:** Subtítulo optimizado con `text-balance` y espaciado vertical (`py-0.5`) para mostrarse en máximo dos líneas limpias sin palabras huérfanas.
+  - **Elementos del Carrusel:** Flechas y paginación con fondo semitransparente (`bg-slate-900/35 backdrop-blur-md`).
+  - **Alineación de Acciones Principales:** Botones de acción principales en cuadrícula uniforme de 2 columnas (`grid grid-cols-2`).
+  - **Agrupación de Categorías / Contenedor:** Las 3 micro-garantías organizadas en una sola línea horizontal fluida (`flex flex-row items-center justify-between sm:justify-start gap-x-2 sm:gap-x-4`).
+
+### Verificación técnica
+- `npm test` (`31/31` pruebas aprobadas).
+- `npm run build` (`vite build`) y `npm run lint` (`tsc --noEmit`): **0 errores**.
+
+---
+
+## [2026-11-25] · v2.15 Optimización de SEO Técnico y Open Graph Avanzado (`index.html`)
+### Cambios implementados
+- **Metadatos y Estructura de Datos SEO en `index.html`:**
+  - Añadidas dimensiones de imagen Open Graph (`og:image:width: 1200`, `og:image:height: 630`) y color de tema (`theme-color: #0B1528`).
+  - Incorporados metadatos geográficos y de indexación avanzados (`geo.region`, `geo.placename`, `robots` con `max-image-preview:large`).
+  - Actualizado el esquema JSON-LD a `ProfessionalService` con catálogo de ofertas detallado (`hasOfferCatalog` para Express $15, Optimización $29 y Avanzado $39) para optimizar la indexación en motores de búsqueda y redes sociales.
+
+### Verificación técnica
+- `npm test` (`31/31` pruebas aprobadas).
+- `npm run build` (`vite build`) y `npm run lint` (`tsc --noEmit`): **0 errores**.
+
+---
+
+## [2026-11-25] · v2.14 Refinamiento Experto UX/UI Móvil: Text Balance en Subtítulo, Carrusel Semitransparente, CTAs Uniformes y Fila Horizontal Centrada con Envoltura de Texto (`HeroSection.tsx`)
+### Cambios implementados
+- **Jerarquía y Adaptación Móvil (`src/components/HeroSection.tsx`):**
+  - **Subtítulo:** Añadido `text-balance` para garantizar distribución limpia en máximo dos líneas sin palabras huérfanas en dispositivos móviles.
+  - **Carrusel:** Controles con fondo semitransparente optimizado (`bg-slate-900/35 backdrop-blur-md`).
+  - **Botones de Acción:** Ancho estandarizado uniforme (`grid grid-cols-2`) centrado.
+  - **Categorías / Accesos Directos:** Distribuidos en una fila horizontal centrada con envoltura de texto adaptativa (`flex flex-wrap items-center justify-center gap-2 w-full` con botones `whitespace-normal`), permitiendo que títulos largos como "Impresoras y Wi-Fi" se adapten sin desbordamientos y preservando la simetría visual.
+
+### Verificación técnica
+- `npm test` (`31/31` pruebas aprobadas).
+- `npm run build` (`vite build`) y `npm run lint` (`tsc --noEmit`): **0 errores**.
+
+---
+
+## [2026-11-25] · v2.13 Refinamiento UX/UI Móvil: Desactivación de OS secundarios, Subtítulo en 2 líneas, Carrusel Semitransparente, CTAs Uniformes y Cuadrícula 2x3 de Shortcuts (`DiagnosticWizard.tsx`, `HeroSection.tsx`)
+### Cambios implementados
+- **Desactivación de OS Secundarios (`DiagnosticWizard.tsx`):**
+  - Los botones de selección de sistema operativo **Mac**, **Linux** y **Mobile** se muestran desactivados con indicador visual `(Pronto)` y título `"Disponible próximamente"`, manteniendo exclusivamente **Windows** activo por defecto.
+- **Optimizaciones de Diseño Móvil (`HeroSection.tsx`):**
+  - **Subtítulo:** Ajustado el interlineado y tamaño para asegurar que fluya limpiamente en máximo dos líneas en pantallas móviles.
+  - **Controles del Carrusel:** Flechas de navegación e indicadores de progreso actualizados con fondo semitransparente (`bg-slate-900/35 backdrop-blur-md`) para restar peso visual y destacar el contenido fotográfico.
+  - **Acciones Principales:** Estandarizados los botones principales (`Iniciar diagnóstico` y `Así funciona`) en una cuadrícula de 2 columnas (`grid grid-cols-2`) de ancho uniforme y centrado.
+  - **Accesos Directos ("Ayuda para tu día a día"):** Distribuidos en una cuadrícula de 3 columnas (`grid grid-cols-3`) formando dos filas horizontales centradas que ocupan todo el ancho de la pantalla.
+
+### Verificación técnica
+- `npm test` (`31/31` pruebas aprobadas).
+- `npm run build` (`vite build`) y `npm run lint` (`tsc --noEmit`): **0 errores**.
+
+---
+
+## [2026-11-25] · v2.12 Optimización de Espaciado y Padding en Hero para Vista Móvil (`HeroSection.tsx`)
+### Cambios implementados
+- **Optimización de Altura y Espaciado en Móvil (`src/components/HeroSection.tsx`):**
+  - Reducidos los paddings exteriores (`pt-4 pb-4` en lugar de `pt-6 pb-6`), gaps de grid y espaciados verticales en la versión móvil, además de ajustar la proporción del carrusel a `aspect-[16/10]` y compactar los botones y textos.
+  - Esto garantiza que los botones de acción (`Iniciar diagnóstico`, `Así funciona`) y las micro-garantías ubicadas debajo del carrusel se muestren completos y visibles en la vista inicial de pantallas móviles y tabletas (`Lenovo Tab P12`), sin recortes ni desbordamientos verticales.
+
+### Verificación técnica
+- `npm test` (`31/31` pruebas aprobadas).
+- `npm run build` (`vite build`) y `npm run lint` (`tsc --noEmit`): **0 errores**.
+
+---
+
+## [2026-11-25] · v2.11 Adición de Sección de Preguntas Frecuentes (FAQ) Estilo Acordeón (`FaqSection.tsx`)
+### Cambios implementados
+- **Componente FAQ Acordeón (`src/components/FaqSection.tsx`):**
+  - Creada la sección interactiva de preguntas frecuentes con animación de apertura/cierre, flechas indicadoras, accesibilidad completa (`aria-expanded`) y diseño sobrio corporativo.
+  - Integrada en la página principal (`src/App.tsx`) para resolver dudas comunes sobre seguridad, RustDesk, pagos, tarifas y garantías, reduciendo la fricción en la creación de tickets.
+
+### Verificación técnica
+- `npm test` (`31/31` pruebas aprobadas).
+- `npm run build` (`vite build`) y `npm run lint` (`tsc --noEmit`): **0 errores**.
+
+---
+
+## [2026-11-25] · v2.10 Actualización de Título de Reclutamiento en Tarjeta de Pie de Página (`LandingSections.tsx`)
+### Cambios implementados
+- **Actualización de Título en Tarjeta de Reclutamiento:**
+  - Cambiado a `"¿Eres especialista certificado en soporte TI? Colabora en nuestra red exclusiva bajo demanda"` para enfatizar el rigor de selección y certificación.
+
+### Verificación técnica
+- `npm run lint` (`tsc --noEmit`): **0 errores**.
+- `npm run build` (`vite build`): **0 errores**.
+
+---
+
+## [2026-11-25] · v2.9 Integración de Monitoreo de Rendimiento y Errores Frontend (Sentry + Web Vitals)
+### Cambios implementados
+- **Módulo de Monitoreo Silencioso (`src/services/frontendMonitoring.ts`):**
+  - Integrado `@sentry/react` junto con captura global de errores (`window.onerror`), promesas rechazadas (`unhandledrejection`), y Core Web Vitals (`LCP`, `CLS`, `TTFB`, `PageLoad` con `PerformanceObserver`) para el Portal de Clientes y el Centro de Operaciones.
+  - Añadidos endpoints BFF en `server.ts` (`POST /api/monitoring/errors` y `POST /api/monitoring/performance`) para procesar y registrar telemetría de rendimiento y errores en tiempo real sin alterar la interfaz de usuario (cumpliendo la regla de interfaz limpia).
+  - Inicializado automáticamente al arranque en `src/main.tsx`.
+
+### Verificación técnica
+- `npm test` (`31/31` pruebas aprobadas).
+- `npm run build` (`vite build`) y `npm run lint` (`tsc --noEmit`): **0 errores**.
+
+---
+
+## [2026-11-25] · v2.8 Actualización de Eyebrow y Subtítulo del Hero (`HeroSection.tsx`)
+### Cambios implementados
+- **Actualización de Copys en `src/components/HeroSection.tsx`:**
+  - Eyebrow cambiado a `"Soporte remoto con IA + Especialistas"`.
+  - Subtítulo cambiado a `"Cuéntanos qué ocurre. Nuestro asistente IA te guía gratis con pasos seguros; si necesitas conexión remota, un especialista certificado lo resuelve contigo."`.
+  - Ningún otro componente, botón, estilo o carrusel fue modificado.
+
+### Verificación técnica
+- `npm run lint` (`tsc --noEmit`): **0 errores**.
+- `npm run build` (`vite build`): **0 errores**.
+
+---
+
+## [2026-11-25] · v2.7 Reubicación de CTAs y Micro-Garantías del Hero debajo del Carrusel (`HeroSection.tsx`)
+### Cambios implementados
+- **Reubicación Quirúrgica en `src/components/HeroSection.tsx`:**
+  - Movidos exclusivamente el bloque de botones de acción (`Iniciar diagnóstico →`, `Así funciona ↓`) y las micro-garantías (`Tú decides cada paso`, `Sin contraseñas por chat`, `Desde $15 USD`) desde debajo del párrafo descriptivo hacia directamente debajo del contenedor del carrusel de imágenes con espaciado superior `mt-6`.
+  - Conservados intactos todos los estilos, clases CSS, iconos, animaciones, textos, handlers (`onClick`), carrusel, barra superior (`Header.tsx`) y resto de secciones.
+
+### Verificación técnica
+- `npm run lint` (`tsc --noEmit`): **0 errores**.
+- `npm run build` (`vite build`): **0 errores**.
+- Verificación visual en navegador real (Escritorio `1440x900`, Tablet Lenovo Tab P12 `1280x800` / `800x1280` y Móvil `390x844`): alineación limpia debajo del carrusel, `0` errores de consola y `0` desbordamiento horizontal.
+
+---
+
 ## [2026-11-21] · v2.6 Remediación Fase 2: Rendimiento, Supabase Completo, Accesibilidad y Limpieza (`AUD-12`–`AUD-22`)
 ### Cambios implementados
 - **Optimización de Peso, Imágenes y Code-Splitting (`src/App.tsx`, `vite.config.ts`, `src/components/HeroSection.tsx`, `src/components/DiagnosticWizard.tsx`):**

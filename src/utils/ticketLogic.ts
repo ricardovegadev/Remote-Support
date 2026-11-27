@@ -7,17 +7,25 @@ import type {
   IssueCategory,
   MemberTierType,
   OperatingSystem,
+  OrganizationMember,
   PaymentStatus,
   RemoteSessionRecord,
   ServiceTier,
   SupportTicket,
   TechnicianAvailability,
   TechnicianCommissionTier,
+  TechnicianSpecialty,
   TicketPriority,
   TicketStatus,
   ValidationResult,
   WizardDraft,
 } from '../types/support';
+import {
+  computeNetCommissionBreakdown,
+  getActiveBusinessConfig,
+  getConfiguredCommissionTier,
+  getConfiguredTierPriceUsd,
+} from '../config/businessConfig';
 
 export const FIXED_SERVICE_PRICE_USD = 15;
 export const LEGAL_TERMS_VERSION = 'v1.0-2026';
@@ -27,155 +35,18 @@ export const ADULT_RESTRICTION_ERROR =
   'Remote Support 365 está disponible únicamente para personas mayores de 18 años.';
 
 export const SERVICE_TIER_PRICES: Record<ServiceTier, number> = {
-  'Express $15': 15,
-  'Optimización $29': 29,
-  'Avanzado $39': 39,
-  'Pyme Esencial $39/mes': 39,
-  'Pyme Corporativo $79/mes': 79,
+  'Express $15': getActiveBusinessConfig().serviceTiers[0]?.priceUsd ?? 15,
+  'Optimización $29': getActiveBusinessConfig().serviceTiers[1]?.priceUsd ?? 29,
+  'Avanzado $39': getActiveBusinessConfig().serviceTiers[2]?.priceUsd ?? 39,
+  'Pyme Esencial $39/mes': getActiveBusinessConfig().pymePlans[0]?.priceUsd ?? 39,
+  'Pyme Corporativo $79/mes': getActiveBusinessConfig().pymePlans[1]?.priceUsd ?? 79,
 };
 
-export const SERVICE_TIER_REGULAR_PRICES: Record<ServiceTier, number> = {
-  'Express $15': 25,
-  'Optimización $29': 40,
-  'Avanzado $39': 55,
-  'Pyme Esencial $39/mes': 59,
-  'Pyme Corporativo $79/mes': 99,
-};
+export const SERVICE_TIER_OPTIONS = getActiveBusinessConfig().serviceTiers;
 
-export const SERVICE_TIER_OPTIONS: Array<{
-  id: ServiceTier;
-  priceUsd: number;
-  regularPriceUsd: number;
-  discountLabel: string;
-  recommended?: boolean;
-  eyebrow: string;
-  summary: string;
-  features: string[];
-}> = [
-  {
-    id: 'Express $15',
-    priceUsd: 15,
-    regularPriceUsd: 25,
-    discountLabel: '40% OFF',
-    eyebrow: 'Sesión Única Temporal · Inicio Rápido',
-    summary: 'Asistencia puntual para incidencias cotidianas, sujeta a disponibilidad.',
-    features: [
-      'Impresoras y escáneres',
-      'Correo Outlook / Microsoft 365',
-      'Instalación y configuración rápida',
-    ],
-  },
-  {
-    id: 'Optimización $29',
-    priceUsd: 29,
-    regularPriceUsd: 40,
-    discountLabel: '28% OFF',
-    recommended: true,
-    eyebrow: 'Rendimiento Integral',
-    summary: 'Deja tu equipo rápido, limpio y protegido en una sola sesión supervisada.',
-    features: [
-      'Limpieza profunda Windows / macOS',
-      'Eliminación de malware y procesos lentos',
-      'Optimización de arranque y actualizaciones',
-    ],
-  },
-  {
-    id: 'Avanzado $39',
-    priceUsd: 39,
-    regularPriceUsd: 55,
-    discountLabel: '29% OFF',
-    eyebrow: 'Soporte Especializado',
-    summary: 'Intervención avanzada para conectividad, respaldos y entornos críticos.',
-    features: [
-      'Configuración de redes Wi-Fi y VPN',
-      'Respaldos críticos y migración de datos',
-      'Diagnóstico avanzado de sistema',
-    ],
-  },
-];
+export const PYME_PLANS = getActiveBusinessConfig().pymePlans;
 
-export const PYME_PLANS: Array<{
-  id: string;
-  name: string;
-  serviceTier: ServiceTier;
-  priceUsd: number;
-  regularPriceUsd: number;
-  devicesLimit: string;
-  summary: string;
-  features: string[];
-}> = [
-  {
-    id: 'pyme-39',
-    name: 'Pyme Esencial',
-    serviceTier: 'Pyme Esencial $39/mes',
-    priceUsd: 39,
-    regularPriceUsd: 59,
-    devicesLimit: 'Hasta 5 equipos',
-    summary: 'Agente instalado desatendido y mesa de ayuda prioritaria mensual.',
-    features: [
-      'Hasta 5 equipos protegidos en red',
-      'Agente RustDesk instalado desatendido',
-      'Acceso a la información técnica disponible en la plataforma',
-    ],
-  },
-  {
-    id: 'pyme-79',
-    name: 'Pyme Corporativo',
-    serviceTier: 'Pyme Corporativo $79/mes',
-    priceUsd: 79,
-    regularPriceUsd: 99,
-    devicesLimit: 'Hasta 15 equipos',
-    summary: 'Plan mensual para equipos de una pequeña empresa; alcance sujeto a configuración.',
-    features: [
-      'Atención de solicitudes según condiciones del plan',
-      'Herramientas disponibles según la configuración contratada',
-      'Consulta de registros disponibles en la plataforma',
-    ],
-  },
-];
-
-export const SAAS_PLANS = [
-  {
-    id: 'starter-29',
-    name: 'Starter MSP',
-    priceUsd: 29,
-    regularPriceUsd: 49,
-    seats: 'Hasta 3 técnicos internos',
-    summary: 'Para firmas de soporte IT que digitalizan su mesa de ayuda remota.',
-    features: [
-      'Sala de conexión white-label (/sesion/RS-XXXX)',
-      'Despacho manual y cola en tiempo real',
-      'Herramientas de mesa de ayuda disponibles en la plataforma',
-    ],
-  },
-  {
-    id: 'growth-49',
-    name: 'Growth Helpdesk',
-    priceUsd: 49,
-    regularPriceUsd: 79,
-    seats: 'Hasta 10 técnicos + Freelancers',
-    summary: 'Plan de crecimiento con funciones de soporte y automatización sujetas a disponibilidad.',
-    highlighted: true,
-    features: [
-      'Asignación de tickets según las funciones disponibles',
-      'Gestión de miembros de la organización',
-      'Herramientas de automatización sujetas a disponibilidad',
-    ],
-  },
-  {
-    id: 'scale-79',
-    name: 'Scale Marketplace',
-    priceUsd: 79,
-    regularPriceUsd: 119,
-    seats: 'Capacidad y alcance por confirmar',
-    summary: 'Funciones avanzadas sujetas a configuración y acuerdo de servicio.',
-    features: [
-      'Funciones de gestión multiempresa sujetas a disponibilidad del producto',
-      'Integraciones remotas según configuración contratada',
-      'Volumen y tiempos de atención por definir en el acuerdo de servicio',
-    ],
-  },
-];
+export const SAAS_PLANS = getActiveBusinessConfig().saasPlans;
 
 export const CATEGORY_OPTIONS: CategoryOption[] = [
   {
@@ -292,6 +163,185 @@ export function getSuggestedTierForCategory(category: IssueCategory): ServiceTie
   return CATEGORY_SUGGESTED_TIER_MAP[category] ?? 'Express $15';
 }
 
+export function getOsCompatibleCategory(
+  category: IssueCategory,
+  osType: OperatingSystem | null | undefined
+): IssueCategory {
+  if (!osType || osType === 'Windows') {
+    return category;
+  }
+  if (
+    category === 'Windows lento o bajo rendimiento' ||
+    category === 'Actualizaciones de Windows'
+  ) {
+    return 'Sistema Operativo/Lentitud';
+  }
+  return category;
+}
+
+export function formatCategoryForOs(
+  category: IssueCategory | string,
+  osType?: OperatingSystem | null
+): string {
+  if (!osType || osType === 'Windows') {
+    return category;
+  }
+
+  if (osType === 'Mac') {
+    if (
+      category === 'Windows lento o bajo rendimiento' ||
+      category === 'Sistema Operativo/Lentitud'
+    ) {
+      return 'macOS lento o bajo rendimiento';
+    }
+    if (category === 'Actualizaciones de Windows') {
+      return 'Actualizaciones de macOS';
+    }
+    if (category === 'Pantallazos azules (BSOD)') {
+      return 'Reinicios inesperados / Kernel Panic';
+    }
+  }
+
+  if (osType === 'Linux') {
+    if (
+      category === 'Windows lento o bajo rendimiento' ||
+      category === 'Sistema Operativo/Lentitud'
+    ) {
+      return 'Linux lento o alto consumo';
+    }
+    if (category === 'Actualizaciones de Windows') {
+      return 'Actualizaciones y paquetes del sistema';
+    }
+    if (category === 'Pantallazos azules (BSOD)') {
+      return 'Fallos de arranque o Kernel Panic';
+    }
+  }
+
+  if (osType === 'Mobile') {
+    if (
+      category === 'Windows lento o bajo rendimiento' ||
+      category === 'Sistema Operativo/Lentitud'
+    ) {
+      return 'Dispositivo móvil lento o sin espacio';
+    }
+    if (category === 'Actualizaciones de Windows') {
+      return 'Actualizaciones del sistema móvil';
+    }
+    if (category === 'Pantallazos azules (BSOD)') {
+      return 'Reinicios o bloqueos del dispositivo';
+    }
+  }
+
+  return category;
+}
+
+const CATEGORY_TO_SPECIALTIES: Record<IssueCategory, TechnicianSpecialty[]> = {
+  'Windows lento o bajo rendimiento': ['Windows & BSOD'],
+  'Aplicaciones que no arrancan': ['Windows & BSOD'],
+  'Pantallazos azules (BSOD)': ['Windows & BSOD'],
+  'Problemas de Wi-Fi o red': ['Redes & VPN'],
+  'Errores de Microsoft 365 y Outlook': ['Microsoft 365 & Outlook'],
+  'Configuración de impresoras': ['Impresoras'],
+  'Eliminación de malware y virus': ['Seguridad & Malware'],
+  'Recuperación de archivos': ['Recuperación de Datos'],
+  'Actualizaciones de Windows': ['Windows & BSOD'],
+  'VPN y acceso remoto': ['Redes & VPN'],
+  Impresoras: ['Impresoras'],
+  'Correo/Office': ['Microsoft 365 & Outlook'],
+  'Sistema Operativo/Lentitud': ['Windows & BSOD'],
+  'Redes/Wi-Fi': ['Redes & VPN'],
+  Otro: ['Windows & BSOD'],
+};
+
+export function matchTechnicianForTicket(
+  ticket: Pick<SupportTicket, 'os_type' | 'category'>,
+  member: Pick<OrganizationMember, 'specialties' | 'full_name'>
+): {
+  compatible: boolean;
+  score: number;
+  reason: string;
+  matchedSpecialties: TechnicianSpecialty[];
+} {
+  const specialties = Array.isArray(member.specialties) ? member.specialties : [];
+  const rawCategorySpecs = CATEGORY_TO_SPECIALTIES[ticket.category] ?? [];
+  const categorySpecs: TechnicianSpecialty[] =
+    ticket.os_type === 'Windows'
+      ? rawCategorySpecs
+      : rawCategorySpecs.filter((spec) => spec !== 'Windows & BSOD');
+
+  const matchedSpecialties: TechnicianSpecialty[] = [];
+
+  if (ticket.os_type === 'Mac') {
+    if (!specialties.includes('Soporte macOS')) {
+      return {
+        compatible: false,
+        score: 0,
+        reason: 'Requiere especialidad Soporte macOS.',
+        matchedSpecialties: [],
+      };
+    }
+    matchedSpecialties.push('Soporte macOS');
+  } else if (ticket.os_type === 'Linux') {
+    if (!specialties.includes('Soporte Linux & Servidores')) {
+      return {
+        compatible: false,
+        score: 0,
+        reason: 'Requiere especialidad Soporte Linux & Servidores.',
+        matchedSpecialties: [],
+      };
+    }
+    matchedSpecialties.push('Soporte Linux & Servidores');
+  } else if (ticket.os_type === 'Windows') {
+    const requiresWindowsOs =
+      ticket.category === 'Pantallazos azules (BSOD)' ||
+      ticket.category === 'Actualizaciones de Windows' ||
+      ticket.category === 'Windows lento o bajo rendimiento';
+
+    if (requiresWindowsOs && !specialties.includes('Windows & BSOD')) {
+      return {
+        compatible: false,
+        score: 0,
+        reason: 'Requiere especialidad Windows & BSOD.',
+        matchedSpecialties: [],
+      };
+    }
+    if (specialties.includes('Windows & BSOD')) {
+      matchedSpecialties.push('Windows & BSOD');
+    }
+  }
+
+  for (const spec of categorySpecs) {
+    if (specialties.includes(spec) && !matchedSpecialties.includes(spec)) {
+      matchedSpecialties.push(spec);
+    }
+  }
+
+  if (ticket.os_type === 'Windows' && matchedSpecialties.length === 0) {
+    return {
+      compatible: false,
+      score: 0,
+      reason: `Sin especialidad Windows o ${categorySpecs[0] ?? 'categoría compatible'}.`,
+      matchedSpecialties: [],
+    };
+  }
+
+  const matchedCategory = categorySpecs.some((spec) => specialties.includes(spec));
+  const score =
+    (ticket.os_type === 'Mac' || ticket.os_type === 'Linux' || specialties.includes('Windows & BSOD')
+      ? 60
+      : 30) + (matchedCategory ? 40 : 0);
+
+  return {
+    compatible: true,
+    score,
+    reason:
+      matchedSpecialties.length > 0
+        ? `Compatible: ${matchedSpecialties.join(' · ')}`
+        : `Compatible con ${ticket.os_type}`,
+    matchedSpecialties,
+  };
+}
+
 export const INITIAL_WIZARD_DRAFT: WizardDraft = {
   step: 1,
   category: null,
@@ -328,20 +378,15 @@ export function isValidUuid(value: string | null | undefined): boolean {
 }
 
 export function getServiceTierPriceUsd(tier: ServiceTier): number {
-  return SERVICE_TIER_PRICES[tier] ?? FIXED_SERVICE_PRICE_USD;
+  return (
+    getConfiguredTierPriceUsd(tier, undefined, getActiveBusinessConfig()) ??
+    SERVICE_TIER_PRICES[tier] ??
+    getActiveBusinessConfig().serviceTiers[0]?.priceUsd ??
+    FIXED_SERVICE_PRICE_USD
+  );
 }
 
-export function getServiceTierRegularPriceUsd(tier: ServiceTier): number {
-  return SERVICE_TIER_REGULAR_PRICES[tier] ?? 25;
-}
-
-export function getDiscountPercent(
-  priceUsd: number,
-  regularPriceUsd: number
-): number {
-  if (regularPriceUsd <= 0 || priceUsd >= regularPriceUsd) return 0;
-  return Math.round(((regularPriceUsd - priceUsd) / regularPriceUsd) * 100);
-}
+export { computeNetCommissionBreakdown };
 
 export function getInitials(name: string | null | undefined): string {
   const parts = String(name ?? '')
@@ -393,6 +438,74 @@ export function getPriorityMeta(priority: TicketPriority): {
         badgeClass: 'bg-[#E0F2FE] text-sky-800',
       };
   }
+}
+
+const PRIORITY_URGENCY_RANK: Record<TicketPriority, number> = {
+  high: 0,
+  medium: 1,
+  low: 2,
+};
+
+const ACTIVE_STATUS_SLA_RANK: Record<TicketStatus, number> = {
+  ready_to_connect: 0,
+  in_progress: 1,
+  waiting_payment: 2,
+  resolved: 3,
+};
+
+export function sortTicketsByUrgencyAndSla(
+  tickets: SupportTicket[]
+): SupportTicket[] {
+  return [...tickets].sort((a, b) => {
+    const aResolved = a.status === 'resolved' ? 1 : 0;
+    const bResolved = b.status === 'resolved' ? 1 : 0;
+    if (aResolved !== bResolved) {
+      return aResolved - bResolved;
+    }
+
+    if (aResolved === 0) {
+      const aPriority = PRIORITY_URGENCY_RANK[deriveTicketPriority(a)];
+      const bPriority = PRIORITY_URGENCY_RANK[deriveTicketPriority(b)];
+      if (aPriority !== bPriority) {
+        return aPriority - bPriority;
+      }
+
+      const aStatusRank = ACTIVE_STATUS_SLA_RANK[a.status] ?? 99;
+      const bStatusRank = ACTIVE_STATUS_SLA_RANK[b.status] ?? 99;
+      if (aStatusRank !== bStatusRank) {
+        return aStatusRank - bStatusRank;
+      }
+
+      const aCreated = Date.parse(a.created_at) || 0;
+      const bCreated = Date.parse(b.created_at) || 0;
+      if (aCreated !== bCreated) {
+        return aCreated - bCreated;
+      }
+      return a.ticket_code.localeCompare(b.ticket_code);
+    }
+
+    const aClosed = Date.parse(a.resolved_at ?? a.created_at) || 0;
+    const bClosed = Date.parse(b.resolved_at ?? b.created_at) || 0;
+    return bClosed - aClosed;
+  });
+}
+
+export function formatElapsedSessionDuration(
+  startedAtIso: string | null | undefined,
+  nowMs: number = Date.now()
+): string {
+  const startMs = startedAtIso ? Date.parse(startedAtIso) : Number.NaN;
+  if (Number.isNaN(startMs)) return '00:00';
+  const totalSeconds = Math.max(0, Math.floor((nowMs - startMs) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const mm = String(minutes).padStart(2, '0');
+  const ss = String(seconds).padStart(2, '0');
+  if (hours > 0) {
+    return `${String(hours).padStart(2, '0')}:${mm}:${ss}`;
+  }
+  return `${mm}:${ss}`;
 }
 
 export function getStatusBadgeClass(status: TicketStatus): string {
@@ -545,20 +658,56 @@ export function deriveInitialDiagnosisSummary(
   osType: OperatingSystem,
   problemDescription: string
 ): string {
+  const isMac = osType === 'Mac';
+  const isLinux = osType === 'Linux';
+  const isMobile = osType === 'Mobile';
+
   const map: Record<IssueCategory, string> = {
-    'Windows lento o bajo rendimiento': `Protocolo sugerido (${osType}): Auditar Administrador de Tareas, programas de inicio, uso de disco/RAM y servicios en segundo plano.`,
-    'Aplicaciones que no arrancan': `Protocolo sugerido (${osType}): Verificar librerías Runtime/DLL, registros de fallos de aplicación y permisos de ejecución.`,
-    'Pantallazos azules (BSOD)': `Protocolo sugerido (${osType}): Analizar archivos Minidump/volcados de memoria, controladores críticos y estabilidad del sistema.`,
+    'Windows lento o bajo rendimiento': isMac
+      ? 'Protocolo sugerido (Mac): Auditar Monitor de Actividad, ítems de inicio de sesión, almacenamiento APFS y procesos en segundo plano.'
+      : isLinux
+      ? 'Protocolo sugerido (Linux): Auditar consumo de CPU/RAM (top/htop), servicios systemd y espacio en particiones.'
+      : isMobile
+      ? 'Protocolo sugerido (Mobile): Revisar almacenamiento disponible, caché de aplicaciones y procesos activos en segundo plano.'
+      : 'Protocolo sugerido (Windows): Auditar Administrador de Tareas, programas de inicio, uso de disco/RAM y servicios en segundo plano.',
+    'Aplicaciones que no arrancan': isMac
+      ? 'Protocolo sugerido (Mac): Revisar reportes de cierre en Consola, permisos en Privacidad y Seguridad e integridad del paquete .app.'
+      : isLinux
+      ? 'Protocolo sugerido (Linux): Revisar dependencias en terminal, logs de journalctl y permisos de ejecución.'
+      : isMobile
+      ? 'Protocolo sugerido (Mobile): Validar permisos de la app, limpiar caché y verificar compatibilidad de versión.'
+      : 'Protocolo sugerido (Windows): Verificar librerías Runtime/DLL, registros de fallos de aplicación y permisos de ejecución.',
+    'Pantallazos azules (BSOD)': isMac
+      ? 'Protocolo sugerido (Mac): Analizar reportes de Kernel Panic, extensiones del sistema y salud de almacenamiento.'
+      : isLinux
+      ? 'Protocolo sugerido (Linux): Analizar logs de kernel (dmesg/journalctl), módulos y estabilidad de memoria.'
+      : isMobile
+      ? 'Protocolo sugerido (Mobile): Analizar historial de reinicios, temperatura del equipo y conflictos de software.'
+      : 'Protocolo sugerido (Windows): Analizar archivos Minidump/volcados de memoria, controladores críticos y estabilidad del sistema.',
     'Problemas de Wi-Fi o red': `Protocolo sugerido (${osType}): Validar adaptador de red, concesión DHCP, resolución DNS y estabilidad de puerta de enlace.`,
-    'Errores de Microsoft 365 y Outlook': `Protocolo sugerido (${osType}): Verificar credenciales Modern Auth/WAM, estado de licencia Microsoft 365 y reparación de perfil PST/OST.`,
-    'Configuración de impresoras': `Protocolo sugerido (${osType}): Inspeccionar spooler de impresión, driver oficial y puerto TCP/IP o USB.`,
-    'Eliminación de malware y virus': `Protocolo sugerido (${osType}): Ejecutar desinfección profunda, depurar extensiones/secuestradores de navegador y reforzar protección.`,
+    'Errores de Microsoft 365 y Outlook': `Protocolo sugerido (${osType}): Verificar credenciales Modern Auth, estado de licencia Microsoft 365 y reparación de perfil.`,
+    'Configuración de impresoras': isMac
+      ? 'Protocolo sugerido (Mac): Inspeccionar cola de impresión CUPS, AirPrint o controlador oficial y conectividad de red.'
+      : `Protocolo sugerido (${osType}): Inspeccionar cola de impresión, controlador oficial y puerto TCP/IP o USB.`,
+    'Eliminación de malware y virus': `Protocolo sugerido (${osType}): Ejecutar desinfección profunda, depurar extensiones sospechosas del navegador y reforzar protección.`,
     'Recuperación de archivos': `Protocolo sugerido (${osType}): Evaluar volumen afectado en modo seguro de lectura, rescatar documentos y respaldar en ruta segura.`,
-    'Actualizaciones de Windows': `Protocolo sugerido (${osType}): Limpiar caché de SoftwareDistribution, reparar componentes de Windows Update o revertir parches fallidos.`,
-    'VPN y acceso remoto': `Protocolo sugerido (${osType}): Configurar túnel VPN corporativo, reglas de escritorio remoto RDP seguro y rutas DNS privadas.`,
-    Impresoras: `Protocolo sugerido (${osType}): Inspeccionar spooler de impresión, driver activo y puerto TCP/IP.`,
+    'Actualizaciones de Windows': isMac
+      ? 'Protocolo sugerido (Mac): Verificar espacio libre para actualización de macOS, descarga del instalador y estado de reinicio.'
+      : isLinux
+      ? 'Protocolo sugerido (Linux): Reparar gestor de paquetes, limpiar bloqueos pendientes y validar kernel instalado.'
+      : 'Protocolo sugerido (Windows): Limpiar caché de SoftwareDistribution, reparar componentes de Windows Update o revertir parches fallidos.',
+    'VPN y acceso remoto': `Protocolo sugerido (${osType}): Configurar túnel VPN corporativo, reglas de acceso remoto seguro y rutas DNS privadas.`,
+    Impresoras: isMac
+      ? 'Protocolo sugerido (Mac): Inspeccionar cola CUPS / AirPrint, controlador activo y puerto de red.'
+      : `Protocolo sugerido (${osType}): Inspeccionar cola de impresión, controlador activo y puerto TCP/IP.`,
     'Correo/Office': `Protocolo sugerido (${osType}): Verificar credenciales OAuth2/IMAP, caché de perfil y estado de licencia Microsoft 365.`,
-    'Sistema Operativo/Lentitud': `Protocolo sugerido (${osType}): Auditar consumo de CPU/disco, servicios en segundo plano y cola de actualizaciones.`,
+    'Sistema Operativo/Lentitud': isMac
+      ? 'Protocolo sugerido (Mac): Auditar Monitor de Actividad, ítems de inicio, disco APFS y actualizaciones pendientes de macOS.'
+      : isLinux
+      ? 'Protocolo sugerido (Linux): Auditar consumo de CPU/disco, servicios systemd y cola de paquetes.'
+      : isMobile
+      ? 'Protocolo sugerido (Mobile): Revisar almacenamiento, caché de aplicaciones y consumo en segundo plano.'
+      : `Protocolo sugerido (${osType}): Auditar consumo de CPU/disco, servicios en segundo plano y cola de actualizaciones.`,
     'Redes/Wi-Fi': `Protocolo sugerido (${osType}): Validar adaptador de red, resolución DNS, puerta de enlace y túnel VPN.`,
     Otro: `Protocolo sugerido (${osType}): Diagnóstico guiado de software, periféricos y permisos del sistema.`,
   };
@@ -597,10 +746,14 @@ export function createTicketFromDraft(
   const explicitRandomFn = options?.randomFn;
   const randomFn = explicitRandomFn ?? Math.random;
   const created_at = options?.nowIso ?? new Date().toISOString();
+  const normalizedCategory = getOsCompatibleCategory(
+    draft.category,
+    draft.operatingSystem
+  );
   const aiSummary =
     draft.aiTriage?.preDiagnosis ??
     deriveInitialDiagnosisSummary(
-      draft.category,
+      normalizedCategory,
       draft.operatingSystem,
       draft.description
     );
@@ -615,7 +768,7 @@ export function createTicketFromDraft(
     organization_id: options?.organizationId ?? '00000000-0000-4000-8000-000000000001',
     organization_name:
       options?.organizationName ?? 'Mi organización',
-    category: draft.category,
+    category: normalizedCategory,
     os_type: draft.operatingSystem,
     service_tier: draft.serviceTier,
     billing_mode: billingMode,
@@ -630,6 +783,8 @@ export function createTicketFromDraft(
     problem_description: draft.description.trim(),
     ai_diagnosis_summary: aiSummary,
     ai_diagnosis: draft.aiTriage ?? null,
+    human_reviewed_at: null,
+    human_reviewed_by: null,
     client_name: draft.clientName.trim(),
     client_email: draft.clientEmail.trim().toLowerCase(),
     client_birth_date: birthDate,
@@ -705,8 +860,8 @@ export function canClaimTicket(ticket: SupportTicket): boolean {
 
 export function computeAverageResponseMinutes(
   tickets: SupportTicket[],
-  sessions: RemoteSessionRecord[] = []
-): { minutes: number; formatted: string } {
+  _sessions: RemoteSessionRecord[] = []
+): { minutes: number | null; formatted: string; sampleCount: number } {
   const responseSamples: number[] = [];
 
   for (const ticket of tickets) {
@@ -723,21 +878,16 @@ export function computeAverageResponseMinutes(
   }
 
   if (responseSamples.length === 0) {
-    const validDurations = sessions
-      .map((s) => s.duration_minutes)
-      .filter((d) => typeof d === 'number' && d > 0);
-    if (validDurations.length === 0) {
-      return { minutes: 0, formatted: '0.0 min' };
-    }
-    const avgSessionMin =
-      validDurations.reduce((acc, n) => acc + n, 0) / validDurations.length;
-    const rounded = Math.round(avgSessionMin * 10) / 10;
-    return { minutes: rounded, formatted: `${rounded.toFixed(1)} min` };
+    return { minutes: null, formatted: 'Sin datos', sampleCount: 0 };
   }
 
   const total = responseSamples.reduce((acc, val) => acc + val, 0);
   const avg = Math.round((total / responseSamples.length) * 10) / 10;
-  return { minutes: avg, formatted: `${avg.toFixed(1)} min` };
+  return {
+    minutes: avg,
+    formatted: `${avg.toFixed(1)} min`,
+    sampleCount: responseSamples.length,
+  };
 }
 
 export function buildTechnicalResolutionSummary(
@@ -914,59 +1064,13 @@ export function getRustDeskInstallerUrl(
   return getOfficialRustDeskDownloadEndpoint(os);
 }
 
-export const TECHNICIAN_COMMISSION_TIERS: TechnicianCommissionTier[] = [
-  {
-    id: 'base',
-    label: 'Nivel Base',
-    minIncidents: 0,
-    maxIncidents: 25,
-    rangeLabel: '0 – 25 incidencias/mes',
-    commissionPercent: 65,
-    description:
-      'Ingreso inicial para técnicos verificados en modalidad Half-time o Full-time.',
-  },
-  {
-    id: 'pro',
-    label: 'Nivel Pro',
-    minIncidents: 26,
-    maxIncidents: 100,
-    rangeLabel: '26 – 100 incidencias/mes',
-    commissionPercent: 75,
-    description:
-      'Desbloqueado al superar 25 incidencias resueltas en el mes calendario.',
-  },
-  {
-    id: 'senior',
-    label: 'Nivel Senior',
-    minIncidents: 101,
-    maxIncidents: 250,
-    rangeLabel: '101 – 250 incidencias/mes',
-    commissionPercent: 80,
-    description:
-      'Para especialistas de alto volumen con SLA y calificación consistentes.',
-  },
-  {
-    id: 'elite',
-    label: 'Nivel Elite',
-    minIncidents: 251,
-    maxIncidents: null,
-    rangeLabel: '251 – 500+ incidencias/mes',
-    commissionPercent: 85,
-    description:
-      'Máxima participación mensual para referentes de la red Remote Support 365.',
-  },
-];
+export const TECHNICIAN_COMMISSION_TIERS: TechnicianCommissionTier[] =
+  getActiveBusinessConfig().commissionTiers;
 
 export function getTechnicianCommissionTier(
   monthlyResolvedCount: number
 ): TechnicianCommissionTier {
-  const safeCount = Number.isFinite(monthlyResolvedCount)
-    ? Math.max(0, Math.floor(monthlyResolvedCount))
-    : 0;
-  if (safeCount >= 251) return TECHNICIAN_COMMISSION_TIERS[3];
-  if (safeCount >= 101) return TECHNICIAN_COMMISSION_TIERS[2];
-  if (safeCount >= 26) return TECHNICIAN_COMMISSION_TIERS[1];
-  return TECHNICIAN_COMMISSION_TIERS[0];
+  return getConfiguredCommissionTier(monthlyResolvedCount, getActiveBusinessConfig());
 }
 
 export function parseAppRoute(pathname: string): {

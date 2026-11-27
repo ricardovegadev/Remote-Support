@@ -31,15 +31,13 @@ import {
   Wrench,
   Zap,
 } from 'lucide-react';
+import { getConfiguredTierPriceUsd } from '../config/businessConfig';
 import { FEATURE_FLAGS } from '../config/features';
+import { useBusinessConfig } from '../hooks/useBusinessConfig';
 import type { IssueCategory, ServiceTier } from '../types/support';
 import {
   CATEGORY_OPTIONS,
   isValidEmail,
-  PYME_PLANS,
-  SAAS_PLANS,
-  SERVICE_TIER_OPTIONS,
-  TECHNICIAN_COMMISSION_TIERS,
 } from '../utils/ticketLogic';
 import {
   CardNetworkBadges,
@@ -112,16 +110,6 @@ const SERVICE_COLOR_MAP: Record<IssueCategory, string> = {
   Otro: 'bg-slate-100 text-[#0B1528] border border-slate-200',
 };
 
-function getTierBadgeStyle(tier: ServiceTier): string {
-  if (tier === 'Express $15') {
-    return 'bg-emerald-50 text-emerald-800 border-emerald-200/90';
-  }
-  if (tier === 'Avanzado $39') {
-    return 'bg-indigo-50 text-indigo-800 border-indigo-200/90';
-  }
-  return 'bg-blue-50 text-[#1D4ED8] border-blue-200/90';
-}
-
 const PROCESS_STEPS = [
   {
     num: '01',
@@ -192,6 +180,7 @@ export function LandingSections({
   onStartDiagnostic,
   onOpenTechnicianApply,
 }: LandingSectionsProps) {
+  const businessConfig = useBusinessConfig();
   const [pricingAudience, setPricingAudience] = useState<'clients' | 'saas'>('clients');
   const [serviceFilter, setServiceFilter] = useState<
     'all' | 'popular' | 'office' | 'performance' | 'network'
@@ -203,6 +192,15 @@ export function LandingSections({
   const [selectedSaasPlan, setSelectedSaasPlan] = useState('Growth Helpdesk ($49/mes)');
   const [leadError, setLeadError] = useState<string | null>(null);
   const [leadSubmitted, setLeadSubmitted] = useState(false);
+
+  const expressPriceUsd =
+    businessConfig.serviceTiers[0]?.priceUsd ??
+    getConfiguredTierPriceUsd('Express $15', 'one_time', businessConfig) ??
+    15;
+  const minCommissionPct = businessConfig.commissionTiers[0]?.commissionPercent ?? 65;
+  const maxCommissionPct =
+    businessConfig.commissionTiers[businessConfig.commissionTiers.length - 1]
+      ?.commissionPercent ?? 85;
 
   const handleCopyReferralLink = async () => {
     const baseUrl =
@@ -447,13 +445,13 @@ export function LandingSections({
                         </span>
                         <span
                           aria-hidden="true"
-                          className="font-mono tabular-nums text-3xl font-bold text-slate-200 select-none"
+                          className="font-display tabular-nums text-3xl font-bold text-slate-200 select-none"
                         >
                           {step.num}
                         </span>
                       </div>
 
-                      <p className="font-mono tabular-nums text-xs font-semibold text-[#2563EB]">
+                      <p className="tabular-nums text-xs font-semibold text-[#2563EB]">
                         {step.eyebrow}
                       </p>
                       <h3 className="text-lg font-semibold text-[#0B1528]">
@@ -639,7 +637,7 @@ export function LandingSections({
                           </span>
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2 mb-0.5">
-                              <span className="font-mono tabular-nums text-[11px] font-medium text-slate-500">
+                              <span className="tabular-nums text-[11px] font-medium text-slate-500">
                                 ~{service.typicalResolutionTime}
                               </span>
                               {isPopular && (
@@ -653,14 +651,6 @@ export function LandingSections({
                             </h3>
                           </div>
                         </div>
-
-                        <span
-                          className={`font-mono tabular-nums text-[11px] font-semibold px-2.5 py-0.5 rounded-md border shrink-0 ${getTierBadgeStyle(
-                            service.suggestedTier
-                          )}`}
-                        >
-                          {service.suggestedTier}
-                        </span>
                       </div>
 
                       <p className="text-sm text-slate-600 leading-relaxed">
@@ -805,7 +795,7 @@ export function LandingSections({
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch pt-2">
-                  {SERVICE_TIER_OPTIONS.map((tier) => {
+                  {businessConfig.serviceTiers.map((tier) => {
                     const isFeatured = Boolean(tier.recommended);
                     const tierName = tier.id.split(' $')[0];
                     const isExpress = tier.id === 'Express $15';
@@ -825,15 +815,9 @@ export function LandingSections({
                         }`}
                       >
                         {isFeatured && (
-                          <>
-                            <div
-                              aria-hidden="true"
-                              className="absolute inset-x-0 top-0 h-1.5 rounded-t-xl bg-gradient-to-r from-[#2563EB] via-blue-400 to-[#10B981]"
-                            />
-                            <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-3.5 py-1 rounded-full bg-gradient-to-r from-[#2563EB] to-[#1D4ED8] text-white text-[11px] font-bold tracking-wide whitespace-nowrap shadow-md shadow-blue-600/25">
-                              ★ RECOMENDADO
-                            </div>
-                          </>
+                          <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-3.5 py-1 rounded-full bg-gradient-to-r from-[#2563EB] to-[#1D4ED8] text-white text-[11px] font-bold tracking-wide whitespace-nowrap shadow-md shadow-blue-600/25">
+                            ★ RECOMENDADO
+                          </div>
                         )}
 
                         <div>
@@ -863,7 +847,7 @@ export function LandingSections({
                           </h3>
 
                           <div className="mt-4 space-y-1">
-                            <p className="font-mono tabular-nums text-3xl font-bold tracking-tight text-[#0B1528]">
+                            <p className="font-display tabular-nums text-3xl font-bold tracking-tight text-[#0B1528]">
                               ${tier.priceUsd} USD{' '}
                               <span className="text-xs font-sans font-normal text-slate-600">
                                 / incidente
@@ -916,7 +900,7 @@ export function LandingSections({
                   Planes Pyme Mensuales (acceso desatendido y tiempos objetivo)
                 </p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {PYME_PLANS.map((plan, index) => {
+                  {businessConfig.pymePlans.map((plan, index) => {
                     const isPrimary = index === 1;
                     return (
                       <div
@@ -944,7 +928,7 @@ export function LandingSections({
                           <h3 className="text-xl font-bold mt-3">{plan.name}</h3>
 
                           <div className="mt-3 flex items-baseline gap-2.5">
-                            <p className="font-mono tabular-nums text-3xl font-bold">
+                            <p className="font-display tabular-nums text-3xl font-bold">
                               ${plan.priceUsd} USD
                               <span
                                 className={`text-xs font-sans font-normal ${
@@ -1093,19 +1077,19 @@ export function LandingSections({
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-3 border-t border-slate-200 text-xs">
                     <div>
-                      <p className="font-mono tabular-nums font-bold text-[#0B1528]">
+                      <p className="tabular-nums font-bold text-[#0B1528]">
                         Tarifa publicada
                       </p>
                       <p className="text-slate-600 mt-0.5">Consulta antes de contratar</p>
                     </div>
                     <div>
-                      <p className="font-mono tabular-nums font-bold text-emerald-700">
-                        $15 USD
+                      <p className="tabular-nums font-bold text-emerald-700">
+                        ${expressPriceUsd} USD
                       </p>
                       <p className="text-slate-600 mt-0.5">Tarifa Express publicada</p>
                     </div>
                     <div>
-                      <p className="font-mono tabular-nums font-bold text-[#2563EB]">
+                      <p className="tabular-nums font-bold text-[#2563EB]">
                         3 pasos
                       </p>
                       <p className="text-slate-600 mt-0.5">Diagnóstico guiado</p>
@@ -1167,7 +1151,7 @@ export function LandingSections({
               className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start animate-fade-up"
             >
               <div className="lg:col-span-8 grid grid-cols-1 md:grid-cols-3 gap-5">
-                {SAAS_PLANS.map((plan) => {
+                {businessConfig.saasPlans.map((plan) => {
                   return (
                     <div
                       key={plan.id}
@@ -1197,7 +1181,7 @@ export function LandingSections({
 
                         <div className="mt-3 space-y-1">
 
-                          <p className="font-mono tabular-nums text-2xl font-bold">
+                          <p className="font-display tabular-nums text-2xl font-bold">
                             ${plan.priceUsd} USD{' '}
                             <span
                               className={`text-xs font-sans font-normal ${
@@ -1344,13 +1328,14 @@ export function LandingSections({
                         onChange={(e) => setSelectedSaasPlan(e.target.value)}
                         className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/15"
                       >
-                        <option value="Starter MSP ($29/mes)">Starter MSP ($29/mes)</option>
-                        <option value="Growth Helpdesk ($49/mes)">
-                          Growth Helpdesk ($49/mes)
-                        </option>
-                        <option value="Scale Marketplace ($79/mes)">
-                          Scale Marketplace ($79/mes)
-                        </option>
+                        {businessConfig.saasPlans.map((plan) => {
+                          const optionVal = `${plan.name} ($${plan.priceUsd}/mes)`;
+                          return (
+                            <option key={plan.id} value={optionVal}>
+                              {optionVal}
+                            </option>
+                          );
+                        })}
                       </select>
                     </div>
 
@@ -1408,32 +1393,35 @@ export function LandingSections({
                 <div className="lg:col-span-7 space-y-5">
                   <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 text-xs font-semibold">
                     <Sparkles className="w-3.5 h-3.5 text-[#10B981]" aria-hidden="true" />
-                    <span>Red de Especialistas Remotos · Half-time / Full-time</span>
+                    <span>Red de Especialistas Independientes · Bajo Demanda</span>
                   </div>
 
                   <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
-                    ¿Eres técnico en soporte IT? Trabaja con nosotros
+                    ¿Eres especialista certificado en soporte TI? Colabora en nuestra red exclusiva bajo demanda
                   </h2>
 
                   <p className="text-sm sm:text-base text-slate-300 leading-relaxed">
-                    Únete a nuestra red bajo demanda estilo Uber: conéctate en tus horarios,
-                    atiende incidencias según tu especialidad y escala tu comisión mensual
-                    del <strong className="text-emerald-300">65 % al 85 %</strong> conforme
-                    resuelves casos.
+                    Únete como profesional autónomo bajo demanda: elige tu disponibilidad sin
+                    horarios fijos, atiende incidencias según tu especialidad y escala tu
+                    participación mensual del{' '}
+                    <strong className="text-emerald-300">
+                      {minCommissionPct}% al {maxCommissionPct}%
+                    </strong>{' '}
+                    sobre el ingreso neto de cada caso resuelto.
                   </p>
 
                   <div className="flex flex-wrap gap-2 text-xs">
                     <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0F172A] border border-slate-700/80 text-slate-200">
                       <Clock className="w-3.5 h-3.5 text-[#10B981]" aria-hidden="true" />
-                      <span>Modalidad Half-time o Full-time</span>
+                      <span>Colaboración independiente por demanda</span>
                     </span>
                     <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0F172A] border border-slate-700/80 text-slate-200">
                       <CheckCircle2 className="w-3.5 h-3.5 text-[#10B981]" aria-hidden="true" />
-                      <span>Pago por incidencia resuelta</span>
+                      <span>Verificación KYC y período supervisado</span>
                     </span>
                     <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0F172A] border border-slate-700/80 text-slate-200">
                       <ShieldCheck className="w-3.5 h-3.5 text-[#10B981]" aria-hidden="true" />
-                      <span>Evaluación técnica + NDA en línea</span>
+                      <span>Evaluación técnica + auditoría de sesión</span>
                     </span>
                   </div>
 
@@ -1442,9 +1430,9 @@ export function LandingSections({
                       type="button"
                       data-testid="landing-tech-apply-cta"
                       onClick={onOpenTechnicianApply}
-                      className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-[#10B981] hover:bg-emerald-400 text-[#0B1528] text-sm font-bold shadow-lg shadow-emerald-950/30 active:scale-[0.99] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B1528]"
+                      className="min-h-[44px] inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-[#10B981] hover:bg-emerald-400 text-[#0B1528] text-sm font-bold shadow-lg shadow-emerald-950/30 active:scale-[0.99] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B1528]"
                     >
-                      <span>Postular y realizar evaluación</span>
+                      <span>Postular y calcular ganancia</span>
                       <ArrowRight className="w-4 h-4" aria-hidden="true" />
                     </button>
                   </div>
@@ -1454,15 +1442,15 @@ export function LandingSections({
                   <div className="rounded-2xl bg-[#0F172A] border border-slate-800 p-5 space-y-3">
                     <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-800">
                       <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                        Comisiones mensuales
+                        Comisiones sobre neto
                       </span>
-                      <span className="text-xs font-mono font-semibold text-emerald-300">
-                        65 % – 85 %
+                      <span className="text-xs tabular-nums font-semibold text-emerald-300">
+                        {minCommissionPct}% – {maxCommissionPct}%
                       </span>
                     </div>
 
                     <div className="space-y-2">
-                      {TECHNICIAN_COMMISSION_TIERS.map((tier) => (
+                      {businessConfig.commissionTiers.map((tier) => (
                         <div
                           key={tier.id}
                           className={`flex items-center justify-between gap-3 rounded-xl px-3.5 py-2.5 border ${
@@ -1473,11 +1461,11 @@ export function LandingSections({
                         >
                           <div className="min-w-0">
                             <p className="text-xs font-bold text-white">{tier.label}</p>
-                            <p className="text-[11px] font-mono text-slate-300">
+                            <p className="text-[11px] tabular-nums text-slate-300">
                               {tier.rangeLabel}
                             </p>
                           </div>
-                          <span className="text-base font-extrabold font-mono tabular-nums text-emerald-300 shrink-0">
+                          <span className="text-base font-extrabold font-display tabular-nums text-emerald-300 shrink-0">
                             {tier.commissionPercent}%
                           </span>
                         </div>
@@ -1485,8 +1473,9 @@ export function LandingSections({
                     </div>
 
                     <p className="text-[11px] text-slate-400 leading-relaxed pt-1">
-                      Calculado sobre el ingreso neto tras comisión de pasarela de pago.
-                      Requiere mayoría de edad (+18) y firma del NDA interno.
+                      Calculado sobre el neto tras comisión de pasarela y costo operativo ($
+                      {businessConfig.feeConfig.operationalCostUsd.toFixed(2)} USD/ticket).
+                      Requiere verificación de identidad (+18), período supervisado y NDA.
                     </p>
                   </div>
                 </div>

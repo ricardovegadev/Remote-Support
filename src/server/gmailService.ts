@@ -83,8 +83,8 @@ export async function sendTechnicianApprovedEmail(input: {
   const safeName = escapeHtml(input.fullName);
   const modalityLabel =
     input.modality === 'full_time'
-      ? 'Tiempo Completo (Full-time)'
-      : 'Medio Tiempo (Half-time)';
+      ? 'Disponibilidad amplia independiente (bajo demanda)'
+      : 'Disponibilidad parcial independiente (bajo demanda)';
   const safeSpecialties = input.specialties.map(escapeHtml).join(' · ') || 'Soporte Técnico Remoto';
   const safeUrl = escapeHtml(input.registerUrl);
 
@@ -226,6 +226,58 @@ export async function sendClientTicketCreatedEmail(input: {
         <a href="${safeUrl}" style="display:inline-block;background:#2563EB;color:#FFFFFF;text-decoration:none;font-weight:600;font-size:14px;padding:13px 26px;border-radius:10px;">Abrir mi sala de soporte →</a>
       </div>
       <p style="font-size:12px;color:#64748B;margin:0;">Seguridad garantizada: ningún especialista puede conectarse sin tu aprobación manual en pantalla ni te pedirá contraseñas bancarias o códigos 2FA.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+
+  return sendGmailMessage({ to: input.to, subject, html, text });
+}
+
+export async function sendPrivacyOtpEmail(input: {
+  to: string;
+  clientName?: string;
+  ticketCode?: string | null;
+  otpCode: string;
+  actionLabel: string;
+  expiresMinutes?: number;
+}): Promise<GmailDeliveryResult> {
+  const expiresMinutes = input.expiresMinutes ?? 10;
+  const safeName = escapeHtml(input.clientName?.trim() || 'Cliente');
+  const safeAction = escapeHtml(input.actionLabel);
+  const safeCode = escapeHtml(input.otpCode);
+  const ticketRef = input.ticketCode ? ` (${input.ticketCode})` : '';
+  const safeTicketRef = input.ticketCode ? ` (${escapeHtml(input.ticketCode)})` : '';
+
+  const subject = `Código de verificación${ticketRef}: ${input.otpCode} — Remote Support 365`;
+
+  const text = [
+    `Hola ${input.clientName?.trim() || 'Cliente'},`,
+    '',
+    `Recibimos una solicitud para: ${input.actionLabel}${ticketRef}.`,
+    '',
+    `Tu código de verificación de un solo uso es: ${input.otpCode}`,
+    `Válido por ${expiresMinutes} minutos.`,
+    '',
+    'Si no realizaste esta solicitud, ignora este correo y nadie podrá exportar o eliminar tus datos.',
+    'Equipo de Privacidad · Remote Support 365',
+  ].join('\n');
+
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<body style="margin:0;padding:24px;background-color:#F8FAFC;font-family:Inter,Segoe UI,Arial,sans-serif;color:#0B192C;">
+  <div style="max-width:520px;margin:0 auto;background:#FFFFFF;border:1px solid #E2E8F0;border-radius:16px;overflow:hidden;">
+    <div style="background:#0B192C;padding:20px 24px;color:#FFFFFF;">
+      <p style="margin:0;font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#10B981;">Remote Support 365 · Verificación de Privacidad</p>
+      <h1 style="margin:6px 0 0;font-size:18px;line-height:1.3;">Confirma tu identidad</h1>
+    </div>
+    <div style="padding:24px;font-size:14px;line-height:1.6;color:#334155;">
+      <p style="margin-top:0;">Hola <strong>${safeName}</strong>,</p>
+      <p>Solicitaste <strong>${safeAction}${safeTicketRef}</strong>. Ingresa este código de un solo uso para continuar:</p>
+      <div style="text-align:center;margin:20px 0;">
+        <span style="display:inline-block;font-family:monospace;font-size:28px;font-weight:700;letter-spacing:0.18em;color:#0B192C;background:#F1F5F9;border:1px solid #CBD5E1;padding:12px 22px;border-radius:12px;">${safeCode}</span>
+      </div>
+      <p style="font-size:12px;color:#64748B;margin-bottom:0;">Expira en <strong>${expiresMinutes} minutos</strong>. Si no solicitaste esta acción, no compartas este código con nadie.</p>
     </div>
   </div>
 </body>

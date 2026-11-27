@@ -26,15 +26,16 @@ import {
   ASSESSMENT_DURATION_SECONDS,
   TECHNICIAN_ASSESSMENT_QUESTIONS,
 } from '../utils/techEvaluation';
+import { useBusinessConfig } from '../hooks/useBusinessConfig';
 import {
   ADULT_RESTRICTION_ERROR,
   calculateAgeFromBirthDate,
   generateUuid,
   isValidEmail,
   NDA_TECH_VERSION,
-  TECHNICIAN_COMMISSION_TIERS,
 } from '../utils/ticketLogic';
 import type { LegalDocTab } from './LegalDocsModal';
+import { TechnicianEarningsCalculator } from './TechnicianEarningsCalculator';
 
 interface TechnicianApplyViewProps {
   onReturnHome: () => void;
@@ -83,6 +84,7 @@ export function TechnicianApplyView({
   onReturnHome,
   onOpenLegalDoc,
 }: TechnicianApplyViewProps) {
+  const businessConfig = useBusinessConfig();
   const [step, setStep] = useState<ApplyStep>(1);
 
   // Step 2: Profile fields
@@ -327,9 +329,11 @@ export function TechnicianApplyView({
             <span>Volver al inicio</span>
           </button>
 
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white border border-slate-200 text-xs font-mono text-slate-600 shadow-xs">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white border border-slate-200 text-xs text-slate-600 shadow-xs">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" aria-hidden="true" />
-            <span>/postular · Red de Técnicos</span>
+            <span>
+              <span className="font-mono">/postular</span> · Red de Especialistas
+            </span>
           </span>
         </div>
 
@@ -353,7 +357,7 @@ export function TechnicianApplyView({
                     }`}
                   >
                     <span
-                      className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-mono font-bold shrink-0 ${
+                      className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] tabular-nums font-bold shrink-0 ${
                         isActive
                           ? 'bg-[#2563EB] text-white'
                           : isDone
@@ -378,26 +382,32 @@ export function TechnicianApplyView({
           </nav>
         )}
 
-        {/* STEP 1: Value proposition & Commission Tiers (65% / 75% / 80% / 85%) */}
+        {/* STEP 1: Independent Specialist Value Proposition, Onboarding Policies, Commission Tiers & Calculator */}
         {step === 1 && !submittedApplication && (
           <div className="space-y-6 animate-fade-up">
             <div className="bg-[#0B192C] text-white rounded-3xl p-6 sm:p-8 lg:p-10 border border-slate-800 shadow-xl space-y-5">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 text-xs font-semibold">
                 <Sparkles className="w-3.5 h-3.5 text-[#10B981]" aria-hidden="true" />
-                <span>Red de Especialistas Verificados · Modelo Bajo Demanda</span>
+                <span>Red de Especialistas Independientes · Colaboración Bajo Demanda</span>
               </div>
 
               <div className="space-y-2.5 max-w-3xl">
                 <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight text-white">
-                  Trabaja como Técnico en Remote Support 365
+                  Colabora como Especialista Independiente en Remote Support 365
                 </h1>
                 <p className="text-sm sm:text-base text-slate-300 leading-relaxed">
-                  Conéctate bajo demanda estilo Uber en modalidad{' '}
-                  <strong className="text-white">Half-time</strong> o{' '}
-                  <strong className="text-white">Full-time</strong>, resuelve incidencias
-                  reales en Windows, Microsoft 365, redes o impresoras y escala tu
-                  participación mensual del <strong className="text-emerald-300">65 % al 85 %</strong>{' '}
-                  según tu volumen de casos resueltos.
+                  Opera como <strong className="text-white">profesional independiente</strong>{' '}
+                  sin horarios obligatorios, atiende incidencias reales en Windows, macOS,
+                  Linux, Microsoft 365 o redes según tu especialidad y escala tu participación
+                  mensual del{' '}
+                  <strong className="text-emerald-300">
+                    {businessConfig.commissionTiers[0]?.commissionPercent ?? 65}% al{' '}
+                    {businessConfig.commissionTiers[
+                      businessConfig.commissionTiers.length - 1
+                    ]?.commissionPercent ?? 85}
+                    %
+                  </strong>{' '}
+                  sobre el neto de cada ticket resuelto.
                 </p>
               </div>
 
@@ -405,37 +415,96 @@ export function TechnicianApplyView({
                 <div className="rounded-xl bg-[#0F172A] border border-slate-800 p-4 space-y-1">
                   <div className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-300">
                     <Briefcase className="w-4 h-4 text-[#10B981]" aria-hidden="true" />
-                    <span>Modalidad Flexible</span>
+                    <span>Autonomía Profesional</span>
                   </div>
                   <p className="text-xs text-slate-300 leading-relaxed">
-                    Elige Half-time (15–20 h/sem) o Full-time (35–40 h/sem) con asignación
-                    inteligente por especialidad.
+                    Elige tu nivel de disponibilidad independiente (parcial o amplia) sin
+                    jornadas laborales impuestas y con enrutamiento por especialidad y SO.
                   </p>
                 </div>
                 <div className="rounded-xl bg-[#0F172A] border border-slate-800 p-4 space-y-1">
                   <div className="inline-flex items-center gap-2 text-xs font-semibold text-blue-300">
                     <Award className="w-4 h-4 text-[#60A5FA]" aria-hidden="true" />
-                    <span>Comisión Progresiva</span>
+                    <span>Comisión Progresiva sobre Neto</span>
                   </div>
                   <p className="text-xs text-slate-300 leading-relaxed">
-                    A más incidencias resueltas en el mes calendario, mayor es tu nivel y
-                    porcentaje de ganancia.
+                    Liquidación clara sobre el monto neto tras comisión de pasarela y costo
+                    operativo por ticket. Simula tu ganancia abajo.
                   </p>
                 </div>
                 <div className="rounded-xl bg-[#0F172A] border border-slate-800 p-4 space-y-1">
                   <div className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-300">
                     <Lock className="w-4 h-4 text-[#10B981]" aria-hidden="true" />
-                    <span>Estándar NDA y Seguridad</span>
+                    <span>Cumplimiento, KYC y Auditoría</span>
                   </div>
                   <p className="text-xs text-slate-300 leading-relaxed">
-                    Todos los especialistas aprueban evaluación técnica + actitud y firman el{' '}
-                    <span className="font-mono">{NDA_TECH_VERSION}</span>.
+                    Verificación de identidad (+18), período de prueba supervisado, firma del{' '}
+                    <span className="font-mono">{NDA_TECH_VERSION}</span> y política de
+                    auditoría de sesión.
                   </p>
                 </div>
               </div>
             </div>
 
-            {/* Commission Tiers Table / Grid */}
+            {/* Onboarding, KYC, Supervised Trial & Session Recording/Audit Policy */}
+            <div
+              data-testid="tech-onboarding-requirements"
+              className="bg-white rounded-3xl shadow-sm border border-slate-200/80 p-6 sm:p-8 space-y-5"
+            >
+              <div>
+                <p className="text-xs font-semibold text-[#2563EB] tracking-wide">
+                  Proceso de verificación y estándar operativo
+                </p>
+                <h2 className="text-xl font-bold text-[#0B192C] mt-0.5">
+                  Requisitos de ingreso y políticas de sesión para especialistas independientes
+                </h2>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="rounded-2xl bg-[#F8FAFC] border border-slate-200 p-4 space-y-2">
+                  <div className="flex items-center gap-2 text-xs font-bold text-[#0B192C]">
+                    <span className="w-6 h-6 rounded-lg bg-blue-50 text-[#1D4ED8] tabular-nums flex items-center justify-center">
+                      1
+                    </span>
+                    <span>Verificación de identidad (KYC)</span>
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Antes de recibir acceso remoto real, validamos mayoría de edad (+18),
+                    documento oficial de identidad y titularidad de cuenta para cobros.
+                  </p>
+                </div>
+
+                <div className="rounded-2xl bg-[#F8FAFC] border border-slate-200 p-4 space-y-2">
+                  <div className="flex items-center gap-2 text-xs font-bold text-[#0B192C]">
+                    <span className="w-6 h-6 rounded-lg bg-emerald-50 text-emerald-800 tabular-nums flex items-center justify-center">
+                      2
+                    </span>
+                    <span>Período de prueba supervisado</span>
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Tus primeras sesiones operan bajo acompañamiento y revisión técnica de
+                    coordinación para validar tiempos de respuesta, trato y resolución efectiva.
+                  </p>
+                </div>
+
+                <div className="rounded-2xl bg-[#F8FAFC] border border-slate-200 p-4 space-y-2">
+                  <div className="flex items-center gap-2 text-xs font-bold text-[#0B192C]">
+                    <span className="w-6 h-6 rounded-lg bg-slate-200 text-[#0B192C] tabular-nums flex items-center justify-center">
+                      3
+                    </span>
+                    <span>Grabación y auditoría de sesión</span>
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Las sesiones de soporte pueden quedar sujetas a registro de eventos y
+                    auditoría técnica para control de calidad, prevención de fraude y
+                    respaldo de garantías; está prohibido al técnico grabar o retener copias
+                    locales.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Commission Tiers Table / Grid + Interactive Calculator */}
             <div
               data-testid="commission-tiers-grid"
               className="bg-white rounded-3xl shadow-xl shadow-slate-200/60 border border-slate-200/80 p-6 sm:p-8 space-y-6"
@@ -443,19 +512,24 @@ export function TechnicianApplyView({
               <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
                 <div>
                   <p className="text-xs font-semibold text-emerald-700 tracking-wide">
-                    Esquema transparente de compensación mensual
+                    Esquema transparente de compensación sobre neto
                   </p>
                   <h2 className="text-xl sm:text-2xl font-bold text-[#0B192C] mt-0.5">
-                    Tramos de comisión por volumen resuelto (65 % – 85 %)
+                    Tramos de comisión por volumen resuelto (
+                    {businessConfig.commissionTiers[0]?.commissionPercent ?? 65}% –{' '}
+                    {businessConfig.commissionTiers[
+                      businessConfig.commissionTiers.length - 1
+                    ]?.commissionPercent ?? 85}
+                    %)
                   </h2>
                 </div>
-                <span className="inline-flex items-center gap-1.5 text-xs font-mono font-semibold text-[#1D4ED8] bg-blue-50 border border-blue-200 px-3 py-1 rounded-full self-start sm:self-auto">
-                  4 niveles mensuales
+                <span className="inline-flex items-center gap-1.5 text-xs tabular-nums font-semibold text-[#1D4ED8] bg-blue-50 border border-blue-200 px-3 py-1 rounded-lg self-start sm:self-auto">
+                  {businessConfig.commissionTiers.length} niveles mensuales
                 </span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {TECHNICIAN_COMMISSION_TIERS.map((tier) => {
+                {businessConfig.commissionTiers.map((tier) => {
                   const isElite = tier.id === 'elite';
                   return (
                     <div
@@ -477,16 +551,16 @@ export function TechnicianApplyView({
                             {tier.label}
                           </span>
                           {isElite && (
-                            <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-[10px] font-semibold text-emerald-300">
+                            <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-400/30 text-[10px] font-semibold text-emerald-300">
                               Máximo nivel
                             </span>
                           )}
                         </div>
-                        <p className="text-3xl font-extrabold font-mono tabular-nums">
+                        <p className="text-3xl font-extrabold font-display tabular-nums">
                           {tier.commissionPercent}%
                         </p>
                         <p
-                          className={`text-xs font-mono font-semibold ${
+                          className={`text-xs tabular-nums font-semibold ${
                             isElite ? 'text-blue-200' : 'text-[#1D4ED8]'
                           }`}
                         >
@@ -505,11 +579,24 @@ export function TechnicianApplyView({
                 })}
               </div>
 
+              <TechnicianEarningsCalculator />
+
               <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-xl p-3.5 leading-relaxed">
-                <strong>Nota de transparencia:</strong> El porcentaje mensual corresponde al
-                ingreso neto de cada incidencia resuelta tras descontar la comisión de la
-                pasarela de pago (Stripe / PayPal). Requisitos obligatorios: ser mayor de 18
-                años (+18), firmar el NDA interno (<span className="font-mono">{NDA_TECH_VERSION}</span>) y completar la evaluación cronometrada de 15 minutos.
+                <strong>Nota de transparencia:</strong> El porcentaje mensual se aplica sobre
+                el ingreso neto de cada incidencia resuelta tras descontar la comisión de la
+                pasarela de pago (
+                <span className="tabular-nums font-medium">
+                  {businessConfig.feeConfig.paymentFeePercent}% + $
+                  {businessConfig.feeConfig.paymentFeeFixedUsd.toFixed(2)} USD
+                </span>
+                ) y el costo operativo por ticket (
+                <span className="tabular-nums font-medium">
+                  ${businessConfig.feeConfig.operationalCostUsd.toFixed(2)} USD
+                </span>
+                ). Requisitos obligatorios: ser mayor de 18 años (+18), verificación de
+                identidad (KYC), período de prueba supervisado, firma del NDA interno (
+                <span className="font-mono">{NDA_TECH_VERSION}</span>) y evaluación
+                cronometrada de 15 minutos.
               </p>
 
               <div className="flex flex-wrap items-center justify-between gap-4 pt-2 border-t border-slate-100">
@@ -692,24 +779,24 @@ export function TechnicianApplyView({
 
               <div>
                 <span className="block text-xs font-semibold text-[#0B192C] mb-1.5">
-                  Modalidad de disponibilidad *
+                  Disponibilidad independiente bajo demanda *
                 </span>
                 <div
                   role="radiogroup"
-                  aria-label="Modalidad de disponibilidad"
+                  aria-label="Disponibilidad independiente bajo demanda"
                   className="grid grid-cols-2 gap-2.5"
                 >
                   {(
                     [
                       {
                         id: 'half_time',
-                        title: 'Half-time',
-                        subtitle: '15 – 20 h / semana',
+                        title: 'Disponibilidad parcial',
+                        subtitle: 'Bloques flexibles bajo demanda',
                       },
                       {
                         id: 'full_time',
-                        title: 'Full-time',
-                        subtitle: '35 – 40 h / semana',
+                        title: 'Disponibilidad amplia',
+                        subtitle: 'Mayor cobertura autónoma',
                       },
                     ] as const
                   ).map((option) => {
@@ -849,8 +936,15 @@ export function TechnicianApplyView({
                   contraseñas personales, códigos 2FA, PINs o datos bancarios.
                 </li>
                 <li>
-                  <strong>Cero grabación ni copia de archivos:</strong> prohibido grabar
-                  sesiones, capturar datos sensibles o retener archivos del cliente.
+                  <strong>Auditoría de sesión y cero retención local:</strong> las sesiones
+                  técnicas están sujetas a registro de auditoría y verificación de calidad;
+                  queda prohibido al técnico grabar pantallas por cuenta propia o retener
+                  archivos del cliente.
+                </li>
+                <li>
+                  <strong>Verificación KYC y período supervisado:</strong> el especialista
+                  acepta la verificación de identidad (+18) y completar sus primeras sesiones
+                  bajo supervisión de coordinación técnica.
                 </li>
                 <li>
                   <strong>Cláusula de no elusión (Non-Circumvention):</strong> prohibido
@@ -1109,19 +1203,19 @@ export function TechnicianApplyView({
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="rounded-2xl bg-[#F8FAFC] border border-slate-200 p-4 space-y-1">
                 <p className="text-xs text-slate-600">Puntaje Técnico</p>
-                <p className="text-2xl font-extrabold font-mono tabular-nums text-[#0B192C]">
+                <p className="text-2xl font-extrabold font-display tabular-nums text-[#0B192C]">
                   {submittedApplication.technical_score}%
                 </p>
               </div>
               <div className="rounded-2xl bg-[#F8FAFC] border border-slate-200 p-4 space-y-1">
                 <p className="text-xs text-slate-600">Actitud y Confidencialidad</p>
-                <p className="text-2xl font-extrabold font-mono tabular-nums text-emerald-800">
+                <p className="text-2xl font-extrabold font-display tabular-nums text-emerald-800">
                   {submittedApplication.attitude_score}%
                 </p>
               </div>
               <div className="rounded-2xl bg-[#0B192C] text-white border border-slate-800 p-4 space-y-1">
                 <p className="text-xs text-slate-300">Puntaje Global</p>
-                <p className="text-2xl font-extrabold font-mono tabular-nums text-white">
+                <p className="text-2xl font-extrabold font-display tabular-nums text-white">
                   {submittedApplication.total_score}%
                 </p>
               </div>
@@ -1136,7 +1230,9 @@ export function TechnicianApplyView({
               </p>
               <p>
                 <strong>Postulante:</strong> {submittedApplication.full_name} ·{' '}
-                {submittedApplication.modality === 'full_time' ? 'Full-time' : 'Half-time'}
+                {submittedApplication.modality === 'full_time'
+                  ? 'Disponibilidad amplia independiente'
+                  : 'Disponibilidad parcial independiente'}
               </p>
               <p>
                 <strong>NDA firmado:</strong>{' '}

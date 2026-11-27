@@ -136,10 +136,10 @@ export function TicketChatPanel({
         <div className="flex items-center gap-2">
           <MessageSquare className="w-4 h-4 text-[#0B192C]" aria-hidden="true" />
           <h3 className="text-sm font-semibold text-[#0B192C]">
-            Chat en vivo · {ticketCode}
+            Chat en vivo · <span className="font-mono">{ticketCode}</span>
           </h3>
         </div>
-        <span className="font-mono tabular-nums text-xs text-slate-500">
+        <span className="tabular-nums text-xs text-slate-500">
           {messages.length} {messages.length === 1 ? 'mensaje' : 'mensajes'}
         </span>
       </div>
@@ -185,7 +185,7 @@ export function TicketChatPanel({
                 <div className="flex items-center gap-2 text-[11px] text-slate-500 mb-1">
                   <span className="font-medium text-slate-700">{senderLabel}</span>
                   <span aria-hidden="true">·</span>
-                  <span className="font-mono tabular-nums">{timeLabel}</span>
+                  <span className="tabular-nums">{timeLabel}</span>
                 </div>
                 <div
                   className={`max-w-[85%] rounded-lg px-3.5 py-2 text-xs leading-relaxed ${

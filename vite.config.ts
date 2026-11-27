@@ -88,6 +88,9 @@ export default defineConfig(() => {
       hmr: isPreviewEnv ? false : true,
       // Disable file watching in preview/DISABLE_HMR mode to speed up cold start and save CPU.
       watch: isPreviewEnv ? null : {},
+      fs: {
+        cachedChecks: true,
+      } as any,
     },
   };
 });

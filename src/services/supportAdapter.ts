@@ -14,7 +14,6 @@ import type {
   MessageSenderRole,
   Organization,
   OrganizationMember,
-  PaymentStatus,
   RemoteSessionRecord,
   SupportTicket,
   TechnicianApplication,
@@ -24,7 +23,12 @@ import type {
   TicketStatus,
   UserAccountProfile,
 } from '../types/support';
-import { canClaimTicket, generateUuid, isValidUuid } from '../utils/ticketLogic';
+import {
+  canClaimTicket,
+  generateUuid,
+  isValidUuid,
+  matchTechnicianForTicket,
+} from '../utils/ticketLogic';
 
 const TICKETS_STORAGE_KEY = 'rs365_v1_tickets_v5';
 const MESSAGES_STORAGE_KEY = 'rs365_v1_messages_v5';
@@ -40,6 +44,7 @@ const ENTERPRISE_STORAGE_KEY = 'rs365_enterprise_leads_v1';
 const USER_PROFILE_STORAGE_KEY = 'rs365_user_profile_v1';
 export const TECHNICIAN_APPLICATIONS_STORAGE_KEY = 'rs365_technician_applications_v1';
 const BROADCAST_CHANNEL_NAME = 'rs365_realtime_sync_v5';
+const isProdEnv = typeof import.meta !== 'undefined' && Boolean(import.meta.env?.PROD);
 
 const TODAY_ISO = new Date().toISOString().slice(0, 10);
 
@@ -131,7 +136,7 @@ export const SEED_MEMBERS: OrganizationMember[] = [
     role: 'technician',
     agreed_ticket_rate_usd: 0,
     status: 'active',
-    specialties: ['Redes & VPN', 'Windows & BSOD', 'Recuperación de Datos'],
+    specialties: ['Redes & VPN', 'Windows & BSOD', 'Recuperación de Datos', 'Soporte Linux & Servidores'],
     availability_status: 'available',
     accepting_requests: true,
     rating: 4.9,
@@ -147,7 +152,7 @@ export const SEED_MEMBERS: OrganizationMember[] = [
     role: 'technician',
     agreed_ticket_rate_usd: 0,
     status: 'active',
-    specialties: ['Microsoft 365 & Outlook', 'Impresoras'],
+    specialties: ['Soporte macOS', 'Microsoft 365 & Outlook', 'Impresoras'],
     availability_status: 'busy',
     accepting_requests: true,
     rating: 4.89,
@@ -179,7 +184,7 @@ export const SEED_MEMBERS: OrganizationMember[] = [
     role: 'technician',
     agreed_ticket_rate_usd: 15,
     status: 'active',
-    specialties: ['Impresoras', 'Seguridad & Malware', 'Windows & BSOD'],
+    specialties: ['Soporte macOS', 'Impresoras', 'Seguridad & Malware', 'Windows & BSOD'],
     availability_status: 'available',
     accepting_requests: true,
     rating: 4.94,
@@ -294,6 +299,9 @@ export const SEED_TICKETS: SupportTicket[] = [
     assigned_technician_id: '30000000-0000-4000-8000-000000000001',
     assigned_technician_name: 'Carlos Mendoza',
     assigned_technician_specialty: 'Redes & VPN · Windows & BSOD',
+    assigned_technician_verified: true,
+    assigned_technician_sessions_count: 148,
+    assigned_technician_rating: 4.96,
     resolution_notes: null,
     client_session_token:
       'a1b2c3d4e5f60718293a4b5c6d7e8f901024a1b2c3d4e5f60718293a4b5c6d7e',
@@ -336,7 +344,7 @@ export const SEED_TICKETS: SupportTicket[] = [
     ticket_code: 'RS-1026',
     organization_id: '00000000-0000-4000-8000-000000000001',
     organization_name: 'Mi organización',
-    category: 'Windows lento o bajo rendimiento',
+    category: 'Sistema Operativo/Lentitud',
     os_type: 'Mac',
     service_tier: 'Optimización $29',
     priority: 'low',
@@ -415,10 +423,15 @@ export const SEED_TICKETS: SupportTicket[] = [
     consent_accepted_at: `${TODAY_ISO}T07:22:00.000Z`,
     payment_status: 'paid',
     status: 'resolved',
-    assigned_to: '30000000-0000-4000-8000-000000000001',
-    assigned_technician_id: '30000000-0000-4000-8000-000000000001',
-    assigned_technician_name: 'Carlos Mendoza',
-    assigned_technician_specialty: 'Windows & BSOD · Redes & VPN',
+    assigned_to: '30000000-0000-4000-8000-000000000004',
+    assigned_technician_id: '30000000-0000-4000-8000-000000000004',
+    assigned_technician_name: 'Sofía Paredes',
+    assigned_technician_specialty: 'Soporte macOS · Impresoras',
+    assigned_technician_verified: true,
+    assigned_technician_sessions_count: 84,
+    assigned_technician_rating: 4.89,
+    human_reviewed_at: `${TODAY_ISO}T07:42:00.000Z`,
+    human_reviewed_by: 'Sofía Paredes',
     resolution_notes:
       'INFORME TÉCNICO DE CIERRE · RS-1023\nSe asignó reserva DHCP al equipo multifunción y se reinstaló la cola IPP en macOS. Prueba de impresión verificada.',
     client_session_token:
@@ -703,7 +716,7 @@ export const SEED_AUDIT_LOGS: AuditLogEntry[] = [
     organization_id: '00000000-0000-4000-8000-000000000001',
     actor_type: 'technician',
     actor_label: 'Carlos Mendoza',
-    action: 'Reclamó atómicamente el ticket e inició túnel RustDesk',
+    action: 'Aceptó el ticket e inició sesión remota RustDesk',
     target_ref: 'RS-1024',
     created_at: `${TODAY_ISO}T09:17:00.000Z`,
   },
@@ -779,7 +792,7 @@ function isNonEmptyStr(val: unknown): val is string {
 }
 
 function excludeSeedRecords<T extends { id: string }>(records: T[], seeds: T[]): T[] {
-  if (!isSupabaseConfigured()) return records;
+  if (!isSupabaseConfigured() && !isProdEnv) return records;
   const seedIds = new Set(seeds.map((record) => record.id));
   return records.filter((record) => !seedIds.has(record.id));
 }
@@ -851,6 +864,13 @@ function getRoomToken(ticketCode: string): string | null {
   } catch {
     return null;
   }
+}
+
+function stripTokensWithoutPersisting(tickets: SupportTicket[]): SupportTicket[] {
+  return tickets.map((ticket) => ({
+    ...ticket,
+    client_session_token: '',
+  }));
 }
 
 function stripSessionTokensForLocalStorage(tickets: SupportTicket[]): SupportTicket[] {
@@ -997,8 +1017,20 @@ export function haveRecordsChanged<T>(prev: T[], next: T[]): boolean {
 }
 
 export const supportAdapter = {
+  isUsingDemoData(): boolean {
+    return !isSupabaseConfigured() && !isProdEnv;
+  },
+
+  getRoomToken(ticketCode: string): string | null {
+    return getRoomToken(ticketCode);
+  },
+
+  saveRoomToken(ticketCode: string, token: string): void {
+    saveRoomToken(ticketCode, token);
+  },
+
   loadTickets(): SupportTicket[] {
-    const sanitizedSeedTickets = stripSessionTokensForLocalStorage(SEED_TICKETS);
+    const sanitizedSeedTickets = isProdEnv ? [] : stripTokensWithoutPersisting(SEED_TICKETS);
     const valid = loadSanitizedCollection<SupportTicket>(
       TICKETS_STORAGE_KEY,
       sanitizedSeedTickets,
@@ -1014,7 +1046,9 @@ export const supportAdapter = {
           isNonEmptyStr(t.payment_status) &&
           isNonEmptyStr(t.created_at)
         );
-      }
+      },
+      undefined,
+      isProdEnv
     );
     const hadPlaintextTokenInStorage = valid.some(
       (ticket) => Boolean(ticket.client_session_token)
@@ -1038,7 +1072,7 @@ export const supportAdapter = {
   loadMessages(): TicketMessage[] {
     return excludeSeedRecords(loadSanitizedCollection<TicketMessage>(
       MESSAGES_STORAGE_KEY,
-      SEED_MESSAGES,
+      isProdEnv ? [] : SEED_MESSAGES,
       (item): item is TicketMessage => {
         if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
         const m = item as Partial<TicketMessage>;
@@ -1056,9 +1090,12 @@ export const supportAdapter = {
   },
 
   loadOrganizations(): Organization[] {
+    const orgSeeds = isProdEnv
+      ? SEED_ORGANIZATIONS.filter((o) => o.id === '00000000-0000-4000-8000-000000000001')
+      : SEED_ORGANIZATIONS;
     return excludeSeedRecords(loadSanitizedCollection<Organization>(
       ORGS_STORAGE_KEY,
-      SEED_ORGANIZATIONS,
+      orgSeeds,
       (item): item is Organization => {
         if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
         const o = item as Partial<Organization>;
@@ -1084,9 +1121,14 @@ export const supportAdapter = {
       if (!Array.isArray(raw)) return ['Windows & BSOD'];
       const mapLegacy: Record<string, TechnicianSpecialty> = {
         Windows: 'Windows & BSOD',
+        Mac: 'Soporte macOS',
+        macOS: 'Soporte macOS',
+        Linux: 'Soporte Linux & Servidores',
         'Microsoft 365': 'Microsoft 365 & Outlook',
         Redes: 'Redes & VPN',
         'Windows & BSOD': 'Windows & BSOD',
+        'Soporte macOS': 'Soporte macOS',
+        'Soporte Linux & Servidores': 'Soporte Linux & Servidores',
         'Microsoft 365 & Outlook': 'Microsoft 365 & Outlook',
         Impresoras: 'Impresoras',
         'Redes & VPN': 'Redes & VPN',
@@ -1105,7 +1147,7 @@ export const supportAdapter = {
 
     return excludeSeedRecords(loadSanitizedCollection<OrganizationMember>(
       MEMBERS_STORAGE_KEY,
-      SEED_MEMBERS,
+      isProdEnv ? [] : SEED_MEMBERS,
       (item): item is OrganizationMember => {
         if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
         const m = item as Partial<OrganizationMember>;
@@ -1119,14 +1161,15 @@ export const supportAdapter = {
       (item) => ({
         ...item,
         specialties: normalizeSpecialties(item.specialties),
-      })
+      }),
+      isProdEnv
     ), SEED_MEMBERS);
   },
 
   loadDevices(): ClientDevice[] {
     return excludeSeedRecords(loadSanitizedCollection<ClientDevice>(
       DEVICES_STORAGE_KEY,
-      SEED_DEVICES,
+      isProdEnv ? [] : SEED_DEVICES,
       (item): item is ClientDevice => {
         if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
         const d = item as Partial<ClientDevice>;
@@ -1145,7 +1188,7 @@ export const supportAdapter = {
   loadSessions(): RemoteSessionRecord[] {
     return excludeSeedRecords(loadSanitizedCollection<RemoteSessionRecord>(
       SESSIONS_STORAGE_KEY,
-      SEED_SESSIONS,
+      isProdEnv ? [] : SEED_SESSIONS,
       (item): item is RemoteSessionRecord => {
         if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
         const s = item as Partial<RemoteSessionRecord>;
@@ -1165,7 +1208,7 @@ export const supportAdapter = {
   loadAiAgents(): AiAgentConfig[] {
     return excludeSeedRecords(loadSanitizedCollection<AiAgentConfig>(
       AI_AGENTS_STORAGE_KEY,
-      SEED_AI_AGENTS,
+      isProdEnv ? [] : SEED_AI_AGENTS,
       (item): item is AiAgentConfig => {
         if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
         const a = item as Partial<AiAgentConfig>;
@@ -1176,14 +1219,16 @@ export const supportAdapter = {
           isNonEmptyStr(a.agent_name) &&
           Array.isArray(a.governance_rules)
         );
-      }
+      },
+      undefined,
+      isProdEnv
     ), SEED_AI_AGENTS);
   },
 
   loadAuditLogs(): AuditLogEntry[] {
     return excludeSeedRecords(loadSanitizedCollection<AuditLogEntry>(
       AUDIT_STORAGE_KEY,
-      SEED_AUDIT_LOGS,
+      isProdEnv ? [] : SEED_AUDIT_LOGS,
       (item): item is AuditLogEntry => {
         if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
         const log = item as Partial<AuditLogEntry>;
@@ -1592,12 +1637,31 @@ export const supportAdapter = {
         }
       }
 
-      if (!client) {
+      if (!client || (!hasOperatorSession && !options?.ticketCode)) {
         return { ok: true, data: {} };
       }
 
+      let useHumanReviewCols = false;
+      if (hasOperatorSession && typeof fetch === 'function') {
+        try {
+          const schemaRes = await fetch('/api/schema-status');
+          if (schemaRes.ok) {
+            const schemaJson = (await schemaRes.json()) as { humanReviewColumns?: boolean };
+            useHumanReviewCols = schemaJson.humanReviewColumns === true;
+          }
+        } catch {
+          useHumanReviewCols = false;
+        }
+      }
+
+      const baseTicketCols =
+        'id,ticket_code,organization_id,organization_name,category,os_type,service_tier,billing_mode,priority,problem_description,ai_diagnosis_summary,ai_diagnosis,client_name,client_email,client_birth_date,is_adult_verified,terms_accepted_at,terms_version,marketing_opt_in,subscription_status,anonymized_at,rustdesk_id,agent_type,agent_downloaded,consent_accepted,consent_accepted_at,client_nda_version,client_nda_accepted_at,payment_status,payment_reference,paid_at,status,assigned_to,assigned_technician_id,assigned_technician_name,assigned_technician_specialty,resolution_notes,claimed_at,resolved_at,created_at,stripe_subscription_id,csat_rating,csat_comment,client_confirmed_at,dispute_reason,disputed_at';
+      const selectedTicketCols = useHumanReviewCols
+        ? `${baseTicketCols},human_reviewed_at,human_reviewed_by`
+        : baseTicketCols;
+
       const [
-        ticketsQuery,
+        initialTicketsQuery,
         messagesQuery,
         orgsQuery,
         membersQuery,
@@ -1609,9 +1673,7 @@ export const supportAdapter = {
       ] = await Promise.all([
         client
           .from('tickets')
-          .select(
-            'id,ticket_code,organization_id,organization_name,category,os_type,service_tier,billing_mode,priority,problem_description,ai_diagnosis_summary,ai_diagnosis,client_name,client_email,client_birth_date,is_adult_verified,terms_accepted_at,terms_version,marketing_opt_in,subscription_status,anonymized_at,rustdesk_id,agent_type,agent_downloaded,consent_accepted,consent_accepted_at,client_nda_version,client_nda_accepted_at,payment_status,payment_reference,paid_at,status,assigned_to,assigned_technician_id,assigned_technician_name,assigned_technician_specialty,resolution_notes,claimed_at,resolved_at,created_at,stripe_subscription_id,csat_rating,csat_comment,client_confirmed_at,dispute_reason,disputed_at'
-          )
+          .select(selectedTicketCols)
           .order('created_at', { ascending: false })
           .order('ticket_code', { ascending: false }),
         client.from('ticket_messages').select('*').order('created_at', { ascending: true }),
@@ -1637,6 +1699,18 @@ export const supportAdapter = {
           ? client.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(200)
           : Promise.resolve({ data: null, error: null }),
       ]);
+
+      let ticketsQuery: { data: Record<string, any>[] | null; error: any } = initialTicketsQuery;
+      if (
+        ticketsQuery.error &&
+        extractMissingSchemaColumn(ticketsQuery.error)?.startsWith('human_reviewed_')
+      ) {
+        ticketsQuery = await client
+          .from('tickets')
+          .select(baseTicketCols)
+          .order('created_at', { ascending: false })
+          .order('ticket_code', { ascending: false });
+      }
 
       if (ticketsQuery.error) {
         return {
@@ -1737,15 +1811,60 @@ export const supportAdapter = {
       }
 
       const rawTickets = ticketsQuery.data ?? undefined;
+      const memberTrustByUserId = new Map<
+        string,
+        { verified: boolean; sessionsCount: number | null; rating: number | null }
+      >();
+      const resolvedByTechId = new Map<string, number>();
+      for (const row of rawTickets ?? []) {
+        if (row.status === 'resolved') {
+          const techKey =
+            (typeof row.assigned_technician_id === 'string' && row.assigned_technician_id) ||
+            (typeof row.assigned_to === 'string' && row.assigned_to) ||
+            '';
+          if (techKey) {
+            resolvedByTechId.set(techKey, (resolvedByTechId.get(techKey) ?? 0) + 1);
+          }
+        }
+      }
+      for (const member of remoteMembers ?? this.loadMembers()) {
+        const lookupKey = member.user_id || member.id;
+        const sessionsCount =
+          typeof member.resolved_count === 'number' && member.resolved_count > 0
+            ? member.resolved_count
+            : resolvedByTechId.get(lookupKey) ?? null;
+        const rating =
+          typeof member.rating === 'number' && member.rating > 0 ? member.rating : null;
+        memberTrustByUserId.set(lookupKey, {
+          verified: member.status === 'active',
+          sessionsCount,
+          rating,
+        });
+      }
+
       const hydratedRemoteTickets: SupportTicket[] =
-        rawTickets?.map((t) => ({
-          ...(t as unknown as Omit<SupportTicket, 'client_session_token'>),
-          client_session_token: '',
-          organization_name:
-            (typeof t.organization_name === 'string' && t.organization_name.trim()) ||
-            orgLookup.get(t.organization_id) ||
-            'Mi organización',
-        })) ?? [];
+        rawTickets?.map((t) => {
+          const techKey =
+            (typeof t.assigned_technician_id === 'string' && t.assigned_technician_id) ||
+            (typeof t.assigned_to === 'string' && t.assigned_to) ||
+            '';
+          const trust = techKey ? memberTrustByUserId.get(techKey) : undefined;
+          return {
+            ...(t as unknown as Omit<SupportTicket, 'client_session_token'>),
+            client_session_token: '',
+            organization_name:
+              (typeof t.organization_name === 'string' && t.organization_name.trim()) ||
+              orgLookup.get(t.organization_id) ||
+              'Mi organización',
+            ...(trust
+              ? {
+                  assigned_technician_verified: trust.verified,
+                  assigned_technician_sessions_count: trust.sessionsCount,
+                  assigned_technician_rating: trust.rating,
+                }
+              : {}),
+          };
+        }) ?? [];
 
       const fallbackIds = getLocalFallbackTicketIds();
       const localTickets = this.loadTickets();
@@ -1890,7 +2009,11 @@ export const supportAdapter = {
     ]);
     let fallbackWarning: string | undefined;
 
-    if (isSupabaseConfigured()) {
+    if (
+      typeof window !== 'undefined' &&
+      typeof fetch === 'function' &&
+      (isSupabaseConfigured() || !options?.operatorCreated)
+    ) {
       try {
         const isOperatorCreated = Boolean(options?.operatorCreated);
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -2010,10 +2133,24 @@ export const supportAdapter = {
       return {
         ok: false,
         data: currentLocal,
-        error: `El ticket ${target.ticket_code} ya fue reclamado por ${
-          target.assigned_technician_name ?? 'otro técnico'
-        } y está bloqueado atómicamente.`,
+        error: `El ticket ${target.ticket_code} ya fue asignado a ${
+          target.assigned_technician_name ?? 'otro especialista'
+        } y está reservado en curso.`,
       };
+    }
+
+    const techMember = this.loadMembers().find(
+      (m) => m.user_id === techId || m.id === techId
+    );
+    if (techMember) {
+      const compatibility = matchTechnicianForTicket(target, techMember);
+      if (!compatibility.compatible) {
+        return {
+          ok: false,
+          data: currentLocal,
+          error: `Especialidad incompatible con ${target.os_type}: ${compatibility.reason}`,
+        };
+      }
     }
 
     if (!isValidUuid(ticketId) || !isValidUuid(techId)) {
@@ -2038,7 +2175,7 @@ export const supportAdapter = {
           return {
             ok: false,
             data: existing,
-            error: `Fallo en asignación atómica: ${error.message}`,
+            error: `Fallo al asignar el ticket: ${error.message}`,
           };
         }
         const payload = data as { claimed?: boolean; reason?: string; ticket?: SupportTicket } | null;
@@ -2066,6 +2203,11 @@ export const supportAdapter = {
           assigned_technician_id: techId,
           assigned_technician_name: techName,
           assigned_technician_specialty: techSpecialty,
+          assigned_technician_verified: techMember ? techMember.status === 'active' : true,
+          assigned_technician_sessions_count:
+            typeof techMember?.resolved_count === 'number' ? techMember.resolved_count : null,
+          assigned_technician_rating:
+            typeof techMember?.rating === 'number' ? techMember.rating : null,
           status: nextStatus,
           claimed_at: nowIso,
         };
@@ -2077,7 +2219,7 @@ export const supportAdapter = {
       organization_id: target.organization_id,
       actor_type: 'technician',
       actor_label: techName,
-      action: 'Aceptó solicitud con bloqueo atómico (claim_ticket_atomically)',
+      action: 'Aceptó y reservó la solicitud en la cola',
       target_ref: target.ticket_code,
     });
 
@@ -2100,6 +2242,8 @@ export const supportAdapter = {
         | 'assigned_technician_name'
         | 'assigned_technician_specialty'
         | 'resolution_notes'
+        | 'human_reviewed_at'
+        | 'human_reviewed_by'
         | 'agent_downloaded'
         | 'claimed_at'
         | 'resolved_at'
@@ -2184,6 +2328,8 @@ export const supportAdapter = {
         if ('assigned_technician_specialty' in patch)
           dbPatch.assigned_technician_specialty = patch.assigned_technician_specialty;
         if ('resolution_notes' in patch) dbPatch.resolution_notes = patch.resolution_notes;
+        if ('human_reviewed_at' in patch) dbPatch.human_reviewed_at = patch.human_reviewed_at;
+        if ('human_reviewed_by' in patch) dbPatch.human_reviewed_by = patch.human_reviewed_by;
         if ('agent_downloaded' in patch) dbPatch.agent_downloaded = patch.agent_downloaded;
         if ('claimed_at' in patch) dbPatch.claimed_at = patch.claimed_at;
         if ('resolved_at' in patch) dbPatch.resolved_at = patch.resolved_at;
@@ -2196,6 +2342,14 @@ export const supportAdapter = {
         if ('anonymized_at' in patch) dbPatch.anonymized_at = patch.anonymized_at;
 
         let updateError: unknown = null;
+        if ('human_reviewed_at' in dbPatch && isStaffForTicket && staffClient) {
+          await staffClient.rpc('mark_ticket_human_reviewed', {
+            p_ticket_id: ticketId,
+          }).then(() => undefined, () => undefined);
+          delete dbPatch.human_reviewed_at;
+          delete dbPatch.human_reviewed_by;
+        }
+
         if ('status' in dbPatch) {
           if (!isStaffForTicket || !staffClient) {
             return {
@@ -2226,6 +2380,8 @@ export const supportAdapter = {
           delete dbPatch.status;
           delete dbPatch.resolution_notes;
           delete dbPatch.resolved_at;
+          delete dbPatch.human_reviewed_at;
+          delete dbPatch.human_reviewed_by;
         }
 
         const isAuthenticatedDirectClient =
@@ -2403,24 +2559,231 @@ export const supportAdapter = {
     }
   },
 
+  async fetchAuthorizedRoomTicket(
+    ticketCode: string,
+    roomToken?: string | null,
+    operatorAccessToken?: string | null
+  ): Promise<{
+    ok: boolean;
+    status: number;
+    ticket?: SupportTicket;
+    messages?: TicketMessage[];
+    error?: string;
+  }> {
+    if (typeof fetch !== 'function') {
+      return { ok: false, status: 0, error: 'NETWORK_ERROR' };
+    }
+    try {
+      const headers: Record<string, string> = {};
+      if (roomToken) headers['x-ticket-token'] = roomToken;
+      if (operatorAccessToken) headers.Authorization = `Bearer ${operatorAccessToken}`;
+      const response = await fetch(`/api/tickets/${encodeURIComponent(ticketCode.toUpperCase())}`, {
+        headers,
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        success?: boolean;
+        ticket?: SupportTicket;
+        messages?: TicketMessage[];
+        error?: string;
+      } | null;
+      if (!response.ok || !payload?.success || !payload.ticket) {
+        return {
+          ok: false,
+          status: response.status,
+          error: payload?.error ?? 'Acceso denegado: token de sala inválido o faltante.',
+        };
+      }
+      if (payload.ticket.client_session_token) {
+        saveRoomToken(payload.ticket.ticket_code, payload.ticket.client_session_token);
+      }
+      return {
+        ok: true,
+        status: response.status,
+        ticket: payload.ticket,
+        messages: payload.messages ?? [],
+      };
+    } catch {
+      return { ok: false, status: 0, error: 'NETWORK_ERROR' };
+    }
+  },
+
+  async requestPrivacyOtp(params: {
+    action: 'export' | 'erase';
+    ticketCode?: string;
+    sessionToken?: string | null;
+    email?: string;
+    fullName?: string;
+    accessToken?: string | null;
+  }): Promise<{
+    ok: boolean;
+    challengeId?: string;
+    maskedEmail?: string;
+    expiresAt?: string;
+    emailDeliveryStatus?: string;
+    devOtpPreview?: string;
+    error?: string;
+  }> {
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const token =
+        params.sessionToken ??
+        (params.ticketCode ? getRoomToken(params.ticketCode) : null);
+      if (token) headers['x-ticket-token'] = token;
+      if (params.accessToken) headers.Authorization = `Bearer ${params.accessToken}`;
+      const res = await fetch('/api/privacy/otp/request', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          action: params.action,
+          ...(params.ticketCode ? { ticketCode: params.ticketCode } : {}),
+          ...(params.email ? { email: params.email } : {}),
+          ...(params.fullName ? { fullName: params.fullName } : {}),
+        }),
+      });
+      const data = (await res.json().catch(() => null)) as {
+        success?: boolean;
+        challengeId?: string;
+        maskedEmail?: string;
+        expiresAt?: string;
+        emailDeliveryStatus?: string;
+        devOtpPreview?: string;
+        error?: string;
+      } | null;
+      if (!res.ok || !data?.success || !data.challengeId) {
+        return {
+          ok: false,
+          error: data?.error ?? 'No se pudo enviar el código de verificación al correo.',
+        };
+      }
+      return {
+        ok: true,
+        challengeId: data.challengeId,
+        maskedEmail: data.maskedEmail,
+        expiresAt: data.expiresAt,
+        emailDeliveryStatus: data.emailDeliveryStatus,
+        devOtpPreview: data.devOtpPreview,
+      };
+    } catch {
+      return { ok: false, error: 'Error de red solicitando código de verificación.' };
+    }
+  },
+
+  async exportPrivacyDataWithOtp(params: {
+    challengeId: string;
+    otpCode: string;
+    ticketCode?: string;
+    sessionToken?: string | null;
+    email?: string;
+    accessToken?: string | null;
+  }): Promise<{ ok: boolean; exportPayload?: unknown; error?: string }> {
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const token =
+        params.sessionToken ??
+        (params.ticketCode ? getRoomToken(params.ticketCode) : null);
+      if (token) headers['x-ticket-token'] = token;
+      if (params.accessToken) headers.Authorization = `Bearer ${params.accessToken}`;
+      const res = await fetch('/api/privacy/export', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          challengeId: params.challengeId,
+          otpCode: params.otpCode,
+          ...(params.ticketCode ? { ticketCode: params.ticketCode } : {}),
+          ...(params.email ? { email: params.email } : {}),
+        }),
+      });
+      const data = (await res.json().catch(() => null)) as {
+        success?: boolean;
+        exportPayload?: unknown;
+        error?: string;
+      } | null;
+      if (!res.ok || !data?.success) {
+        return { ok: false, error: data?.error ?? 'Código OTP inválido o expirado.' };
+      }
+      return { ok: true, exportPayload: data.exportPayload };
+    } catch {
+      return { ok: false, error: 'Error de red al verificar OTP para exportación.' };
+    }
+  },
+
+  async erasePrivacyDataWithOtp(params: {
+    challengeId: string;
+    otpCode: string;
+    ticketCode?: string;
+    sessionToken?: string | null;
+    email?: string;
+    accessToken?: string | null;
+  }): Promise<{ ok: boolean; anonymizedAt?: string; error?: string }> {
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const token =
+        params.sessionToken ??
+        (params.ticketCode ? getRoomToken(params.ticketCode) : null);
+      if (token) headers['x-ticket-token'] = token;
+      if (params.accessToken) headers.Authorization = `Bearer ${params.accessToken}`;
+      const res = await fetch('/api/privacy/erase', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          challengeId: params.challengeId,
+          otpCode: params.otpCode,
+          ...(params.ticketCode ? { ticketCode: params.ticketCode } : {}),
+          ...(params.email ? { email: params.email } : {}),
+        }),
+      });
+      const data = (await res.json().catch(() => null)) as {
+        success?: boolean;
+        anonymizedAt?: string;
+        error?: string;
+      } | null;
+      if (!res.ok || !data?.success) {
+        return { ok: false, error: data?.error ?? 'Código OTP inválido o expirado.' };
+      }
+      return { ok: true, anonymizedAt: data.anonymizedAt };
+    } catch {
+      return { ok: false, error: 'Error de red al verificar OTP para eliminación.' };
+    }
+  },
+
   async confirmPaymentAndReady(
     ticketId: string,
     existing: SupportTicket[],
     scope?: { ticketCode?: string; sessionToken?: string }
   ): Promise<AdapterResult<SupportTicket[]>> {
     const target = existing.find((t) => t.id === ticketId);
-    const nextStatus: TicketStatus =
-      target && target.status === 'resolved'
-        ? 'resolved'
-        : target && target.status === 'in_progress'
-        ? 'in_progress'
-        : 'ready_to_connect';
-
-    const patch: { payment_status: PaymentStatus; status: TicketStatus } = {
-      payment_status: 'paid',
-      status: nextStatus,
-    };
-    return this.updateTicket(ticketId, patch, existing, scope);
+    const ticketCode = scope?.ticketCode ?? target?.ticket_code;
+    const token =
+      scope?.sessionToken ??
+      (ticketCode ? getRoomToken(ticketCode) : null) ??
+      target?.client_session_token ??
+      null;
+    if (!ticketCode) {
+      return { ok: false, data: existing, error: 'No se encontró el ticket para verificar el pago.' };
+    }
+    const authRes = await this.fetchAuthorizedRoomTicket(ticketCode, token);
+    if (!authRes.ok || !authRes.ticket) {
+      return {
+        ok: false,
+        data: existing,
+        error: authRes.error ?? 'No se pudo verificar el estado de pago en el servidor.',
+      };
+    }
+    if (authRes.ticket.payment_status !== 'paid') {
+      return {
+        ok: false,
+        data: existing,
+        error: 'El pago aún figura pendiente en el servidor. Debe confirmarse mediante webhook firmado.',
+      };
+    }
+    const next = sortTicketsDeterministically([
+      authRes.ticket,
+      ...existing.filter(
+        (t) => t.id !== ticketId && t.ticket_code !== authRes.ticket!.ticket_code
+      ),
+    ]);
+    const saved = this.saveTickets(next);
+    return { ok: true, data: saved };
   },
 
   updateMemberAvailability(

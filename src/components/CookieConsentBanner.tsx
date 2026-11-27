@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Cookie, Settings2, ShieldCheck, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Cookie, Settings2, ShieldCheck, X } from 'lucide-react';
 import type { CookieConsentPreferences } from '../types/support';
 import {
   readCookieConsent,
@@ -18,11 +18,13 @@ export function CookieConsentBanner({
   onOpenPrivacyPolicy,
 }: CookieConsentBannerProps) {
   const [showConfig, setShowConfig] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const [analyticsEnabled, setAnalyticsEnabled] = useState(false);
   const [marketingEnabled, setMarketingEnabled] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
+    setCollapsed(false);
     const saved = readCookieConsent();
     if (saved) {
       setAnalyticsEnabled(saved.analytics);
@@ -41,6 +43,8 @@ export function CookieConsentBanner({
         setShowConfig(false);
       } else if (readCookieConsent()) {
         onClose();
+      } else {
+        setCollapsed(true);
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -52,12 +56,14 @@ export function CookieConsentBanner({
   const handleAcceptAll = () => {
     saveCookieConsent({ analytics: true, marketing: true });
     setShowConfig(false);
+    setCollapsed(false);
     onClose();
   };
 
   const handleEssentialOnly = () => {
     saveCookieConsent({ analytics: false, marketing: false });
     setShowConfig(false);
+    setCollapsed(false);
     onClose();
   };
 
@@ -67,58 +73,140 @@ export function CookieConsentBanner({
       marketing: marketingEnabled,
     });
     setShowConfig(false);
+    setCollapsed(false);
     onClose();
   };
 
   const savedExisting: CookieConsentPreferences | null = readCookieConsent();
+
+  if (collapsed) {
+    return (
+      <div
+        role="region"
+        aria-label="Aviso de cookies contraído"
+        data-testid="cookie-consent-banner"
+        className="fixed bottom-3 left-3 z-50"
+      >
+        <button
+          type="button"
+          onClick={() => setCollapsed(false)}
+          aria-expanded="false"
+          className="min-h-[44px] inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white/95 backdrop-blur-md border border-slate-300 shadow-lg text-xs font-semibold text-[#0B192C] hover:bg-slate-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+        >
+          <Cookie className="w-4 h-4 text-[#0B192C]" aria-hidden="true" />
+          <span>Cookies</span>
+          <ChevronUp className="w-3.5 h-3.5 text-slate-600" aria-hidden="true" />
+        </button>
+      </div>
+    );
+  }
 
   return (
     <aside
       role="region"
       aria-label="Aviso y preferencias de cookies"
       data-testid="cookie-consent-banner"
-      className="fixed bottom-4 left-4 right-4 z-50 max-w-4xl mx-auto bg-white border border-slate-300 rounded-xl shadow-2xl p-5 sm:p-6 text-slate-800"
+      className="fixed bottom-3 left-3 right-3 z-50 max-w-3xl mx-auto bg-white/95 backdrop-blur-md border border-slate-300 rounded-xl shadow-xl px-3.5 sm:px-4 py-3 text-slate-800"
     >
-      <div className="flex flex-col gap-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <span className="w-9 h-9 rounded-lg bg-[#0B192C] text-[#10B981] flex items-center justify-center shrink-0 mt-0.5">
-              <Cookie className="w-4 h-4" aria-hidden="true" />
-            </span>
-            <div className="space-y-1">
-              <p className="text-sm font-bold text-[#0B192C]">
-                Privacidad y control de cookies (sin rastreo previo al consentimiento)
-              </p>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Usamos cookies estrictamente esenciales para tu sala cifrada{' '}
-                <span className="font-mono">/sesion/RS-XXXX</span>. Ningún tracker de
-                analítica ni marketing se activa hasta que elijas aceptarlo. Consulta la{' '}
+      <div className="space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          <div className="flex items-start sm:items-center justify-between gap-2.5 min-w-0">
+            <div className="flex items-start sm:items-center gap-2.5 min-w-0">
+              <span className="w-8 h-8 rounded-lg bg-[#0B192C] text-[#10B981] flex items-center justify-center shrink-0">
+                <Cookie className="w-4 h-4" aria-hidden="true" />
+              </span>
+              <p className="text-xs text-slate-700 leading-snug">
+                <strong className="text-[#0B192C]">Cookies esenciales activas</strong> para tu sesión{' '}
+                <span className="font-mono text-[11px]">/sesion/RS-XXXX</span>. Sin rastreo sin tu permiso.{' '}
                 <button
                   type="button"
                   onClick={onOpenPrivacyPolicy}
                   className="font-semibold text-[#2563EB] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB] rounded"
                 >
-                  Política de Privacidad
+                  Privacidad
                 </button>
                 .
               </p>
             </div>
+
+            <div className="sm:hidden shrink-0 -mt-1 -mr-1">
+              {savedExisting ? (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  aria-label="Cerrar preferencias de cookies"
+                  className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center text-slate-500 hover:text-[#0B192C] hover:bg-slate-100 rounded-lg transition-colors"
+                >
+                  <X className="w-4 h-4" aria-hidden="true" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setCollapsed(true)}
+                  aria-label="Contraer aviso de cookies"
+                  title="Contraer aviso"
+                  className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center text-slate-500 hover:text-[#0B192C] hover:bg-slate-100 rounded-lg transition-colors"
+                >
+                  <ChevronDown className="w-4 h-4" aria-hidden="true" />
+                </button>
+              )}
+            </div>
           </div>
 
-          {savedExisting && (
+          <div className="flex flex-wrap sm:flex-nowrap items-center justify-end gap-1.5 w-full sm:w-auto sm:shrink-0">
             <button
               type="button"
-              onClick={onClose}
-              aria-label="Cerrar preferencias de cookies"
-              className="p-1 text-slate-500 hover:text-[#0B192C] rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+              onClick={() => setShowConfig((prev) => !prev)}
+              aria-expanded={showConfig}
+              className="min-h-[44px] sm:min-h-[36px] inline-flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg transition-colors whitespace-nowrap"
             >
-              <X className="w-4 h-4" />
+              <Settings2 className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>{showConfig ? 'Ocultar' : 'Configurar'}</span>
             </button>
-          )}
+
+            <button
+              type="button"
+              onClick={handleEssentialOnly}
+              className="min-h-[44px] sm:min-h-[36px] px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-[#0B192C] bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg transition-colors whitespace-nowrap"
+            >
+              Solo esenciales
+            </button>
+
+            <button
+              type="button"
+              onClick={handleAcceptAll}
+              className="min-h-[44px] sm:min-h-[36px] px-3 py-1.5 text-xs font-semibold text-white bg-[#0B192C] hover:bg-[#0F172A] rounded-lg transition-colors whitespace-nowrap"
+            >
+              Aceptar
+            </button>
+
+            <div className="hidden sm:block">
+              {savedExisting ? (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  aria-label="Cerrar preferencias de cookies"
+                  className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center text-slate-500 hover:text-[#0B192C] hover:bg-slate-100 rounded-lg transition-colors"
+                >
+                  <X className="w-4 h-4" aria-hidden="true" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setCollapsed(true)}
+                  aria-label="Contraer aviso de cookies"
+                  title="Contraer aviso"
+                  className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center text-slate-500 hover:text-[#0B192C] hover:bg-slate-100 rounded-lg transition-colors"
+                >
+                  <ChevronDown className="w-4 h-4" aria-hidden="true" />
+                </button>
+              )}
+            </div>
+          </div>
         </div>
 
         {showConfig && (
-          <div className="p-4 rounded-lg bg-[#F8FAFC] border border-slate-200 space-y-3">
+          <div className="p-3.5 rounded-lg bg-[#F8FAFC] border border-slate-200 space-y-2.5">
             <div className="flex items-center justify-between gap-4 text-xs">
               <div>
                 <p className="font-semibold text-[#0B192C]">
@@ -136,12 +224,12 @@ export function CookieConsentBanner({
 
             <div className="flex items-start justify-between gap-4 pt-2 border-t border-slate-200 text-xs">
               <label htmlFor="cookie-analytics-optin" className="cursor-pointer">
-                <p className="font-semibold text-[#0B192C]">
+                <span className="block font-semibold text-[#0B192C]">
                   Analítica técnica de rendimiento
-                </p>
-                <p className="text-slate-600">
+                </span>
+                <span className="block text-slate-600">
                   Mide tiempos de carga y estabilidad sin identificar datos personales.
-                </p>
+                </span>
               </label>
               <input
                 id="cookie-analytics-optin"
@@ -154,12 +242,12 @@ export function CookieConsentBanner({
 
             <div className="flex items-start justify-between gap-4 pt-2 border-t border-slate-200 text-xs">
               <label htmlFor="cookie-marketing-optin" className="cursor-pointer">
-                <p className="font-semibold text-[#0B192C]">
+                <span className="block font-semibold text-[#0B192C]">
                   Preferencias y atribución de campañas
-                </p>
-                <p className="text-slate-600">
+                </span>
+                <span className="block text-slate-600">
                   Recuerda códigos de invitación y descuentos aplicados en el portal.
-                </p>
+                </span>
               </label>
               <input
                 id="cookie-marketing-optin"
@@ -169,45 +257,18 @@ export function CookieConsentBanner({
                 className="mt-1 w-4 h-4 rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
               />
             </div>
+
+            <div className="pt-2 border-t border-slate-200 flex justify-end">
+              <button
+                type="button"
+                onClick={handleSaveCustom}
+                className="min-h-[44px] sm:min-h-[36px] px-4 py-1.5 text-xs font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-lg transition-colors"
+              >
+                Guardar preferencias
+              </button>
+            </div>
           </div>
         )}
-
-        <div className="flex flex-wrap items-center justify-end gap-2.5">
-          {showConfig ? (
-            <button
-              type="button"
-              onClick={handleSaveCustom}
-              className="px-4 py-2 text-xs font-semibold text-white bg-[#2563EB] hover:bg-blue-700 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
-            >
-              Guardar preferencias
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setShowConfig(true)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
-            >
-              <Settings2 className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>Configurar cookies</span>
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={handleEssentialOnly}
-            className="px-4 py-2 text-xs font-semibold text-[#0B192C] bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
-          >
-            Solo esenciales
-          </button>
-
-          <button
-            type="button"
-            onClick={handleAcceptAll}
-            className="px-4 py-2 text-xs font-semibold text-white bg-[#0B192C] hover:bg-[#0F172A] rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
-          >
-            Aceptar todas
-          </button>
-        </div>
       </div>
     </aside>
   );

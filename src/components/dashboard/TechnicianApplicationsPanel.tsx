@@ -231,7 +231,9 @@ export function TechnicianApplicationsPanel() {
                     <p className="text-xs text-slate-600">
                       <span className="font-mono">{app.email}</span> · {app.country} ·{' '}
                       <strong>
-                        {app.modality === 'full_time' ? 'Full-time' : 'Half-time'}
+                        {app.modality === 'full_time'
+                          ? 'Disponibilidad amplia independiente'
+                          : 'Disponibilidad parcial independiente'}
                       </strong>
                     </p>
                   </div>

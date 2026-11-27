@@ -7,6 +7,12 @@ import {
 } from './rbac';
 import { computeOperationalTelemetry } from './telemetryLogic';
 import {
+  applyBusinessConfigFromServer,
+  buildServerBusinessConfig,
+  computeNetCommissionBreakdown,
+  getActiveBusinessConfig,
+} from '../config/businessConfig';
+import {
   ADULT_RESTRICTION_ERROR,
   buildRustDeskDeepLink,
   buildTechnicalResolutionSummary,
@@ -16,23 +22,26 @@ import {
   computeAverageResponseMinutes,
   computeDashboardMetrics,
   createTicketFromDraft,
+  formatCategoryForOs,
+  formatElapsedSessionDuration,
   formatRustDeskId,
   generateTicketCode,
-  getDiscountPercent,
   getInitials,
+  getOsCompatibleCategory,
   getRustDeskInstallerUrl,
   getServiceTierPriceUsd,
-  getServiceTierRegularPriceUsd,
   getSuggestedTierForCategory,
   getTechnicianCommissionTier,
   isAdultBirthDate,
   isValidUuid,
   LEGAL_TERMS_VERSION,
+  matchTechnicianForTicket,
   NDA_CLIENT_VERSION,
   NDA_TECH_VERSION,
   normalizeRustDeskId,
   OFFICIAL_RUSTDESK_RELEASES_URL,
   parseAppRoute,
+  sortTicketsByUrgencyAndSla,
   TECHNICIAN_COMMISSION_TIERS,
   validateRegistrationPassword,
   validateRustDeskId,
@@ -209,6 +218,26 @@ test('createTicketFromDraft, computeDashboardMetrics, and computeAverageResponse
   const avgResponse = computeAverageResponseMinutes(sampleTickets);
   assert.equal(avgResponse.minutes, 3);
   assert.equal(avgResponse.formatted, '3.0 min');
+  assert.equal(avgResponse.sampleCount, 2);
+
+  const noResponseData = computeAverageResponseMinutes([t1], [
+    {
+      id: '00000000-0000-4000-8000-000000000199',
+      organization_id: '00000000-0000-4000-8000-000000000001',
+      ticket_code: t1.ticket_code,
+      client_name: t1.client_name,
+      technician_name: 'Carlos Mendoza',
+      rustdesk_id: '123456789',
+      agent_type: 'temporary',
+      status: 'active',
+      started_at: '2026-11-13T10:05:00.000Z',
+      ended_at: null,
+      duration_minutes: 45,
+    },
+  ]);
+  assert.equal(noResponseData.minutes, null);
+  assert.equal(noResponseData.formatted, 'Sin datos');
+  assert.equal(noResponseData.sampleCount, 0);
 
   const summaryWithPrev = buildTechnicalResolutionSummary(t1, 'Se reinstaló perfil VPN.', true);
   assert.match(summaryWithPrev, /Se reinstaló perfil VPN\./);
@@ -272,19 +301,20 @@ test('getRustDeskInstallerUrl uses configured custom env URLs or /api/rustdesk/o
   );
 });
 
-test('getServiceTierRegularPriceUsd and getDiscountPercent calculate launch savings accurately', () => {
-  assert.equal(getServiceTierRegularPriceUsd('Express $15'), 25);
-  assert.equal(getServiceTierRegularPriceUsd('Optimización $29'), 40);
-  assert.equal(getServiceTierRegularPriceUsd('Avanzado $39'), 55);
+test('Phase 2: service tier pricing exposes real prices without fictitious strikethrough regular prices', () => {
+  const config = buildServerBusinessConfig();
+  assert.equal(getServiceTierPriceUsd('Express $15'), 15);
+  assert.equal(getServiceTierPriceUsd('Optimización $29'), 29);
+  assert.equal(getServiceTierPriceUsd('Avanzado $39'), 39);
   assert.equal(getServiceTierPriceUsd('Pyme Esencial $39/mes'), 39);
-  assert.equal(getServiceTierRegularPriceUsd('Pyme Esencial $39/mes'), 59);
   assert.equal(getServiceTierPriceUsd('Pyme Corporativo $79/mes'), 79);
-  assert.equal(getServiceTierRegularPriceUsd('Pyme Corporativo $79/mes'), 99);
-  assert.equal(getDiscountPercent(15, 25), 40);
-  assert.equal(getDiscountPercent(29, 40), 28);
-  assert.equal(getDiscountPercent(39, 55), 29);
-  assert.equal(getDiscountPercent(79, 99), 20);
-  assert.equal(getDiscountPercent(50, 50), 0);
+  for (const tier of config.serviceTiers) {
+    assert.equal('regularPriceUsd' in tier, false);
+    assert.equal('discountLabel' in tier, false);
+  }
+  for (const plan of config.pymePlans) {
+    assert.equal('regularPriceUsd' in plan, false);
+  }
 });
 
 test('createTicketFromDraft supports Pyme monthly plans with accurate $79/mes billing', () => {
@@ -601,6 +631,269 @@ test('Phase 3 computeOperationalTelemetry aggregates AI quota, sessions, and OS 
     { os: 'Windows', count: 1, pct: 100 },
   ]);
 });
+
+test('Phase 1: getOsCompatibleCategory and formatCategoryForOs prevent Windows labels on Mac/Linux/Mobile', () => {
+  assert.equal(
+    getOsCompatibleCategory('Windows lento o bajo rendimiento', 'Mac'),
+    'Sistema Operativo/Lentitud'
+  );
+  assert.equal(
+    getOsCompatibleCategory('Actualizaciones de Windows', 'Linux'),
+    'Sistema Operativo/Lentitud'
+  );
+  assert.equal(
+    getOsCompatibleCategory('Windows lento o bajo rendimiento', 'Windows'),
+    'Windows lento o bajo rendimiento'
+  );
+
+  assert.equal(
+    formatCategoryForOs('Sistema Operativo/Lentitud', 'Mac'),
+    'macOS lento o bajo rendimiento'
+  );
+  assert.equal(
+    formatCategoryForOs('Sistema Operativo/Lentitud', 'Linux'),
+    'Linux lento o alto consumo'
+  );
+  assert.equal(
+    formatCategoryForOs('Sistema Operativo/Lentitud', 'Mobile'),
+    'Dispositivo móvil lento o sin espacio'
+  );
+
+  const macDraft: WizardDraft = {
+    step: 3,
+    operatingSystem: 'Mac',
+    category: 'Windows lento o bajo rendimiento',
+    serviceTier: 'Optimización $29',
+    description: 'Mi MacBook Pro va muy lento al abrir apps',
+    clientName: 'Sofía Test',
+    clientEmail: 'sofia.test@example.com',
+    birthDate: '1992-05-10',
+    termsAccepted: true,
+  };
+
+  const macTicket = createTicketFromDraft(macDraft);
+  assert.equal(macTicket.os_type, 'Mac');
+  assert.equal(macTicket.category, 'Sistema Operativo/Lentitud');
+  assert.equal(macTicket.human_reviewed_at, null);
+  assert.equal(macTicket.human_reviewed_by, null);
+  assert.ok(
+    !macTicket.ai_diagnosis_summary.toLowerCase().includes('windows'),
+    'Mac diagnosis summary should not reference Windows'
+  );
+});
+
+test('Phase 1: matchTechnicianForTicket enforces OS specialty compatibility', () => {
+  const macTicket = {
+    os_type: 'Mac' as const,
+    category: 'Sistema Operativo/Lentitud' as const,
+  };
+  const windowsTicket = {
+    os_type: 'Windows' as const,
+    category: 'Pantallazos azules (BSOD)' as const,
+  };
+
+  const windowsOnlyTech = {
+    full_name: 'Carlos Mendoza',
+    specialties: ['Windows & BSOD', 'Redes & VPN'] as SupportTicket['category'] extends never ? never : ('Windows & BSOD' | 'Redes & VPN')[],
+  };
+  const macSpecialistTech = {
+    full_name: 'Sofía Paredes',
+    specialties: ['Soporte macOS', 'Redes & VPN'] as ('Soporte macOS' | 'Redes & VPN')[],
+  };
+
+  const winOnMac = matchTechnicianForTicket(macTicket, windowsOnlyTech);
+  assert.equal(winOnMac.compatible, false);
+  assert.match(winOnMac.reason, /macOS/i);
+
+  const macOnMac = matchTechnicianForTicket(macTicket, macSpecialistTech);
+  assert.equal(macOnMac.compatible, true);
+  assert.ok(macOnMac.matchedSpecialties.includes('Soporte macOS'));
+
+  const macOnWinBsod = matchTechnicianForTicket(windowsTicket, macSpecialistTech);
+  assert.equal(macOnWinBsod.compatible, false);
+
+  const winOnWinBsod = matchTechnicianForTicket(windowsTicket, windowsOnlyTech);
+  assert.equal(winOnWinBsod.compatible, true);
+});
+
+test('Phase 1: service tier pricing has no hidden optimization addon uplift', () => {
+  assert.equal(getServiceTierPriceUsd('Express $15'), 15);
+  assert.equal(getServiceTierPriceUsd('Optimización $29'), 29);
+  assert.equal(getServiceTierPriceUsd('Avanzado $39'), 39);
+});
+
+test('Phase 2: computeNetCommissionBreakdown deducts gateway fees and operational cost before applying commission %', () => {
+  const expressBase = computeNetCommissionBreakdown({
+    grossUsd: 15,
+    commissionPercent: 65,
+    feeConfig: {
+      paymentFeePercent: 2.9,
+      paymentFeeFixedUsd: 0.3,
+      operationalCostUsd: 1.5,
+    },
+  });
+  // 15 * 0.029 + 0.30 = 0.735 -> 0.74
+  // 15 - 0.74 - 1.50 = 12.76 net distributable
+  // 12.76 * 0.65 = 8.294 -> 8.29 payout
+  assert.equal(expressBase.grossUsd, 15);
+  assert.equal(expressBase.paymentFeeUsd, 0.74);
+  assert.equal(expressBase.operationalCostUsd, 1.5);
+  assert.equal(expressBase.netDistributableUsd, 12.76);
+  assert.equal(expressBase.technicianPayoutUsd, 8.29);
+  assert.equal(expressBase.platformMarginUsd, 4.47);
+
+  const advancedElite = computeNetCommissionBreakdown({
+    grossUsd: 39,
+    commissionPercent: 85,
+    feeConfig: {
+      paymentFeePercent: 2.9,
+      paymentFeeFixedUsd: 0.3,
+      operationalCostUsd: 1.5,
+    },
+  });
+  // 39 * 0.029 + 0.30 = 1.431 -> 1.43
+  // 39 - 1.43 - 1.50 = 36.07 net
+  // 36.07 * 0.85 = 30.6595 -> 30.66
+  assert.equal(advancedElite.paymentFeeUsd, 1.43);
+  assert.equal(advancedElite.netDistributableUsd, 36.07);
+  assert.equal(advancedElite.technicianPayoutUsd, 30.66);
+
+  const zeroGross = computeNetCommissionBreakdown({
+    grossUsd: 0,
+    commissionPercent: 80,
+  });
+  assert.equal(zeroGross.technicianPayoutUsd, 0);
+  assert.equal(zeroGross.netDistributableUsd, 0);
+});
+
+test('Phase 2: buildServerBusinessConfig reads env overrides and applyBusinessConfigFromServer syncs UI helpers', () => {
+  const prevExpress = process.env.BUSINESS_TIER_EXPRESS_USD;
+  const prevOpCost = process.env.BUSINESS_OPERATIONAL_COST_USD;
+  const prevBasePct = process.env.BUSINESS_COMMISSION_BASE_PCT;
+
+  try {
+    process.env.BUSINESS_TIER_EXPRESS_USD = '19';
+    process.env.BUSINESS_OPERATIONAL_COST_USD = '2.25';
+    process.env.BUSINESS_COMMISSION_BASE_PCT = '68';
+
+    const overridden = buildServerBusinessConfig();
+    assert.equal(
+      overridden.serviceTiers.find((t) => t.id === 'Express $15')?.priceUsd,
+      19
+    );
+    assert.equal(overridden.feeConfig.operationalCostUsd, 2.25);
+    assert.equal(overridden.commissionTiers[0]?.commissionPercent, 68);
+
+    applyBusinessConfigFromServer(overridden);
+    assert.equal(getActiveBusinessConfig().feeConfig.operationalCostUsd, 2.25);
+    assert.equal(getServiceTierPriceUsd('Express $15'), 19);
+    assert.equal(getTechnicianCommissionTier(0).commissionPercent, 68);
+  } finally {
+    if (prevExpress === undefined) delete process.env.BUSINESS_TIER_EXPRESS_USD;
+    else process.env.BUSINESS_TIER_EXPRESS_USD = prevExpress;
+    if (prevOpCost === undefined) delete process.env.BUSINESS_OPERATIONAL_COST_USD;
+    else process.env.BUSINESS_OPERATIONAL_COST_USD = prevOpCost;
+    if (prevBasePct === undefined) delete process.env.BUSINESS_COMMISSION_BASE_PCT;
+    else process.env.BUSINESS_COMMISSION_BASE_PCT = prevBasePct;
+    applyBusinessConfigFromServer(buildServerBusinessConfig());
+  }
+});
+
+test('Phase 3: sortTicketsByUrgencyAndSla prioritizes unresolved high-urgency and oldest SLA tickets first', () => {
+  const baseTicket = createTicketFromDraft(
+    {
+      step: 3,
+      category: 'Redes/Wi-Fi',
+      operatingSystem: 'Windows',
+      serviceTier: 'Express $15',
+      description: 'Sin acceso a red corporativa',
+      clientName: 'Cliente Base',
+      clientEmail: 'base@example.com',
+      birthDate: '1990-01-01',
+      termsAccepted: true,
+    },
+    { nowIso: '2026-11-20T10:00:00.000Z', randomFn: () => 0.1 }
+  );
+
+  const resolvedHigh: SupportTicket = {
+    ...baseTicket,
+    id: '00000000-0000-4000-8000-000000000011',
+    ticket_code: 'RS-1001',
+    priority: 'high',
+    status: 'resolved',
+    created_at: '2026-11-20T08:00:00.000Z',
+    resolved_at: '2026-11-20T09:00:00.000Z',
+  };
+  const lowOld: SupportTicket = {
+    ...baseTicket,
+    id: '00000000-0000-4000-8000-000000000012',
+    ticket_code: 'RS-1002',
+    priority: 'low',
+    status: 'ready_to_connect',
+    created_at: '2026-11-20T07:00:00.000Z',
+  };
+  const highNewerReady: SupportTicket = {
+    ...baseTicket,
+    id: '00000000-0000-4000-8000-000000000013',
+    ticket_code: 'RS-1003',
+    priority: 'high',
+    status: 'ready_to_connect',
+    created_at: '2026-11-20T10:05:00.000Z',
+  };
+  const highOlderReady: SupportTicket = {
+    ...baseTicket,
+    id: '00000000-0000-4000-8000-000000000014',
+    ticket_code: 'RS-1004',
+    priority: 'high',
+    status: 'ready_to_connect',
+    created_at: '2026-11-20T09:30:00.000Z',
+  };
+  const highWaitingPayment: SupportTicket = {
+    ...baseTicket,
+    id: '00000000-0000-4000-8000-000000000015',
+    ticket_code: 'RS-1005',
+    priority: 'high',
+    status: 'waiting_payment',
+    created_at: '2026-11-20T09:00:00.000Z',
+  };
+  const mediumInProgress: SupportTicket = {
+    ...baseTicket,
+    id: '00000000-0000-4000-8000-000000000016',
+    ticket_code: 'RS-1006',
+    priority: 'medium',
+    status: 'in_progress',
+    created_at: '2026-11-20T09:15:00.000Z',
+  };
+
+  const sorted = sortTicketsByUrgencyAndSla([
+    resolvedHigh,
+    lowOld,
+    highNewerReady,
+    highWaitingPayment,
+    mediumInProgress,
+    highOlderReady,
+  ]);
+
+  assert.deepEqual(
+    sorted.map((t) => t.ticket_code),
+    ['RS-1004', 'RS-1003', 'RS-1005', 'RS-1006', 'RS-1002', 'RS-1001']
+  );
+});
+
+test('Phase 3: formatElapsedSessionDuration formats mm:ss and hh:mm:ss deterministically', () => {
+  const start = '2026-11-20T10:00:00.000Z';
+  assert.equal(
+    formatElapsedSessionDuration(start, Date.parse('2026-11-20T10:04:09.000Z')),
+    '04:09'
+  );
+  assert.equal(
+    formatElapsedSessionDuration(start, Date.parse('2026-11-20T11:05:12.000Z')),
+    '01:05:12'
+  );
+  assert.equal(formatElapsedSessionDuration(null, Date.now()), '00:00');
+});
+
+
 
 
 

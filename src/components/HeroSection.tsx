@@ -370,19 +370,20 @@ export function HeroSection({
 
   return (
     <section
+      id="hero"
       aria-labelledby="hero-heading"
       className="relative overflow-x-clip bg-gradient-to-b from-[#F4F7FB] via-white to-[#F8FAFC] border-b border-slate-200/80"
     >
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 pb-10 sm:pt-14 sm:pb-12 lg:pt-16 lg:pb-14">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-start">
-          {/* Left Column: Title, Subtitle, Above-the-Fold CTAs & Floating Assistant Card */}
+          {/* Left Column: Title, Subtitle & Floating Assistant Card */}
           <div className="lg:col-span-5 space-y-6">
             <p
               className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#2563EB] animate-fade-up"
               style={{ animationDelay: '0ms' }}
             >
               <Sparkles className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-              <span>Soporte IT con IA, con especialistas cuando hace falta</span>
+              <span>Soporte remoto con IA + Especialistas</span>
             </p>
 
             <h1
@@ -399,55 +400,10 @@ export function HeroSection({
               className="text-base sm:text-lg text-slate-600 max-w-xl leading-relaxed animate-fade-up"
               style={{ animationDelay: '160ms' }}
             >
-              Cuéntanos qué ocurre. La IA te guía con preguntas sencillas y pasos
-              seguros. Si el caso necesita ayuda humana, transfiere el resumen y tu
-              ticket a un especialista.
+              Cuéntanos qué ocurre. Nuestro asistente IA te guía gratis con pasos
+              seguros; si necesitas conexión remota, un especialista certificado lo
+              resuelve contigo.
             </p>
-
-            {/* Primary & Secondary CTAs + Micro-guarantees above the fold */}
-            <div className="space-y-3.5 animate-fade-up" style={{ animationDelay: '180ms' }}>
-              <div className="flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  data-testid="hero-start-diagnostic"
-                  onClick={onStartDiagnostic}
-                  className="group inline-flex items-center justify-center gap-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white px-6 py-3.5 rounded-xl text-sm sm:text-base font-semibold shadow-lg shadow-blue-600/20 hover:shadow-xl hover:shadow-blue-600/25 hover:-translate-y-0.5 active:scale-[0.99] transition-all duration-150 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2563EB]"
-                >
-                  <span>Iniciar diagnóstico</span>
-                  <ArrowRight
-                    className="w-4 h-4 shrink-0 transition-transform duration-150 group-hover:translate-x-0.5"
-                    aria-hidden="true"
-                  />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleScrollHowItWorks}
-                  className="group inline-flex items-center justify-center gap-2 bg-white hover:bg-slate-50 text-[#0B192C] border border-slate-200 px-5 py-3.5 rounded-xl text-sm sm:text-base font-semibold shadow-xs hover:-translate-y-0.5 transition-all duration-150 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-400"
-                >
-                  <span>Así funciona</span>
-                  <ArrowDown
-                    className="w-4 h-4 text-slate-500 shrink-0 transition-transform duration-150 group-hover:translate-y-0.5"
-                    aria-hidden="true"
-                  />
-                </button>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs font-medium text-slate-700">
-                <span className="inline-flex items-center gap-1.5">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-[#10B981] shrink-0" aria-hidden="true" />
-                  <span>Tú decides cada paso</span>
-                </span>
-                <span className="inline-flex items-center gap-1.5">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-[#10B981] shrink-0" aria-hidden="true" />
-                  <span>Sin contraseñas por chat</span>
-                </span>
-                <span className="inline-flex items-center gap-1.5">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-[#10B981] shrink-0" aria-hidden="true" />
-                  <span>Desde $15 USD</span>
-                </span>
-              </div>
-            </div>
 
             {/* Floating Animated Live Conversation Demo Card with Continuous 3D Perspective & Interactive Tilt */}
             <div
@@ -456,7 +412,7 @@ export function HeroSection({
               onPointerLeave={handleCardPointerLeave}
               onFocusCapture={() => setDemoPaused(true)}
               onBlurCapture={() => setDemoPaused(false)}
-              className="relative w-full p-1 pb-3 [perspective:1100px] animate-fade-up"
+              className="hidden md:block relative w-full p-1 pb-3 [perspective:1100px] animate-fade-up"
               style={{ animationDelay: '200ms' }}
             >
               {/* Soft Levitating Ambient Glow Underneath */}
@@ -498,13 +454,21 @@ export function HeroSection({
                       showOnlineBadge
                     />
                     <div className="min-w-0">
-                      <p className="text-xs font-bold text-[#0B192C] leading-tight truncate">
-                        Asistente Remote 365
-                      </p>
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-xs font-bold text-[#0B192C] leading-tight truncate">
+                          Asistente Remote 365
+                        </p>
+                        <span
+                          data-testid="hero-demo-badge"
+                          className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 text-[9px] font-bold uppercase tracking-wider shrink-0"
+                        >
+                          DEMO
+                        </span>
+                      </div>
                       <p className="text-[11px] font-medium text-emerald-700 leading-tight mt-0.5 truncate">
                         {simStage === 'typing'
                           ? activeScenario.thinkingLabel
-                          : 'Disponible para ayudarte'}
+                          : 'Vista previa interactiva'}
                       </p>
                     </div>
                   </div>
@@ -647,6 +611,11 @@ export function HeroSection({
                       key={slide.id}
                       src={slide.src}
                       alt={slide.alt}
+                      width={1200}
+                      height={900}
+                      loading={index === 0 ? 'eager' : 'lazy'}
+                      decoding="async"
+                      fetchPriority={index === 0 ? 'high' : undefined}
                       referrerPolicy="no-referrer"
                       aria-hidden={!isActive}
                       className={`absolute inset-0 w-full h-full object-cover ${slide.objectPosition} transition-opacity duration-700 ease-out-expo ${
@@ -746,9 +715,54 @@ export function HeroSection({
               </div>
             </div>
 
+            {/* Primary & Secondary CTAs + Micro-guarantees directly below the carousel */}
+            <div className="mt-6 space-y-3.5 animate-fade-up" style={{ animationDelay: '180ms' }}>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  data-testid="hero-start-diagnostic"
+                  onClick={onStartDiagnostic}
+                  className="group inline-flex items-center justify-center gap-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white px-6 py-3.5 rounded-xl text-sm sm:text-base font-semibold shadow-lg shadow-blue-600/20 hover:shadow-xl hover:shadow-blue-600/25 hover:-translate-y-0.5 active:scale-[0.99] transition-all duration-150 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#2563EB]"
+                >
+                  <span>Iniciar diagnóstico</span>
+                  <ArrowRight
+                    className="w-4 h-4 shrink-0 transition-transform duration-150 group-hover:translate-x-0.5"
+                    aria-hidden="true"
+                  />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleScrollHowItWorks}
+                  className="group inline-flex items-center justify-center gap-2 bg-white hover:bg-slate-50 text-[#0B192C] border border-slate-200 px-5 py-3.5 rounded-xl text-sm sm:text-base font-semibold shadow-xs hover:-translate-y-0.5 transition-all duration-150 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-400"
+                >
+                  <span>Así funciona</span>
+                  <ArrowDown
+                    className="w-4 h-4 text-slate-500 shrink-0 transition-transform duration-150 group-hover:translate-y-0.5"
+                    aria-hidden="true"
+                  />
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs font-medium text-slate-700">
+                <span className="inline-flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-[#10B981] shrink-0" aria-hidden="true" />
+                  <span>Tú decides cada paso</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-[#10B981] shrink-0" aria-hidden="true" />
+                  <span>Sin contraseñas por chat</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-[#10B981] shrink-0" aria-hidden="true" />
+                  <span>Desde $15 USD</span>
+                </span>
+              </div>
+            </div>
+
             {/* Bottom Strip: Daily Application Shortcuts Bar */}
             <div
-              className="mt-6 pt-5 border-t border-slate-200/80 flex flex-col items-start gap-3.5 animate-fade-up"
+              className="mt-6 pt-5 border-t border-slate-200/80 flex flex-col items-start gap-3.5 animate-fade-up w-full"
               style={{ animationDelay: '360ms' }}
             >
               <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 whitespace-nowrap">
@@ -759,7 +773,7 @@ export function HeroSection({
               <div
                 role="group"
                 aria-label="Accesos directos por aplicación"
-                className="flex flex-wrap items-center gap-2"
+                className="w-full flex flex-nowrap items-center gap-1.5 overflow-x-auto scrollbar-transparent pb-0.5"
               >
                 {DAILY_APP_SHORTCUTS.map((item) => {
                   const Icon = item.icon;
@@ -768,7 +782,7 @@ export function HeroSection({
                       key={item.label}
                       type="button"
                       onClick={() => triggerSymptom(item.symptom, item.category)}
-                      className="inline-flex items-center gap-1.5 bg-white hover:bg-blue-50/80 border border-slate-200/90 hover:border-blue-300 text-slate-700 hover:text-[#1D4ED8] hover:-translate-y-0.5 px-3.5 py-2 rounded-xl text-xs font-medium shadow-xs transition-all duration-150 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+                      className="inline-flex items-center gap-1.5 bg-white hover:bg-blue-50/80 border border-slate-200/90 hover:border-blue-300 text-slate-700 hover:text-[#1D4ED8] hover:-translate-y-0.5 px-2.5 py-2 rounded-xl text-[11px] xl:text-xs font-medium shadow-xs transition-all duration-150 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
                     >
                       <Icon className="w-3.5 h-3.5 text-[#2563EB] shrink-0" aria-hidden="true" />
                       <span>{item.label}</span>

@@ -4,7 +4,6 @@ import {
   Bot,
   CheckCircle2,
   Clock,
-  Headphones,
   Monitor,
   Plus,
   ShieldCheck,
@@ -25,9 +24,11 @@ import type {
 import {
   computeAverageResponseMinutes,
   deriveTicketPriority,
+  formatCategoryForOs,
   formatRustDeskId,
   getInitials,
   getTicketStatusLabel,
+  sortTicketsByUrgencyAndSla,
 } from '../../utils/ticketLogic';
 
 import {
@@ -148,7 +149,10 @@ export function DashboardOverview({
     );
   });
 
-  const recentTickets = filteredTickets.slice(0, 4);
+  const sortedTickets = sortTicketsByUrgencyAndSla(filteredTickets);
+  const recentTickets = sortedTickets.slice(0, 6);
+
+  const isDemoData = !supabaseConfigured;
 
   return (
     <div data-testid="dashboard-overview" className="space-y-6">
@@ -156,11 +160,15 @@ export function DashboardOverview({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <p className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#64748B]">
-            <span
-              className="w-2.5 h-2.5 rounded-full bg-[#34D399]"
-              aria-hidden="true"
-            />
-            <span>PLATAFORMA DE SOPORTE PROFESIONAL</span>
+            <span>CENTRO DE OPERACIONES</span>
+            {isDemoData && (
+              <span
+                data-testid="dashboard-demo-badge"
+                className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-bold tracking-wider"
+              >
+                DEMO
+              </span>
+            )}
           </p>
           <h1
             id="tech-portal-heading"
@@ -177,75 +185,11 @@ export function DashboardOverview({
         <button
           type="button"
           onClick={onOpenNewTicketModal}
-          className="inline-flex items-center justify-center gap-2 px-5 py-3 text-[14px] font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-xl shadow-[0_6px_16px_rgba(37,99,235,0.28)] transition-colors whitespace-nowrap self-start sm:self-auto"
+          className="min-h-[44px] inline-flex items-center justify-center gap-2 px-5 py-3 text-[14px] font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-xl shadow-[0_6px_16px_rgba(37,99,235,0.22)] transition-colors whitespace-nowrap self-start sm:self-auto"
         >
           <Plus className="w-[18px] h-[18px]" strokeWidth={2.2} aria-hidden="true" />
           <span>Nueva solicitud</span>
         </button>
-      </div>
-
-      {/* Blue Gradient Hero Banner matching Reference Screenshot */}
-      <div
-        className="relative overflow-hidden rounded-2xl p-6 sm:p-8 text-white shadow-[0_10px_28px_rgba(13,45,98,0.16)] grid grid-cols-1 lg:grid-cols-12 gap-6 items-center"
-        style={{
-          background:
-            'linear-gradient(135deg, #0D2D62 0%, #154A9B 55%, #1D64D8 100%)',
-        }}
-      >
-        {/* Subtle decorative background circles */}
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute -right-12 -top-12 w-64 h-64 rounded-full border border-white/10 bg-white/[0.03]"
-        />
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute right-10 -bottom-20 w-52 h-52 rounded-full border border-white/10"
-        />
-
-        <div className="lg:col-span-8 space-y-3 relative z-10 pr-12 sm:pr-0">
-          <p className="text-[11px] font-semibold tracking-[0.14em] uppercase text-white/70">
-            REMOTE SUPPORT 365
-          </p>
-          <h2 className="text-[24px] sm:text-[30px] font-bold tracking-tight leading-[1.18] text-white">
-            Tu operación de soporte, bajo control.
-          </h2>
-          <p className="text-[14px] text-white/80 leading-relaxed max-w-lg">
-            Un espacio unificado para atender clientes, coordinar técnicos y
-            gestionar sesiones remotas.
-          </p>
-
-          <div className="pt-2">
-            <button
-              type="button"
-              onClick={() => onNavigateSection('tickets')}
-              className="inline-flex items-center gap-2.5 px-5 py-2.5 text-[13px] font-semibold text-white bg-white/10 hover:bg-white/20 border border-white/25 rounded-xl transition-colors backdrop-blur-sm"
-            >
-              <span>Explorar solicitudes</span>
-              <ArrowUpRight className="w-4 h-4" aria-hidden="true" />
-            </button>
-          </div>
-        </div>
-
-        {/* Right Composition visible cleanly across mobile & desktop */}
-        <div
-          aria-hidden="true"
-          className="pointer-events-none lg:col-span-4 absolute right-4 top-1/2 -translate-y-1/2 sm:right-8 lg:static lg:translate-y-0 flex items-center justify-end lg:pr-2 z-0 lg:z-10"
-        >
-          <div className="relative">
-            <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-white/[0.07] lg:bg-white/10 border border-white/12 lg:border-white/20 backdrop-blur-sm flex items-center justify-center">
-              <Headphones
-                className="w-8 h-8 sm:w-10 sm:h-10 text-white/35 lg:text-white/90"
-                strokeWidth={1.7}
-              />
-            </div>
-            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-white/[0.06] lg:bg-white/12 border border-white/12 lg:border-white/20 backdrop-blur-sm flex items-center justify-center absolute -bottom-2.5 -left-6 sm:-bottom-3 sm:-left-7">
-              <ShieldCheck
-                className="w-4 h-4 sm:w-5 sm:h-5 text-white/30 lg:text-blue-100"
-                strokeWidth={1.7}
-              />
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* 4 KPI White Cards (2x2 on mobile/tablet, 4x1 on desktop) */}
@@ -319,7 +263,11 @@ export function DashboardOverview({
               {responseTimeMetric.formatted}
             </p>
             <p className="text-[12px] text-slate-600 mt-1">
-              Promedio real de despacho
+              {responseTimeMetric.sampleCount === 0
+                ? 'Sin muestras de despacho aún'
+                : `Promedio real de despacho (${responseTimeMetric.sampleCount} ${
+                    responseTimeMetric.sampleCount === 1 ? 'ticket' : 'tickets'
+                  })`}
             </p>
           </div>
         </div>
@@ -327,25 +275,28 @@ export function DashboardOverview({
 
       {/* Middle Row: Solicitudes recientes + Capacidades de la plataforma */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
-        {/* Left 65% (8 cols): Solicitudes recientes with hairline row dividers */}
-        <div className="xl:col-span-8 bg-white border border-[#E5E9F2] rounded-2xl p-5 sm:p-6 shadow-[0_1px_3px_rgba(15,23,42,0.03)]">
+        {/* Left 65% (8 cols): Cola de tickets priorizada por urgencia y SLA */}
+        <div
+          data-testid="overview-sla-queue"
+          className="xl:col-span-8 bg-white border border-[#E5E9F2] rounded-2xl p-5 sm:p-6 shadow-[0_1px_3px_rgba(15,23,42,0.03)]"
+        >
           <div className="flex items-start justify-between gap-4 pb-4">
             <div>
-              <h3 className="text-[18px] font-bold text-[#0F172A] leading-snug">
-                Solicitudes recientes
-              </h3>
+              <h2 className="text-[18px] font-bold text-[#0F172A] leading-snug">
+                Cola de solicitudes por urgencia y SLA
+              </h2>
               <p className="text-[13px] text-[#64748B] mt-0.5">
                 {normalizedQuery
                   ? `Filtrado por "${searchQuery}" (${filteredTickets.length} resultados)`
-                  : 'Seguimiento de actividad de soporte'}
+                  : 'Casos activos ordenados primero por prioridad y tiempo de espera'}
               </p>
             </div>
             <button
               type="button"
               onClick={() => onNavigateSection('tickets')}
-              className="inline-flex items-center gap-1.5 text-[13px] font-medium text-[#2563EB] hover:text-[#1D4ED8] whitespace-nowrap mt-0.5"
+              className="min-h-[44px] sm:min-h-0 inline-flex items-center gap-1.5 text-[13px] font-medium text-[#2563EB] hover:text-[#1D4ED8] whitespace-nowrap mt-0.5"
             >
-              <span>Ver todas</span>
+              <span>Ver cola completa</span>
               <ArrowUpRight className="w-4 h-4" aria-hidden="true" />
             </button>
           </div>
@@ -379,11 +330,22 @@ export function DashboardOverview({
                         <p className="text-[14px] font-semibold text-[#0F172A] truncate">
                           {ticket.client_name}
                         </p>
-                        <p className="text-[12px] text-[#64748B] tabular-nums truncate mt-0.5">
-                          {ticket.ticket_code} · {ticket.category}
-                          {ticket.rustdesk_id
-                            ? ` · ID ${formatRustDeskId(ticket.rustdesk_id)}`
-                            : ''}
+                        <p className="text-[12px] text-[#64748B] truncate mt-0.5">
+                          <span className="font-mono font-semibold text-[#0F172A]">
+                            {ticket.ticket_code}
+                          </span>{' '}
+                          · {formatCategoryForOs(ticket.category, ticket.os_type)}
+                          {ticket.rustdesk_id ? (
+                            <>
+                              {' '}
+                              · ID{' '}
+                              <span className="font-mono">
+                                {formatRustDeskId(ticket.rustdesk_id)}
+                              </span>
+                            </>
+                          ) : (
+                            ''
+                          )}
                         </p>
                       </div>
                     </div>
@@ -630,7 +592,7 @@ export function DashboardOverview({
               <p className="text-[12px] text-[#047857] mt-0.5">
                 {supabaseConfigured
                   ? 'Conectado a Supabase Realtime y Gemini AI'
-                  : 'Modo demostración sincronizado + Gemini AI'}
+                  : 'Datos DEMO locales (sin Supabase) · Gemini AI'}
               </p>
             </div>
           </div>

@@ -376,17 +376,22 @@ export function DashboardSidebar({
             </div>
           )}
 
-          {!isCompact && onOpenPublicPortal && (
+          {onOpenPublicPortal && (
             <button
               type="button"
+              data-testid="sidebar-public-portal-link"
+              title={isCompact ? 'Portal Cliente' : undefined}
+              aria-label={isCompact ? 'Ir al Portal Cliente' : undefined}
               onClick={() => {
                 onCloseMobile();
                 onOpenPublicPortal();
               }}
-              className="w-full px-3 py-2 rounded-xl bg-[#111E35] hover:bg-[#162847] border border-[#1E2E4A] text-xs font-medium text-[#CBD5E1] hover:text-white flex items-center justify-between transition-colors"
+              className={`w-full min-h-[44px] rounded-xl bg-[#111E35] hover:bg-[#162847] border border-[#1E2E4A] text-xs font-medium text-[#CBD5E1] hover:text-white flex items-center transition-colors ${
+                isCompact ? 'justify-center px-2' : 'justify-between px-3 py-2'
+              }`}
             >
-              <span>Portal Cliente público</span>
-              <ArrowUpRight className="w-3.5 h-3.5 text-[#60A5FA]" aria-hidden="true" />
+              {!isCompact && <span>Portal Cliente</span>}
+              <ArrowUpRight className="w-4 h-4 text-[#60A5FA] shrink-0" aria-hidden="true" />
             </button>
           )}
 
@@ -433,14 +438,15 @@ export function DashboardSidebar({
 
   return (
     <>
-      {/* Desktop Fixed & Collapsible Sidebar (260px exact width) */}
+      {/* Desktop Full-Height Sticky & Collapsible Sidebar (260px exact width) */}
       <aside
-        className={`hidden lg:block shrink-0 transition-all duration-200 ${
+        data-testid="dashboard-sidebar-desktop"
+        className={`hidden lg:block shrink-0 self-stretch min-h-screen bg-[#0A1426] border-r border-[#16243E] transition-all duration-200 ${
           collapsed ? 'w-20' : 'w-[260px]'
         }`}
       >
         <div
-          className={`fixed top-0 left-0 h-screen z-30 transition-all duration-200 ${
+          className={`sticky top-0 h-screen z-30 transition-all duration-200 ${
             collapsed ? 'w-20' : 'w-[260px]'
           }`}
         >

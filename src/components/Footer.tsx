@@ -75,9 +75,9 @@ export function Footer({
                   onOpenTechnicianApply();
                 }}
                 data-testid="footer-tech-apply-link"
-                className="text-emerald-400 hover:text-emerald-300 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded px-1 py-0.5"
+                className="inline-flex items-center min-h-[44px] text-emerald-300 hover:text-emerald-200 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded px-1"
               >
-                Trabaja como Técnico
+                Red de Especialistas
               </a>
             )}
           </nav>
@@ -87,19 +87,19 @@ export function Footer({
         <div className="pt-5 border-t border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-4 text-xs">
           <div
             aria-label="Documentación legal y privacidad"
-            className="flex flex-wrap items-center gap-x-5 gap-y-2"
+            className="flex flex-wrap items-center gap-x-5 gap-y-1"
           >
             <button
               type="button"
               onClick={() => onOpenLegalDoc('privacy')}
-              className="text-slate-300 hover:text-white underline-offset-4 hover:underline transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded"
+              className="min-h-[44px] inline-flex items-center text-slate-300 hover:text-white underline-offset-4 hover:underline transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded"
             >
               Política de Privacidad
             </button>
             <button
               type="button"
               onClick={() => onOpenLegalDoc('terms')}
-              className="text-slate-300 hover:text-white underline-offset-4 hover:underline transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded"
+              className="min-h-[44px] inline-flex items-center text-slate-300 hover:text-white underline-offset-4 hover:underline transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded"
             >
               Términos y Condiciones
             </button>
@@ -107,28 +107,28 @@ export function Footer({
               type="button"
               onClick={() => onOpenLegalDoc('nda')}
               data-testid="footer-legal-nda-button"
-              className="text-slate-300 hover:text-white underline-offset-4 hover:underline transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded"
+              className="min-h-[44px] inline-flex items-center text-slate-300 hover:text-white underline-offset-4 hover:underline transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded"
             >
               Confidencialidad (NDA)
             </button>
             <button
               type="button"
               onClick={() => onOpenLegalDoc('refunds')}
-              className="text-slate-300 hover:text-white underline-offset-4 hover:underline transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded"
+              className="min-h-[44px] inline-flex items-center text-slate-300 hover:text-white underline-offset-4 hover:underline transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded"
             >
               Reembolsos y Cancelación
             </button>
             <button
               type="button"
               onClick={() => onOpenLegalDoc('contact')}
-              className="text-slate-300 hover:text-white underline-offset-4 hover:underline transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded"
+              className="min-h-[44px] inline-flex items-center text-slate-300 hover:text-white underline-offset-4 hover:underline transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded"
             >
               Contacto y DMCA
             </button>
             <button
               type="button"
               onClick={onOpenCookieSettings}
-              className="text-emerald-400 hover:text-emerald-300 font-medium underline-offset-4 hover:underline transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded"
+              className="min-h-[44px] inline-flex items-center text-emerald-300 hover:text-emerald-200 font-medium underline-offset-4 hover:underline transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded"
             >
               Preferencias de cookies
             </button>

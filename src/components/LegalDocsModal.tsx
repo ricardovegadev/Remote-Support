@@ -347,8 +347,9 @@ export function LegalDocsModal({
                 </div>
                 <p className="text-xs text-emerald-950/90 leading-relaxed">
                   De aceptación obligatoria y firma nominal para todos los técnicos postulantes y
-                  especialistas activos de la red Remote Support 365 (modalidades Half-time y
-                  Full-time).
+                  especialistas independientes activos de la red Remote Support 365 (disponibilidad
+                  parcial o amplia bajo demanda), sujetos a verificación de identidad (KYC) y
+                  período de prueba supervisado.
                 </p>
                 <div className="space-y-2.5 pt-1">
                   <div>
@@ -373,11 +374,13 @@ export function LegalDocsModal({
                   </div>
                   <div>
                     <h5 className="text-xs font-semibold text-[#0B192C]">
-                      2.3 Cero grabación, copia o retención local de archivos
+                      2.3 Política de auditoría de sesión y cero retención local de archivos
                     </h5>
                     <p className="text-xs text-slate-700 mt-0.5">
-                      Está prohibido grabar pantallas, capturar información privada o conservar
-                      copias de archivos de clientes en equipos o nubes personales del técnico.
+                      Las sesiones pueden ser auditadas o registradas por coordinación técnica para
+                      control de calidad, seguridad y garantías. Está prohibido al especialista
+                      grabar pantallas por cuenta propia, capturar información privada o conservar
+                      copias de archivos de clientes en equipos o nubes personales.
                     </p>
                   </div>
                   <div>

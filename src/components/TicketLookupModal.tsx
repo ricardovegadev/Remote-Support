@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, Search, Ticket, X } from 'lucide-react';
 import type { SupportTicket } from '../types/support';
-import { getTicketStatusLabel } from '../utils/ticketLogic';
+import { formatCategoryForOs, getTicketStatusLabel } from '../utils/ticketLogic';
 
 interface TicketLookupModalProps {
   isOpen: boolean;
@@ -157,7 +157,7 @@ export function TicketLookupModal({
                         </span>
                       </div>
                       <p className="text-xs text-slate-600 truncate mt-0.5">
-                        {ticket.category} · {ticket.os_type}
+                        {formatCategoryForOs(ticket.category, ticket.os_type)} · {ticket.os_type}
                       </p>
                     </div>
                     <ArrowRight
