@@ -103,7 +103,7 @@ export function AuthModal({
     setLoading(true);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
-        redirectTo: `${window.location.origin}/portal`,
+        redirectTo: window.location.origin,
       });
       if (error) {
         setAuthError(`No se pudo enviar el enlace: ${error.message}`);
@@ -145,62 +145,10 @@ export function AuthModal({
           );
           return;
         }
-        const { data: dbProfile } = await supabase
-          .from('profiles')
-          .select(
-            'full_name,email,role,birth_date,is_adult_verified,terms_accepted_at,terms_version,marketing_opt_in,created_at'
-          )
-          .eq('id', data.user.id)
-          .maybeSingle();
-
-        const meta = data.user.user_metadata ?? {};
-        const dbRole = dbProfile?.role;
-        const resolvedRole: UserAccountProfile['role'] =
-          dbRole === 'admin' || dbRole === 'technician' || dbRole === 'client'
-            ? dbRole
-            : 'client';
-        const resolvedSubStatus: UserAccountProfile['subscription_status'] = 'none';
-
-        const profile: UserAccountProfile = {
-          id: data.user.id,
-          full_name:
-            (typeof dbProfile?.full_name === 'string' && dbProfile.full_name.trim()) ||
-            (typeof meta.full_name === 'string' && meta.full_name.trim()) ||
-            cleanEmail.split('@')[0],
-          email:
-            (typeof dbProfile?.email === 'string' && dbProfile.email.trim()) ||
-            data.user.email ||
-            cleanEmail,
-          role: resolvedRole,
-          birth_date:
-            (typeof dbProfile?.birth_date === 'string' && dbProfile.birth_date) ||
-            (typeof meta.birth_date === 'string' ? meta.birth_date : ''),
-          is_adult_verified:
-            typeof dbProfile?.is_adult_verified === 'boolean'
-              ? dbProfile.is_adult_verified
-              : Boolean(meta.is_adult_verified),
-          terms_accepted_at:
-            (typeof dbProfile?.terms_accepted_at === 'string' &&
-              dbProfile.terms_accepted_at) ||
-            (typeof meta.terms_accepted_at === 'string'
-              ? meta.terms_accepted_at
-              : ''),
-          terms_version:
-            (typeof dbProfile?.terms_version === 'string' && dbProfile.terms_version) ||
-            (typeof meta.terms_version === 'string'
-              ? meta.terms_version
-              : LEGAL_TERMS_VERSION),
-          marketing_opt_in:
-            typeof dbProfile?.marketing_opt_in === 'boolean'
-              ? dbProfile.marketing_opt_in
-              : Boolean(meta.marketing_opt_in),
-          subscription_plan: null,
-          subscription_status: resolvedSubStatus,
-          created_at:
-            (typeof dbProfile?.created_at === 'string' && dbProfile.created_at) ||
-            data.user.created_at ||
-            new Date().toISOString(),
-        };
+        const profile = await supportAdapter.hydrateAuthenticatedUserProfile(
+          supabase,
+          data.user
+        );
         onAuthenticated(profile);
         onClose();
         return;
@@ -395,8 +343,16 @@ export function AuthModal({
               <p className="text-slate-600 font-mono">{currentUser.email}</p>
               <p className="text-slate-600">
                 Rol:{' '}
-                <strong className="text-[#0B192C]">
-                  {currentUser.role === 'client' ? 'Cliente' : 'Técnico / Empresa'}
+                <strong className="text-[#0B192C]" data-testid="auth-modal-user-role">
+                  {currentUser.role === 'owner'
+                    ? 'Administrador (Owner)'
+                    : currentUser.role === 'admin'
+                    ? 'Administrador'
+                    : currentUser.role === 'supervisor'
+                    ? 'Supervisor'
+                    : currentUser.role === 'technician'
+                    ? 'Técnico Especialista'
+                    : 'Cliente'}
                 </strong>{' '}
                 · Términos{' '}
                 <span className="font-mono">{currentUser.terms_version}</span>

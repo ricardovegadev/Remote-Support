@@ -137,6 +137,41 @@ export function TechnicianRegisterView({
     }
   };
 
+  const assignedRole = invite?.assigned_role ?? 'technician';
+  const roleDisplayMeta =
+    assignedRole === 'admin'
+      ? {
+          eyebrow: 'Alta de Administrador Invitado',
+          heading: 'Completa tu registro de Administrador',
+          badge: 'Rol: Administrador',
+          cta: 'Activar mi cuenta de Administrador',
+          submitting: 'Activando cuenta de Administrador...',
+          successTitle: '¡Cuenta de Administrador activada!',
+          successBody:
+            'Ya tienes acceso al Centro de Operaciones con permisos administrativos para gestionar la operación.',
+        }
+      : assignedRole === 'supervisor'
+      ? {
+          eyebrow: 'Alta de Supervisor Invitado',
+          heading: 'Completa tu registro de Supervisor',
+          badge: 'Rol: Supervisor',
+          cta: 'Activar mi cuenta de Supervisor',
+          submitting: 'Activando cuenta de Supervisor...',
+          successTitle: '¡Cuenta de Supervisor activada!',
+          successBody:
+            'Ya tienes acceso al Centro de Operaciones para coordinar la cola de tickets y el equipo de especialistas.',
+        }
+      : {
+          eyebrow: 'Alta de Especialista Aprobado',
+          heading: 'Completa tu registro técnico',
+          badge: 'Rol: Especialista Técnico',
+          cta: 'Activar mi cuenta de Técnico',
+          submitting: 'Activando cuenta técnica...',
+          successTitle: '¡Cuenta técnica activada!',
+          successBody:
+            'Ya tienes acceso al Dashboard Operativo para activar tu estado en línea y atender incidencias según tus especialidades.',
+        };
+
   return (
     <section className="py-12 sm:py-16 bg-[#F8FAFC] min-h-[calc(100vh-10rem)]">
       <div className="max-w-xl mx-auto px-4 sm:px-6 space-y-6">
@@ -159,10 +194,10 @@ export function TechnicianRegisterView({
             </span>
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wider text-[#10B981]">
-                Alta de Especialista Aprobado
+                {roleDisplayMeta.eyebrow}
               </p>
               <h1 className="text-lg font-bold leading-tight">
-                Completa tu registro técnico
+                {roleDisplayMeta.heading}
               </h1>
             </div>
           </div>
@@ -209,39 +244,51 @@ export function TechnicianRegisterView({
                   <CheckCircle2 className="w-6 h-6" aria-hidden="true" />
                 </span>
                 <h2 className="text-lg font-bold text-[#0B192C]">
-                  ¡Cuenta técnica activada!
+                  {roleDisplayMeta.successTitle}
                 </h2>
                 <p className="text-xs sm:text-sm text-slate-600">
-                  Ya tienes acceso al Dashboard Operativo para activar tu estado en línea y
-                  atender incidencias según tus especialidades.
+                  {roleDisplayMeta.successBody}
                 </p>
               </div>
             ) : (
               <form onSubmit={(e) => void handleSubmit(e)} className="space-y-5" noValidate>
                 {/* Read-only approved profile summary */}
                 <div className="rounded-2xl bg-[#F8FAFC] border border-slate-200/90 p-4 space-y-2.5 text-xs">
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="font-semibold text-[#0B192C] text-sm">
                       {invite.full_name}
                     </span>
-                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold text-[11px]">
-                      <Briefcase className="w-3 h-3" aria-hidden="true" />
-                      {invite.modality === 'full_time'
-                        ? 'Disponibilidad amplia'
-                        : 'Disponibilidad parcial'}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span
+                        data-testid="invite-assigned-role-badge"
+                        className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#EFF6FF] border border-[#BFDBFE] text-[#1D4ED8] font-semibold text-[11px]"
+                      >
+                        <ShieldCheck className="w-3 h-3" aria-hidden="true" />
+                        <span>{roleDisplayMeta.badge}</span>
+                      </span>
+                      {assignedRole === 'technician' && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold text-[11px]">
+                          <Briefcase className="w-3 h-3" aria-hidden="true" />
+                          {invite.modality === 'full_time'
+                            ? 'Disponibilidad amplia'
+                            : 'Disponibilidad parcial'}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <p className="text-slate-600 font-mono">{invite.email}</p>
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    {invite.specialties.map((spec) => (
-                      <span
-                        key={spec}
-                        className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-700 text-[11px] font-medium"
-                      >
-                        {spec}
-                      </span>
-                    ))}
-                  </div>
+                  {invite.specialties.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {invite.specialties.map((spec) => (
+                        <span
+                          key={spec}
+                          className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-700 text-[11px] font-medium"
+                        >
+                          {spec}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Password fields */}
@@ -342,12 +389,12 @@ export function TechnicianRegisterView({
                   {submitting ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-                      <span>Activando cuenta técnica...</span>
+                      <span>{roleDisplayMeta.submitting}</span>
                     </>
                   ) : (
                     <>
                       <ShieldCheck className="w-4 h-4" aria-hidden="true" />
-                      <span>Activar mi cuenta de Técnico</span>
+                      <span>{roleDisplayMeta.cta}</span>
                       <ArrowRight className="w-4 h-4" aria-hidden="true" />
                     </>
                   )}

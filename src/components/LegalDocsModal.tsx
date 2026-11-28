@@ -394,6 +394,25 @@ export function LegalDocsModal({
                       acciones legales aplicables.
                     </p>
                   </div>
+                  <div>
+                    <h5 className="text-xs font-semibold text-[#0B192C]">
+                      2.5 Condiciones económicas, custodia de 48 h, liquidación semanal y modalidad independiente
+                    </h5>
+                    <p className="text-xs text-slate-700 mt-0.5">
+                      El especialista colabora exclusivamente bajo modalidad de{' '}
+                      <strong>contratista independiente</strong> (prestador autónomo de servicios,
+                      sin relación laboral ni exclusividad horaria). Las comisiones vigentes
+                      (65 % / 75 % / 80 % / 85 %) se calculan estrictamente sobre el{' '}
+                      <strong>ingreso neto tras descontar comisiones de pasarela de pago</strong>{' '}
+                      (Stripe, PayPal o Google Pay) una vez confirmada la resolución por el cliente
+                      o cumplida la ventana de auto-captura de 48 horas. Cada pago entra en{' '}
+                      <strong>custodia de garantía de 48 horas</strong> y se liquida mediante{' '}
+                      <strong>lotes semanales</strong> (estado{' '}
+                      <span className="font-mono">paid_out</span>); si la incidencia no se resuelve
+                      y se anula la retención (<span className="font-mono">void</span>), no se
+                      genera comisión.
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
@@ -405,18 +424,37 @@ export function LegalDocsModal({
                 Información de Reembolsos y Cancelación
               </h3>
 
-              <div className="p-4 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-950 space-y-1.5">
+              <div className="p-4 rounded-lg bg-emerald-50/90 border border-emerald-200 text-xs text-emerald-950 space-y-2">
                 <p className="font-semibold">
-                  Garantía de resolución y solicitudes de reembolso
+                  Garantía «Si no te lo resolvemos, no pagas» · Pre-autorización y Doble Confirmación
                 </p>
                 <p>
-                  Garantía de resolución: si el problema técnico no puede resolverse en
-                  sesión, gestionamos el reembolso conforme a nuestra Política de
-                  Reembolsos. El pago se procesa antes de iniciar la asistencia remota;
-                  si tu incidente no pudo ser resuelto durante la sesión, escribe a
-                  soporte con el código de ticket y el comprobante para tramitar la
-                  devolución a través del procesador original (Stripe o PayPal).
+                  En los planes de soporte puntual no realizamos un cobro definitivo antes de
+                  ayudarte: al iniciar la sesión se registra una{' '}
+                  <strong>pre-autorización (retención temporal)</strong> en tu método de pago
+                  (Stripe, Google Pay o PayPal).
                 </p>
+                <ul className="list-disc pl-5 space-y-1 text-emerald-950/90">
+                  <li>
+                    <strong>Doble confirmación y evaluación (ventana de 48 horas):</strong> cuando
+                    el especialista marca tu incidencia como resuelta, recibes una notificación en
+                    tu Sala de Conexión para confirmar la solución y calificar el servicio de 1 a 5
+                    estrellas. Si confirmas, o si transcurren <strong>48 horas</strong> sin
+                    reclamo, el pago se captura de forma definitiva.
+                  </li>
+                  <li>
+                    <strong>Anulación sin costo ($0 comisión):</strong> si tu problema de software
+                    no puede resolverse durante la sesión, anulamos la pre-autorización (
+                    <span className="font-mono">void</span>) con{' '}
+                    <strong>$0 en cargos y sin comisiones</strong>, liberando el saldo en tu banco
+                    o cuenta original.
+                  </li>
+                  <li>
+                    <strong>Revisión post-cierre:</strong> si reportas que el inconveniente
+                    persiste dentro de las 48 horas posteriores al cierre, coordinación técnica
+                    revisa el caso o gestiona la anulación/devolución por el procesador original.
+                  </li>
+                </ul>
               </div>
 
               <div className="space-y-2">

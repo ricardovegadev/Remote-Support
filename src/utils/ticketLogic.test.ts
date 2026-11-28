@@ -2,7 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   canAccessSection,
+  canChangeTeamMemberRole,
+  canInviteTeamRole,
   canManageMemberRole,
+  canToggleTeamMemberStatus,
   hasPermission,
 } from './rbac';
 import { computeOperationalTelemetry } from './telemetryLogic';
@@ -17,21 +20,28 @@ import {
   buildRustDeskDeepLink,
   buildTechnicalResolutionSummary,
   calculateAgeFromBirthDate,
+  calculateNetTechnicianPayout,
   canClaimTicket,
   CATEGORY_OPTIONS,
   computeAverageResponseMinutes,
   computeDashboardMetrics,
+  computeUpdatedTechnicianRating,
   createTicketFromDraft,
+  estimateGatewayFeeUsd,
   formatCategoryForOs,
   formatElapsedSessionDuration,
+  formatPublicTechnicianShortName,
   formatRustDeskId,
   generateTicketCode,
+  getClientRatingLabel,
   getInitials,
   getOsCompatibleCategory,
+  getPaymentStatusLabel,
   getRustDeskInstallerUrl,
   getServiceTierPriceUsd,
   getSuggestedTierForCategory,
   getTechnicianCommissionTier,
+  getTicketStatusLabel,
   isAdultBirthDate,
   isValidUuid,
   LEGAL_TERMS_VERSION,
@@ -560,6 +570,36 @@ test('Phase 3 RBAC governance enforces role hierarchy and section permissions', 
   assert.equal(canManageMemberRole('technician', 'technician', 'admin'), false);
 });
 
+test('Team & Roles governance enforces supervisor scope, invite rules, and owner anti-lockout', () => {
+  // Supervisor can manage workforce & review applications, but cannot manage RBAC or billing settings
+  assert.equal(hasPermission('supervisor', 'workforce:manage'), true);
+  assert.equal(hasPermission('supervisor', 'applications:review'), true);
+  assert.equal(hasPermission('supervisor', 'rbac:manage'), false);
+  assert.equal(hasPermission('supervisor', 'settings:manage'), false);
+
+  // Invite rules: only owner can invite admin/supervisor; owner/admin/supervisor can invite specialist; nobody invites owner
+  assert.equal(canInviteTeamRole('owner', 'admin'), true);
+  assert.equal(canInviteTeamRole('owner', 'supervisor'), true);
+  assert.equal(canInviteTeamRole('owner', 'technician'), true);
+  assert.equal(canInviteTeamRole('owner', 'owner'), false);
+  assert.equal(canInviteTeamRole('admin', 'admin'), false);
+  assert.equal(canInviteTeamRole('admin', 'supervisor'), false);
+  assert.equal(canInviteTeamRole('admin', 'technician'), true);
+  assert.equal(canInviteTeamRole('supervisor', 'technician'), true);
+  assert.equal(canInviteTeamRole('supervisor', 'admin'), false);
+  assert.equal(canInviteTeamRole('technician', 'technician'), false);
+
+  // Owner protection: never downgrade or suspend owner, even by owner
+  assert.equal(canChangeTeamMemberRole('owner', 'owner', 'admin'), false);
+  assert.equal(canChangeTeamMemberRole('owner', 'admin', 'supervisor'), true);
+  assert.equal(canChangeTeamMemberRole('owner', 'technician', 'owner'), false);
+  assert.equal(canChangeTeamMemberRole('admin', 'technician', 'supervisor'), false);
+  assert.equal(canToggleTeamMemberStatus('owner', 'owner'), false);
+  assert.equal(canToggleTeamMemberStatus('owner', 'admin'), true);
+  assert.equal(canToggleTeamMemberStatus('owner', 'supervisor'), true);
+  assert.equal(canToggleTeamMemberStatus('admin', 'technician'), false);
+});
+
 test('Phase 3 computeOperationalTelemetry aggregates AI quota, sessions, and OS breakdown', () => {
   const sampleTicket = createTicketFromDraft({
     step: 3,
@@ -892,6 +932,78 @@ test('Phase 3: formatElapsedSessionDuration formats mm:ss and hh:mm:ss determini
   );
   assert.equal(formatElapsedSessionDuration(null, Date.now()), '00:00');
 });
+
+test('ADR-06: estimateGatewayFeeUsd applies Stripe/Google Pay 2.9%+$0.30, PayPal 5.4%+$0.30 and 4.5%+$0.30 fallback', () => {
+  assert.equal(estimateGatewayFeeUsd(15, 'stripe'), 0.74);
+  assert.equal(estimateGatewayFeeUsd(15, 'google_pay'), 0.74);
+  assert.equal(estimateGatewayFeeUsd(29, 'stripe'), 1.14);
+  assert.equal(estimateGatewayFeeUsd(39, 'stripe'), 1.43);
+
+  assert.equal(estimateGatewayFeeUsd(15, 'paypal'), 1.11);
+  assert.equal(estimateGatewayFeeUsd(29, 'paypal'), 1.87);
+  assert.equal(estimateGatewayFeeUsd(39, 'paypal'), 2.41);
+
+  assert.equal(estimateGatewayFeeUsd(29, 'sandbox'), 1.61);
+  assert.equal(estimateGatewayFeeUsd(0, 'stripe'), 0);
+});
+
+test('ADR-06: calculateNetTechnicianPayout calculates exact net splits for $15, $29, $39 in Stripe and PayPal with zero cent drift', () => {
+  const prices = [15, 29, 39];
+  const gateways = ['stripe', 'paypal'] as const;
+  const counts = [0, 30, 120, 260]; // 65%, 75%, 80%, 85%
+
+  for (const gross of prices) {
+    for (const gateway of gateways) {
+      for (const count of counts) {
+        const res = calculateNetTechnicianPayout(gross, count, gateway);
+        const expectedFee = estimateGatewayFeeUsd(gross, gateway);
+        const expectedNet = Math.round((gross - expectedFee) * 100) / 100;
+        assert.equal(res.grossUsd, gross);
+        assert.equal(res.gatewayFeeUsd, expectedFee);
+        assert.equal(res.netAmountUsd, expectedNet);
+        assert.equal(
+          Math.round((res.technicianNetUsd + res.platformNetUsd) * 100) / 100,
+          res.netAmountUsd,
+          `Exact cent sum failed for $${gross} (${gateway}, count=${count})`
+        );
+      }
+    }
+  }
+
+  // Spot check concrete values across all 4 tiers (65 / 75 / 80 / 85%)
+  const stripe15 = calculateNetTechnicianPayout(15, 0, 'stripe');
+  assert.equal(stripe15.commissionPercent, 65);
+  assert.equal(stripe15.netAmountUsd, 14.26);
+  assert.equal(stripe15.technicianNetUsd, 9.27);
+  assert.equal(stripe15.platformNetUsd, 4.99);
+
+  assert.equal(calculateNetTechnicianPayout(29, 30, 'stripe').commissionPercent, 75);
+  assert.equal(calculateNetTechnicianPayout(29, 120, 'stripe').commissionPercent, 80);
+
+  const paypal39 = calculateNetTechnicianPayout(39, 260, 'paypal');
+  assert.equal(paypal39.commissionPercent, 85);
+  assert.equal(paypal39.gatewayFeeUsd, 2.41);
+  assert.equal(paypal39.netAmountUsd, 36.59);
+  assert.equal(paypal39.technicianNetUsd, 31.1);
+  assert.equal(paypal39.platformNetUsd, 5.49);
+});
+
+test('ADR-06: 1-5 star rating recalculation, short name formatting, and extended status labels', () => {
+  assert.equal(computeUpdatedTechnicianRating(5.0, 0, 4), 4);
+  assert.equal(computeUpdatedTechnicianRating(5.0, 3, 1), 4);
+  assert.equal(computeUpdatedTechnicianRating(4.8, 4, 5), 4.84);
+  assert.equal(computeUpdatedTechnicianRating(4.5, 2, 99), 4.67); // clamps to 5
+
+  assert.equal(formatPublicTechnicianShortName('Carlos Mendoza'), 'Carlos M.');
+  assert.equal(formatPublicTechnicianShortName('  Ana  María López '), 'Ana M.');
+  assert.equal(getClientRatingLabel(1), 'Deficiente');
+  assert.equal(getClientRatingLabel(5), 'Excelente');
+  assert.equal(getPaymentStatusLabel('authorized'), 'Pre-autorizado');
+  assert.equal(getPaymentStatusLabel('voided'), 'Anulado ($0)');
+  assert.equal(getTicketStatusLabel('pending_client_confirmation'), 'Esperando confirmación');
+  assert.equal(getTicketStatusLabel('refunded'), 'Anulado / Reembolsado');
+});
+
 
 
 

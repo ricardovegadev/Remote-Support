@@ -3,7 +3,7 @@
  * Aligned 1:1 with `supabase/schema.sql`.
  */
 
-export type UserRole = 'client' | 'technician' | 'admin';
+export type UserRole = 'client' | 'technician' | 'admin' | 'owner' | 'supervisor';
 
 export type OrganizationPlanTier =
   | 'internal_hq'
@@ -61,13 +61,63 @@ export type ServiceTier =
   | 'Pyme Esencial $39/mes'
   | 'Pyme Corporativo $79/mes';
 
-export type PaymentStatus = 'pending' | 'paid' | 'refunded';
+export type PaymentStatus = 'pending' | 'authorized' | 'paid' | 'voided' | 'refunded';
+
+export type PaymentGateway = 'stripe' | 'google_pay' | 'paypal' | 'sandbox';
+
+export type ResolutionOutcome =
+  | 'resolved'
+  | 'software_unresolved'
+  | 'hardware_fault'
+  | 'client_absent';
 
 export type TicketStatus =
   | 'waiting_payment'
   | 'ready_to_connect'
   | 'in_progress'
-  | 'resolved';
+  | 'pending_client_confirmation'
+  | 'resolved'
+  | 'refunded';
+
+export type TechnicianPayoutStatus =
+  | 'pending'
+  | 'scheduled'
+  | 'paid'
+  | 'paid_out'
+  | 'reversed'
+  | 'cancelled';
+
+export interface NetTechnicianPayoutBreakdown {
+  grossUsd: number;
+  gateway: PaymentGateway;
+  gatewayFeeUsd: number;
+  netAmountUsd: number;
+  commissionPercent: 65 | 75 | 80 | 85;
+  technicianNetUsd: number;
+  platformNetUsd: number;
+}
+
+export interface TechnicianPayoutRecord {
+  id: string;
+  organization_id: string;
+  ticket_id: string;
+  ticket_code: string;
+  service_tier: ServiceTier;
+  technician_id: string;
+  technician_name: string;
+  payment_gateway: PaymentGateway;
+  gross_amount_usd: number;
+  gateway_fee_usd: number;
+  net_amount_usd: number;
+  commission_percent: 65 | 75 | 80 | 85;
+  payout_amount_usd: number;
+  platform_net_usd: number;
+  status: TechnicianPayoutStatus;
+  warranty_releases_at: string;
+  payout_batch_reference?: string | null;
+  paid_out_at?: string | null;
+  created_at: string;
+}
 
 export type MessageSenderRole = 'client' | 'technician' | 'system';
 
@@ -119,7 +169,7 @@ export interface OrganizationMember {
   full_name: string;
   email: string;
   member_type: MemberTierType;
-  role: 'owner' | 'admin' | 'technician';
+  role: 'owner' | 'admin' | 'supervisor' | 'technician';
   agreed_ticket_rate_usd: number;
   status: 'active' | 'invited' | 'suspended';
   specialties: TechnicianSpecialty[];
@@ -198,8 +248,15 @@ export interface SupportTicket {
   consent_accepted: boolean;
   consent_accepted_at: string | null;
   payment_status: PaymentStatus;
+  payment_gateway?: PaymentGateway | null;
+  payment_authorization_id?: string | null;
   payment_reference?: string | null;
   paid_at?: string | null;
+  auto_capture_at?: string | null;
+  client_confirmed_at?: string | null;
+  client_rating?: number | null;
+  client_feedback?: string | null;
+  resolution_outcome?: ResolutionOutcome | null;
   status: TicketStatus;
   assigned_to: string | null;
   assigned_technician_id: string | null;
@@ -221,6 +278,7 @@ export interface UserAccountProfile {
   full_name: string;
   email: string;
   role: UserRole;
+  organization_id?: string | null;
   birth_date: string;
   is_adult_verified: boolean;
   terms_accepted_at: string;

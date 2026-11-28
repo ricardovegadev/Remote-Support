@@ -4,6 +4,71 @@
 
 ---
 
+## [2026-11-27] · v3.0 Upgrade Definitivo a Factory Engineering V3 (Infraestructura de Fábrica)
+### Cambios implementados (6 bloques · Sin modificar UI ni lógica de negocio de RS365)
+- **Bloque 1 · Enrutamiento de Modelos y Experimentos (`.agent/rules/02-model-routing.md`):** Definida matriz de asignación entre modelos rápidos/económicos (copy, CSS, refactor menor, `code-reviewer`) y modelos de alto razonamiento (arquitectura, SQL/RLS, `server.ts` pagos, `security-reviewer` con modelo distinto al Builder y `factory-approver`), más regla de experimentación controlada de 1 sola variable por experimento comparando coste vs. calidad.
+- **Bloque 2 · Regla TDD Obligatoria para el Builder (`.agent/workflows/tdd-builder.md`):** Establecido ciclo estricto *Rojo → Confirmar fallo con `npm test` → Verde* antes de tocar lógica financiera (`src/utils/ticketLogic.ts`), evaluación (`src/utils/techEvaluation.ts`), endpoints críticos (`server.ts`) o scripts deterministas, con lista anti-tautologías.
+- **Bloque 3 · 4 Subagentes Revisores Independientes con Contexto Limpio (`.agent/skills/`):** Creadas 4 skills aisladas sin historial del Builder, con dictamen `PASS/FAIL`, puntaje `1–5` y prohibiciones explícitas:
+  - `.agent/skills/security-reviewer/SKILL.md` (RLS, SQL, tokens criptográficos, bloqueo +18, secretos y capture/void de pagos; modelo distinto al Builder).
+  - `.agent/skills/ux-reviewer/SKILL.md` (flujos de usuario, fricción, cantidad de pasos y coherencia con perfiles de `00_ELEPHANT_MEMORY.md`).
+  - `.agent/skills/ui-reviewer/SKILL.md` (auditoría visual desktop, Lenovo Tab P12 y móvil; contraste WCAG AA, `0 px` overflow y paleta azul marino/eléctrico).
+  - `.agent/skills/code-reviewer/SKILL.md` (limpieza, tipado estricto, ausencia de dead code, pruebas no redundantes/tautológicas y respeto a ADRs).
+- **Bloque 4 · Orquestador Approver (`.agent/skills/factory-approver/SKILL.md`):** Consolida los 4 dictámenes (`security`, `ux`, `ui`, `code`); si alguno es `FAIL`, devuelve lista accionable al Builder (máx. 3 ciclos); solo entrega al Gatekeeper de Riesgo cuando los 4 están en `PASS`.
+- **Bloque 5 · Hook Determinista de Riesgo (`scripts/factory-risk-gate.mjs`, `scripts/factory-risk-gate.test.mjs`, `package.json`):** Script Node.js puro (sin IA) expuesto como `npm run factory:gate` que inspecciona el diff de Git y clasifica riesgo **ALTO** (bloquea auto-merge y exige Puertas Humanas 1 y 2 para `supabase/schema.sql`, `server.ts`, `AuthModal.tsx`, `ticketLogic.ts`, `.env*`), **MEDIO** (`src/components/**`, `src/services/**`) y **BAJO** (`docs/**`, copy/estilos menores), acompañado de 4 pruebas unitarias.
+- **Bloque 6 · Métricas, Automejora y Protocolo Maestro (`docs/egm/04_FACTORY_METRICS.md`, `.agent/FACTORY_PROTOCOL.md`):** Creado tablero vivo de métricas por sesión y sección *"Patrones Recurrentes → Propuestas de Automejora"* (regla ≥2 incidencias → parche a `.agent/rules/`), e integrada la cadena completa V3 en `.agent/FACTORY_PROTOCOL.md` (`Entrada Unificada → Spec Writer → Builder TDD → 4 Revisores en Paralelo → Approver → Gatekeeper + factory:gate → Métricas/Automejora`).
+
+### Verificación técnica (Quality Gates)
+- `npm run lint` (`tsc --noEmit`): **0 errores**.
+- `npm test`: **39/39 pruebas aprobadas** (`fail 0`, incluyendo 4 pruebas deterministas de `factory-risk-gate.test.mjs`).
+- `npm run build` (`vite build`): **0 errores, 0 advertencias** · chunk principal `dist/assets/index-xFSSmzAV.js` = **`302.58 kB`** (`gzip: 68.84 kB`, intacto).
+- `npm run factory:gate`: **0 errores** (clasificación determinista ALTO / MEDIO / BAJO verificada).
+
+---
+
+## [2026-11-27] · v2.29 Seguridad de Cuenta, Gestión de Equipo/Roles e Invitación Directa de Especialistas
+### Cambios implementados (4 bloques)
+- **Bloque 1 · Cambio y Recuperación de Contraseña (`AnalyticsSecuritySettingsView.tsx`, `AuthModal.tsx`):** Añadida tarjeta **"Seguridad de mi cuenta"** en Configuración con campos `Nueva contraseña` (mín. 8 caracteres) y `Confirmar nueva contraseña` con botones de mostrar/ocultar, conectada a `supabase.auth.updateUser({ password })` con feedback claro y respaldo controlado en modo local. Alineado enlace **"¿Olvidaste tu contraseña?"** en `AuthModal.tsx` con `supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin })`.
+- **Bloque 2 · Gestión de Equipo y Roles (`AnalyticsSecuritySettingsView.tsx`, `src/utils/rbac.ts`, `src/types/support.ts`, `src/services/supportAdapter.ts`, `TechPortalView.tsx`, `App.tsx`):** Incorporado el rol `supervisor` en tipos, matriz RBAC y esquema SQL idempotente (`supabase/schema.sql`). Añadida sección **"Equipo y Roles"** en Configuración (visible solo para `owner` y `admin`) con listado de miembros (nombre, correo, rol y estado Activo/Suspendido), formulario exclusivo del `owner` para invitar `admin` o `supervisor` con enlace de 72 h y botón **"Copiar enlace"**, selector de rol y botón `Suspender / Reactivar` bloqueando estrictamente cualquier degradación o suspensión del `owner`.
+- **Bloque 3 · Invitación Directa de Especialistas (`WorkforceDispatchView.tsx`):** Añadido botón **"Invitar Especialista Directo"** (visible para `owner`, `admin` y `supervisor`) con modal compacto de Nombre, Correo y multi-selección de especialidades aprobadas (`approved_specialties`), generando un enlace único `/registro-tecnico?token=...` válido por 72 h (sin pasar por `/postular`) con botón **"Copiar enlace"**.
+- **Bloque 4 · Backend de Invitaciones, Registro Multi-Rol y Auditoría (`server.ts`, `technicianApplicationService.ts`, `TechnicianRegisterView.tsx`):** Creados `POST /api/team/invite` y `PATCH /api/team/members/:memberId` con tokens criptográficos de 256 bits almacenados como hash SHA-256, caducidad de 72 h, consumo atómico de un solo uso, validación estricta de RBAC/anti-bloqueo del `owner` y registro inmutable en `audit_logs`. Actualizado `/registro-tecnico?token=...` para activar cuentas `technician`, `admin` y `supervisor` mostrando claramente el rol asignado en la vista de bienvenida y CTA.
+
+### Verificación técnica (Quality Gates)
+- `npm run lint` (`tsc --noEmit`): **0 errores**.
+- `npm test`: **35/35 pruebas aprobadas** (`fail 0`).
+- `npm run build` (`vite build`): **0 errores, 0 advertencias** · chunk principal `dist/assets/index-xFSSmzAV.js` = **`302.58 kB`** (`gzip: 68.84 kB`).
+
+---
+
+## [2026-11-27] · v2.28 Transición Framer-Motion en Botón de Resolución, Gráfico Recharts Bruto vs Neto, Timeline de Estados y Control de Rol en Header
+### Cambios implementados
+- **Transición Framer-Motion en Botón de Resolución (`ConnectionRoom.tsx`):** Añadida animación con `framer-motion` (`AnimatePresence`, resortes `stiffness`/`damping`) mostrando un checkmark verde expansivo sobre el botón *"Sí, mi incidencia quedó resuelta"* al hacer clic, antes de disparar el flujo de confirmación.
+- **Gráfico de Barras Recharts (`TechnicianEarningsChart.tsx`):** Componente financiero con `recharts` integrado en `TechPortalView` y `WorkforceDispatchView` para visualizar ingresos brutos frente a netos con selector de rango de tiempo personalizable (*7 días, 30 días, 3 meses, histórico*).
+- **Línea de Tiempo de Estados (`ConnectionTimeline.tsx`):** Componente visual en la sala de conexión que consume el historial de estados y timestamps del ticket (*creado → pre-autorizado → resuelto → pagado*), brindando total transparencia al usuario sobre la caja y garantía de 48 h.
+- **Control de Acceso en Header (`Header.tsx`):** Botón *"Centro de Operaciones"* condicionado estrictamente al rol de operador (`owner`, `admin`, `supervisor`, `technician`), ocultándolo correctamente para usuarios con rol `client`.
+
+### Verificación técnica (Quality Gates)
+- `npm run lint` (`tsc --noEmit`): **0 errores**.
+- `npm test`: **34/34 pruebas aprobadas** (`fail 0`).
+- `npm run build` (`vite build`): **0 errores, 0 advertencias**.
+
+---
+
+## [2026-11-27] · v2.27 Flujo Completo de Pre-Autorización (Authorize & Capture), Doble Confirmación 1–5★, Cálculo sobre Neto y Tesorería Semanal (`ADR-06`)
+### Cambios implementados (6 bloques)
+- **Bloque 1 · Decisión Arquitectónica (`docs/egm/01_DECISION_LOG.md`):** Registrado **`ADR-06`** definiendo el flujo oficial de operaciones y caja (pre-autorización antes de conectar, doble confirmación al cierre con ventana de 48 h y calificación 1–5★, captura real o anulación `$0` comisión, comisiones sobre ingreso neto tras pasarela y custodia 48 h + liquidación por lotes semanales).
+- **Bloque 2 · Esquema SQL Idempotente y Tipos (`supabase/schema.sql`, `src/types/support.ts`):** Ampliados `tickets.status` (`pending_client_confirmation`, `refunded`) y `payment_status` (`authorized`, `voided`), añadidas columnas idempotentes en `public.tickets` (`payment_gateway`, `payment_authorization_id`, `auto_capture_at`, `client_confirmed_at`, `client_rating` 1–5, `client_feedback`, `resolution_outcome`) y `public.technician_payouts` (`payment_gateway`, `gateway_fee_usd`, `net_amount_usd`, `platform_net_usd`, `payout_batch_reference`, `paid_out_at`, estado `cancelled`), actualizando RPCs/políticas RLS.
+- **Bloque 3 · Backend Authorize, Capture & Void (`server.ts`):** Configurada captura manual en Stripe (`capture_method: 'manual'`) y autorización en PayPal (`intent: 'AUTHORIZE'`), nuevos endpoints `POST /api/payments/capture` (token cliente con `timingSafeEqual` o Admin/Owner, cálculo neto y registro en `technician_payouts`) y `POST /api/payments/void` (Admin/Owner, liberación `$0` comisión y cancelación de liquidación).
+- **Bloque 4 · Doble Confirmación y Evaluación 1–5★ (`src/components/ConnectionRoom.tsx`):** Tarjeta destacada al pasar a `pending_client_confirmation` con resumen técnico, aviso de auto-captura 48 h, selector accesible de 1 a 5 estrellas (`role="radiogroup"`) con nombre corto del técnico y etiquetas dinámicas (*Deficiente* a *Excelente*), comentario opcional de 300 caracteres, botón de confirmación/captura y botón de solicitud de revisión.
+- **Bloque 5 · Motor Financiero sobre Neto, Controles Admin y Tesorería Semanal (`src/utils/ticketLogic.ts`, `src/utils/ticketLogic.test.ts`, `src/services/supportAdapter.ts`, `TicketsInboxView.tsx`, `WorkforceDispatchView.tsx`, `TechPortalView.tsx`, `App.tsx`):** `estimateGatewayFeeUsd` y `calculateNetTechnicianPayout` con invariante exacta de centavos (`technicianNetUsd + platformNetUsd === netAmountUsd`), recalculo real de calificación promedio del técnico, controles Admin de auto-captura/anulación con motivo (`software_unresolved`, `hardware_fault`, `client_absent`), panel **Mis Ganancias Netas** del técnico (En validación 48 h / Disponible semanal / Liquidado + desglose por ticket) y panel **Tesorería Semanal** del Admin separando *Pasivo a Técnicos* de *Margen de Plataforma* con liquidación por lotes (`paid_out`).
+- **Bloque 6 · Coherencia Legal y Contractual (`src/components/LegalDocsModal.tsx`, `src/components/TechnicianApplyView.tsx`):** Alineada la Política de Reembolsos con la garantía *"Si no te lo resolvemos, no pagas"* (pre-autorización, ventana de 48 h y anulación `$0`), y actualizados el NDA Técnico (`NDA-TECH-v1.0-2026`) y `/postular` con comisión sobre neto tras pasarela, custodia 48 h, lotes semanales y modalidad de contratista independiente.
+
+### Verificación técnica (Quality Gates)
+- `npm run lint` (`tsc --noEmit`): **0 errores**.
+- `npm test`: **34/34 pruebas aprobadas** (`fail 0`).
+- `npm run build` (`vite build`): **0 errores, 0 advertencias** · chunk principal `dist/assets/index-DVCnsoXk.js` = **`326.63 kB`** (`gzip: 76.80 kB`).
+
+---
+
 ## [2026-11-27] · v2.26 Verificación y Blindaje Final del Core (Pre-Template · Estaciones 3 y 4)
 ### Auditoría y correcciones aplicadas (4 bloques)
 - **Bloque 1 · Base de Datos y RLS (`supabase/schema.sql`) — Corregido:**

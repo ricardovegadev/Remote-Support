@@ -1,11 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   CheckCircle2,
+  Clock,
+  Copy,
+  DollarSign,
   Globe,
+  Landmark,
+  Link2,
   Lock,
   ShieldCheck,
+  Star,
   UserPlus,
   Users,
+  Wallet,
+  X,
   Zap,
 } from 'lucide-react';
 import type {
@@ -15,6 +23,7 @@ import type {
   OrganizationMember,
   SupportTicket,
   TechnicianAvailability,
+  TechnicianPayoutRecord,
   TechnicianSpecialty,
 } from '../../types/support';
 import {
@@ -27,20 +36,30 @@ import {
   getMemberTypeLabel,
   getPriorityMeta,
   getStatusBadgeClass,
+  getTechnicianCommissionTier,
   getTicketStatusLabel,
   isValidEmail,
   matchTechnicianForTicket,
 } from '../../utils/ticketLogic';
 import {
+  canInviteTeamRole,
   hasPermission,
   type OrganizationRole,
 } from '../../utils/rbac';
+import { createDirectTeamInvite } from '../../services/technicianApplicationService';
 import { TechnicianApplicationsPanel } from './TechnicianApplicationsPanel';
+import { lazy, Suspense } from 'react';
+const TechnicianEarningsChart = lazy(() =>
+  import('./TechnicianEarningsChart').then((m) => ({
+    default: m.TechnicianEarningsChart,
+  }))
+);
 
 interface WorkforceDispatchViewProps {
   organization: Organization;
   members: OrganizationMember[];
   tickets: SupportTicket[];
+  payouts?: TechnicianPayoutRecord[];
   currentTechId: string;
   operatorRole?: OrganizationRole;
   onSelectActiveTech?: (techId: string) => void;
@@ -66,6 +85,15 @@ interface WorkforceDispatchViewProps {
     techName: string,
     techSpecialty: string
   ) => Promise<void>;
+  onSettleTechnicianPayouts?: (
+    technicianId: string,
+    batchReference: string
+  ) => void;
+  onRecordTeamInviteAudit?: (summary: {
+    fullName: string;
+    email: string;
+    role: string;
+  }) => void;
 }
 
 const ALL_SPECIALTIES: TechnicianSpecialty[] = [
@@ -105,6 +133,7 @@ export function WorkforceDispatchView({
   organization,
   members,
   tickets,
+  payouts = [],
   currentTechId,
   operatorRole = 'technician',
   onSelectActiveTech,
@@ -112,11 +141,135 @@ export function WorkforceDispatchView({
   onChangeDispatchMode,
   onInviteMember,
   onClaimTicketAtomically,
+  onSettleTechnicianPayouts,
+  onRecordTeamInviteAudit,
 }: WorkforceDispatchViewProps) {
+  const [batchRefByTech, setBatchRefByTech] = useState<Record<string, string>>({});
+  const [settlementNotice, setSettlementNotice] = useState<string | null>(null);
+  const nowMs = Date.now();
+  const orgPayouts = useMemo(
+    () => payouts.filter((p) => p.organization_id === organization.id),
+    [payouts, organization.id]
+  );
+
+  const activeTechPayouts = useMemo(
+    () =>
+      orgPayouts.filter(
+        (p) =>
+          p.technician_id === currentTechId ||
+          members.some(
+            (m) =>
+              (m.id === currentTechId || m.user_id === currentTechId) &&
+              (m.id === p.technician_id || m.user_id === p.technician_id)
+          )
+      ),
+    [orgPayouts, currentTechId, members]
+  );
+
+  const techFinanceSummary = useMemo(() => {
+    let inValidationUsd = 0;
+    let availableUsd = 0;
+    let paidOutUsd = 0;
+    for (const p of activeTechPayouts) {
+      if (p.status === 'cancelled' || p.status === 'reversed') continue;
+      if (p.status === 'paid_out') {
+        paidOutUsd += p.payout_amount_usd;
+      } else {
+        const releasesMs = Date.parse(p.warranty_releases_at) || 0;
+        if (p.status === 'scheduled' || releasesMs <= nowMs) {
+          availableUsd += p.payout_amount_usd;
+        } else {
+          inValidationUsd += p.payout_amount_usd;
+        }
+      }
+    }
+    const ratedTickets = tickets.filter(
+      (t) =>
+        (t.assigned_technician_id === currentTechId || t.assigned_to === currentTechId) &&
+        typeof t.client_rating === 'number' &&
+        t.client_rating >= 1
+    );
+    const avgStarRating =
+      ratedTickets.length > 0
+        ? ratedTickets.reduce((sum, t) => sum + (t.client_rating ?? 0), 0) /
+          ratedTickets.length
+        : null;
+    return {
+      inValidationUsd: Math.round(inValidationUsd * 100) / 100,
+      availableUsd: Math.round(availableUsd * 100) / 100,
+      paidOutUsd: Math.round(paidOutUsd * 100) / 100,
+      ratedCount: ratedTickets.length,
+      avgStarRating,
+    };
+  }, [activeTechPayouts, tickets, currentTechId, nowMs]);
+
+  const adminTreasurySummary = useMemo(() => {
+    let grossCollectedUsd = 0;
+    let gatewayFeesUsd = 0;
+    let techLiabilityUsd = 0;
+    let platformMarginUsd = 0;
+    const byTech = new Map<
+      string,
+      {
+        technicianId: string;
+        technicianName: string;
+        inValidationUsd: number;
+        availableUsd: number;
+        paidOutUsd: number;
+        availableCount: number;
+        lastBatchRef: string | null;
+      }
+    >();
+
+    for (const p of orgPayouts) {
+      if (p.status === 'cancelled' || p.status === 'reversed') continue;
+      grossCollectedUsd += p.gross_amount_usd;
+      gatewayFeesUsd += p.gateway_fee_usd;
+      platformMarginUsd += p.platform_net_usd;
+
+      const entry = byTech.get(p.technician_id) ?? {
+        technicianId: p.technician_id,
+        technicianName: p.technician_name,
+        inValidationUsd: 0,
+        availableUsd: 0,
+        paidOutUsd: 0,
+        availableCount: 0,
+        lastBatchRef: null,
+      };
+      if (p.status === 'paid_out') {
+        entry.paidOutUsd += p.payout_amount_usd;
+        if (p.payout_batch_reference && !entry.lastBatchRef) {
+          entry.lastBatchRef = p.payout_batch_reference;
+        }
+      } else {
+        techLiabilityUsd += p.payout_amount_usd;
+        const releasesMs = Date.parse(p.warranty_releases_at) || 0;
+        if (p.status === 'scheduled' || releasesMs <= nowMs) {
+          entry.availableUsd += p.payout_amount_usd;
+          entry.availableCount += 1;
+        } else {
+          entry.inValidationUsd += p.payout_amount_usd;
+        }
+      }
+      byTech.set(p.technician_id, entry);
+    }
+
+    return {
+      grossCollectedUsd: Math.round(grossCollectedUsd * 100) / 100,
+      gatewayFeesUsd: Math.round(gatewayFeesUsd * 100) / 100,
+      techLiabilityUsd: Math.round(techLiabilityUsd * 100) / 100,
+      platformMarginUsd: Math.round(platformMarginUsd * 100) / 100,
+      technicianRows: Array.from(byTech.values()),
+    };
+  }, [orgPayouts, nowMs]);
   const canManageWorkforce = hasPermission(operatorRole, 'workforce:manage');
   const canReviewApplications = hasPermission(
     operatorRole,
     'applications:review'
+  );
+  const canInviteDirectSpecialist = canInviteTeamRole(
+    operatorRole,
+    'technician'
   );
   const [tierFilter, setTierFilter] = useState<'all' | MemberTierType>('all');
   const [claimingId, setClaimingId] = useState<string | null>(null);
@@ -126,11 +279,26 @@ export function WorkforceDispatchView({
   const [inviteRate, setInviteRate] = useState('15');
   const [inviteError, setInviteError] = useState<string | null>(null);
 
+  // Modal Invitar Especialista Directo (Owner / Admin / Supervisor)
+  const [directModalOpen, setDirectModalOpen] = useState(false);
+  const [directName, setDirectName] = useState('');
+  const [directEmail, setDirectEmail] = useState('');
+  const [directSpecialties, setDirectSpecialties] = useState<
+    TechnicianSpecialty[]
+  >(['Windows & BSOD', 'Redes & VPN']);
+  const [directBusy, setDirectBusy] = useState(false);
+  const [directError, setDirectError] = useState<string | null>(null);
+  const [directInviteLink, setDirectInviteLink] = useState<string | null>(null);
+  const [directCopied, setDirectCopied] = useState(false);
+
   useEffect(() => {
     setTierFilter('all');
     setInviteOpen(false);
     setInviteError(null);
     setClaimingId(null);
+    setDirectModalOpen(false);
+    setDirectInviteLink(null);
+    setDirectError(null);
   }, [organization.id]);
 
   const currentMember =
@@ -200,6 +368,68 @@ export function WorkforceDispatchView({
     setInviteName('');
     setInviteEmail('');
     setInviteOpen(false);
+  };
+
+  const toggleDirectSpecialty = (spec: TechnicianSpecialty) => {
+    setDirectSpecialties((prev) =>
+      prev.includes(spec) ? prev.filter((s) => s !== spec) : [...prev, spec]
+    );
+  };
+
+  const handleDirectSpecialistSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setDirectError(null);
+    setDirectCopied(false);
+
+    if (directName.trim().length < 2) {
+      setDirectError('Ingresa el nombre completo del especialista.');
+      return;
+    }
+    if (!isValidEmail(directEmail)) {
+      setDirectError('Ingresa un correo electrónico válido.');
+      return;
+    }
+    if (directSpecialties.length === 0) {
+      setDirectError('Selecciona al menos una especialidad aprobada.');
+      return;
+    }
+
+    setDirectBusy(true);
+    try {
+      const res = await createDirectTeamInvite({
+        fullName: directName.trim(),
+        email: directEmail.trim().toLowerCase(),
+        role: 'technician',
+        organizationId: organization.id,
+        approved_specialties: directSpecialties,
+        actorRole: operatorRole,
+      });
+      if (!res.ok || !res.inviteUrl) {
+        setDirectError(
+          res.error ?? 'No se pudo generar la invitación directa.'
+        );
+        return;
+      }
+      setDirectInviteLink(res.inviteUrl);
+      onRecordTeamInviteAudit?.({
+        fullName: directName.trim(),
+        email: directEmail.trim().toLowerCase(),
+        role: 'technician',
+      });
+    } finally {
+      setDirectBusy(false);
+    }
+  };
+
+  const handleCopyDirectLink = async () => {
+    if (!directInviteLink) return;
+    try {
+      await navigator.clipboard.writeText(directInviteLink);
+      setDirectCopied(true);
+      window.setTimeout(() => setDirectCopied(false), 2500);
+    } catch {
+      setDirectError('Copia el enlace manualmente desde el cuadro resaltado.');
+    }
   };
 
   const getAvailabilityPillClass = (status: TechnicianAvailability) => {
@@ -534,14 +764,32 @@ export function WorkforceDispatchView({
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setInviteOpen((prev) => !prev)}
-            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-xl transition-colors whitespace-nowrap self-start sm:self-auto shadow-sm"
-          >
-            <UserPlus className="w-4 h-4" aria-hidden="true" />
-            <span>Invitar freelancer</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+            {canInviteDirectSpecialist && (
+              <button
+                type="button"
+                data-testid="open-direct-specialist-invite-btn"
+                onClick={() => {
+                  setDirectError(null);
+                  setDirectInviteLink(null);
+                  setDirectCopied(false);
+                  setDirectModalOpen(true);
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-[#0B192C] hover:bg-slate-800 rounded-xl transition-colors whitespace-nowrap shadow-sm"
+              >
+                <Link2 className="w-4 h-4 text-[#10B981]" aria-hidden="true" />
+                <span>Invitar Especialista Directo</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setInviteOpen((prev) => !prev)}
+              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-xl transition-colors whitespace-nowrap shadow-sm"
+            >
+              <UserPlus className="w-4 h-4" aria-hidden="true" />
+              <span>Invitar freelancer</span>
+            </button>
+          </div>
         </div>
 
         {inviteOpen && (
@@ -694,8 +942,490 @@ export function WorkforceDispatchView({
         </div>
       </div>
 
+      {/* Desglose Financiero Transparente del Especialista (ADR-06) */}
+      <div
+        data-testid="technician-net-earnings-panel"
+        className="bg-white border border-[#E5E9F2] rounded-xl p-6 shadow-[0_1px_3px_rgba(15,23,42,0.03)] space-y-5"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base font-bold text-[#0F172A] flex items-center gap-2">
+              <Wallet className="w-4 h-4 text-[#2563EB]" aria-hidden="true" />
+              <span>Mis liquidaciones sobre ingreso neto</span>
+            </h3>
+            <p className="text-xs text-[#64748B] mt-0.5">
+              Comisión calculada sobre Base Neta (Bruto − Comisión de Pasarela) con garantía de 48 h y retiro semanal.
+            </p>
+          </div>
+          {(() => {
+            const activeMember = members.find(
+              (m) => m.user_id === currentTechId || m.id === currentTechId
+            );
+            const tier = getTechnicianCommissionTier(activeMember?.resolved_count ?? 0);
+            const shownRating =
+              techFinanceSummary.avgStarRating ?? activeMember?.rating ?? 5.0;
+            return (
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#EFF6FF] text-[#1D4ED8] font-semibold tabular-nums">
+                  <span>Nivel {tier.label} · {tier.commissionPercent}% sobre neto</span>
+                </span>
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-50 text-amber-900 font-semibold tabular-nums">
+                  <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" aria-hidden="true" />
+                  <span>
+                    {shownRating.toFixed(2)}★
+                    {techFinanceSummary.ratedCount > 0
+                      ? ` (${techFinanceSummary.ratedCount} reseñas)`
+                      : ''}
+                  </span>
+                </span>
+              </div>
+            );
+          })()}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="rounded-xl border border-[#E5E9F2] bg-[#F8FAFC] p-4 space-y-1">
+            <p className="text-xs text-[#64748B] flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-amber-600" aria-hidden="true" />
+              <span>En validación (Garantía 48 h)</span>
+            </p>
+            <p className="text-xl font-bold text-[#0F172A] tabular-nums">
+              ${techFinanceSummary.inValidationUsd.toFixed(2)}
+            </p>
+          </div>
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 space-y-1">
+            <p className="text-xs text-emerald-800 flex items-center gap-1.5 font-medium">
+              <DollarSign className="w-3.5 h-3.5 text-emerald-700" aria-hidden="true" />
+              <span>Disponible para retiro semanal</span>
+            </p>
+            <p className="text-xl font-bold text-emerald-900 tabular-nums">
+              ${techFinanceSummary.availableUsd.toFixed(2)}
+            </p>
+          </div>
+          <div className="rounded-xl border border-[#E5E9F2] bg-white p-4 space-y-1">
+            <p className="text-xs text-[#64748B]">Total liquidado (paid_out)</p>
+            <p className="text-xl font-bold text-[#0F172A] tabular-nums">
+              ${techFinanceSummary.paidOutUsd.toFixed(2)}
+            </p>
+          </div>
+        </div>
+
+        {/* Gráfico de Barras Bruto vs Neto (recharts) */}
+        <Suspense
+          fallback={
+            <div className="p-8 text-center text-xs text-slate-500 bg-white border border-[#E5E9F2] rounded-xl">
+              Cargando gráfico financiero...
+            </div>
+          }
+        >
+          <TechnicianEarningsChart tickets={tickets} payouts={payouts} />
+        </Suspense>
+
+        {activeTechPayouts.length === 0 ? (
+          <p className="text-xs text-[#64748B] py-3">
+            Aún no tienes liquidaciones registradas. Al confirmarse tus tickets resueltos verás el desglose Bruto → Pasarela → Neto aquí.
+          </p>
+        ) : (
+          <div className="overflow-x-auto border border-[#E5E9F2] rounded-xl">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="bg-[#F8FAFC] border-b border-[#E5E9F2] text-[#64748B]">
+                  <th className="py-2.5 px-3 font-semibold">Ticket / Pasarela</th>
+                  <th className="py-2.5 px-3 font-semibold text-right">Bruto</th>
+                  <th className="py-2.5 px-3 font-semibold text-right">Pasarela</th>
+                  <th className="py-2.5 px-3 font-semibold text-right">Base Neta</th>
+                  <th className="py-2.5 px-3 font-semibold text-right">Tu %</th>
+                  <th className="py-2.5 px-3 font-semibold text-right">Pago Neto</th>
+                  <th className="py-2.5 px-3 font-semibold">Estado</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#E5E9F2]">
+                {activeTechPayouts.map((p) => {
+                  const releasesMs = Date.parse(p.warranty_releases_at) || 0;
+                  const statusLabel =
+                    p.status === 'cancelled'
+                      ? 'Anulado ($0)'
+                      : p.status === 'paid_out'
+                      ? `Liquidado (${p.payout_batch_reference ?? 'Lote'})`
+                      : p.status === 'scheduled' || releasesMs <= nowMs
+                      ? 'Disponible'
+                      : 'En validación 48 h';
+                  const badgeClass =
+                    p.status === 'cancelled'
+                      ? 'bg-slate-100 text-slate-600'
+                      : p.status === 'paid_out'
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : p.status === 'scheduled' || releasesMs <= nowMs
+                      ? 'bg-blue-100 text-[#1D4ED8]'
+                      : 'bg-amber-100 text-amber-800';
+                  return (
+                    <tr key={p.id} className="hover:bg-slate-50/70">
+                      <td className="py-2.5 px-3 font-medium text-[#0F172A] whitespace-nowrap">
+                        <span className="font-mono font-bold">{p.ticket_code}</span>
+                        <span className="text-[#64748B] ml-1.5 uppercase text-[10px]">
+                          {p.payment_gateway}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-right tabular-nums text-[#0F172A]">
+                        ${p.gross_amount_usd.toFixed(2)}
+                      </td>
+                      <td className="py-2.5 px-3 text-right tabular-nums text-red-700">
+                        −${p.gateway_fee_usd.toFixed(2)}
+                      </td>
+                      <td className="py-2.5 px-3 text-right tabular-nums font-medium text-[#0F172A]">
+                        ${p.net_amount_usd.toFixed(2)}
+                      </td>
+                      <td className="py-2.5 px-3 text-right tabular-nums text-[#2563EB] font-semibold">
+                        {p.commission_percent}%
+                      </td>
+                      <td className="py-2.5 px-3 text-right tabular-nums font-bold text-emerald-700">
+                        ${p.payout_amount_usd.toFixed(2)}
+                      </td>
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${badgeClass}`}
+                        >
+                          {statusLabel}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Panel Administrativo: Tesorería y Liquidaciones Semanales (ADR-06) */}
+      {canManageWorkforce && (
+        <div
+          data-testid="admin-treasury-panel"
+          className="bg-white border border-[#E5E9F2] rounded-xl p-6 shadow-[0_1px_3px_rgba(15,23,42,0.03)] space-y-5"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 className="text-base font-bold text-[#0F172A] flex items-center gap-2">
+                <Landmark className="w-4 h-4 text-[#2563EB]" aria-hidden="true" />
+                <span>Tesorería y Liquidaciones Semanales</span>
+              </h3>
+              <p className="text-xs text-[#64748B] mt-0.5">
+                Contabilidad separada entre Pasivo Reservado a Técnicos y Margen Neto de Plataforma tras pasarela.
+              </p>
+            </div>
+            <span className="text-[11px] font-semibold text-[#1D4ED8] bg-[#EFF6FF] px-2.5 py-1 rounded-lg self-start sm:self-auto">
+              Custodia garantía 48 h · Lotes semanales
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="rounded-xl border border-[#E5E9F2] bg-[#F8FAFC] p-4 space-y-1">
+              <p className="text-xs text-[#64748B]">Recaudado Bruto</p>
+              <p
+                data-testid="treasury-gross-kpi"
+                className="text-xl font-bold text-[#0F172A] tabular-nums"
+              >
+                ${adminTreasurySummary.grossCollectedUsd.toFixed(2)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-[#E5E9F2] bg-[#F8FAFC] p-4 space-y-1">
+              <p className="text-xs text-[#64748B]">Comisiones Pasarela</p>
+              <p
+                data-testid="treasury-fees-kpi"
+                className="text-xl font-bold text-red-700 tabular-nums"
+              >
+                −${adminTreasurySummary.gatewayFeesUsd.toFixed(2)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-4 space-y-1">
+              <p className="text-xs font-medium text-amber-900">
+                Pasivo Reservado a Técnicos
+              </p>
+              <p
+                data-testid="treasury-liability-kpi"
+                className="text-xl font-bold text-amber-950 tabular-nums"
+              >
+                ${adminTreasurySummary.techLiabilityUsd.toFixed(2)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 space-y-1">
+              <p className="text-xs font-medium text-emerald-900">
+                Margen Neto Plataforma
+              </p>
+              <p
+                data-testid="treasury-margin-kpi"
+                className="text-xl font-bold text-emerald-900 tabular-nums"
+              >
+                ${adminTreasurySummary.platformMarginUsd.toFixed(2)}
+              </p>
+            </div>
+          </div>
+
+          {settlementNotice && (
+            <div
+              role="status"
+              className="rounded-lg bg-emerald-50 border border-emerald-200 px-3.5 py-2.5 text-xs font-medium text-emerald-900"
+            >
+              {settlementNotice}
+            </div>
+          )}
+
+          {adminTreasurySummary.technicianRows.length === 0 ? (
+            <p className="text-xs text-[#64748B]">
+              Sin saldos pendientes de liquidación semanal en esta organización.
+            </p>
+          ) : (
+            <div className="overflow-x-auto border border-[#E5E9F2] rounded-xl">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-[#F8FAFC] border-b border-[#E5E9F2] text-[#64748B]">
+                    <th className="py-2.5 px-3 font-semibold">Especialista</th>
+                    <th className="py-2.5 px-3 font-semibold text-right">
+                      En validación 48 h
+                    </th>
+                    <th className="py-2.5 px-3 font-semibold text-right">
+                      Disponible lote
+                    </th>
+                    <th className="py-2.5 px-3 font-semibold text-right">
+                      Ya liquidado
+                    </th>
+                    <th className="py-2.5 px-3 font-semibold">
+                      Liquidación por lote semanal
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E5E9F2]">
+                  {adminTreasurySummary.technicianRows.map((row) => {
+                    const defaultRef = `LOTE-${new Date().toISOString().slice(0, 10)}`;
+                    const inputRef = batchRefByTech[row.technicianId] ?? defaultRef;
+                    return (
+                      <tr key={row.technicianId}>
+                        <td className="py-3 px-3 font-semibold text-[#0F172A] whitespace-nowrap">
+                          {row.technicianName}
+                        </td>
+                        <td className="py-3 px-3 text-right tabular-nums text-amber-800">
+                          ${row.inValidationUsd.toFixed(2)}
+                        </td>
+                        <td className="py-3 px-3 text-right tabular-nums font-bold text-[#1D4ED8]">
+                          ${row.availableUsd.toFixed(2)}
+                        </td>
+                        <td className="py-3 px-3 text-right tabular-nums text-emerald-700">
+                          ${row.paidOutUsd.toFixed(2)}
+                          {row.lastBatchRef && (
+                            <span className="block text-[10px] font-mono text-[#64748B]">
+                              {row.lastBatchRef}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3">
+                          {row.availableUsd > 0 && onSettleTechnicianPayouts ? (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <input
+                                type="text"
+                                aria-label={`Referencia de lote para ${row.technicianName}`}
+                                value={inputRef}
+                                onChange={(e) =>
+                                  setBatchRefByTech((prev) => ({
+                                    ...prev,
+                                    [row.technicianId]: e.target.value,
+                                  }))
+                                }
+                                className="w-36 rounded-lg border border-[#E5E9F2] bg-white px-2.5 py-1.5 text-xs font-mono text-[#0F172A]"
+                              />
+                              <button
+                                type="button"
+                                data-testid={`settle-batch-btn-${row.technicianId}`}
+                                onClick={() => {
+                                  onSettleTechnicianPayouts(row.technicianId, inputRef);
+                                  setSettlementNotice(
+                                    `Lote ${inputRef} marcado como paid_out para ${row.technicianName} ($${row.availableUsd.toFixed(2)}).`
+                                  );
+                                }}
+                                className="px-3 py-1.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer"
+                              >
+                                Liquidar lote (paid_out)
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-[#64748B]">Sin saldo disponible</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Panel de Postulantes Técnicos (Fase 2 — Aprobación 1-clic + Gmail) */}
       {canReviewApplications && <TechnicianApplicationsPanel />}
+
+      {/* Modal Compacto: Invitar Especialista Directo (salta /postular · enlace 72 h) */}
+      {directModalOpen && canInviteDirectSpecialist && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="direct-specialist-invite-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setDirectModalOpen(false);
+          }}
+          className="fixed inset-0 z-50 bg-[#0B1528]/55 backdrop-blur-[1px] flex items-center justify-center p-4"
+        >
+          <div className="bg-white border border-[#E5E9F2] rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-xl">
+            <div className="px-5 py-4 border-b border-[#E5E9F2] flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <span className="w-8 h-8 rounded-lg bg-[#EFF6FF] text-[#2563EB] flex items-center justify-center">
+                  <UserPlus className="w-4 h-4" aria-hidden="true" />
+                </span>
+                <div>
+                  <h3
+                    id="direct-specialist-invite-title"
+                    className="text-sm font-bold text-[#0F172A]"
+                  >
+                    Invitar Especialista Directo
+                  </h3>
+                  <p className="text-[11px] text-[#64748B]">
+                    Genera un enlace directo de registro válido por 72 h (sin pasar por /postular).
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                aria-label="Cerrar modal de invitación directa"
+                onClick={() => setDirectModalOpen(false)}
+                className="p-1.5 text-[#64748B] hover:text-[#0F172A] rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => void handleDirectSpecialistSubmit(e)}
+              noValidate
+              className="p-5 space-y-4"
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label
+                    htmlFor="direct-spec-name"
+                    className="block text-xs font-semibold text-[#0F172A] mb-1"
+                  >
+                    Nombre completo *
+                  </label>
+                  <input
+                    id="direct-spec-name"
+                    type="text"
+                    value={directName}
+                    onChange={(e) => setDirectName(e.target.value)}
+                    placeholder="Ej. Carlos Andrade"
+                    className="w-full rounded-xl border border-[#E5E9F2] px-3 py-2 text-xs text-[#0F172A] focus:border-[#2563EB] focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="direct-spec-email"
+                    className="block text-xs font-semibold text-[#0F172A] mb-1"
+                  >
+                    Correo electrónico *
+                  </label>
+                  <input
+                    id="direct-spec-email"
+                    type="email"
+                    value={directEmail}
+                    onChange={(e) => setDirectEmail(e.target.value)}
+                    placeholder="carlos@soporte.com"
+                    className="w-full rounded-xl border border-[#E5E9F2] px-3 py-2 text-xs text-[#0F172A] focus:border-[#2563EB] focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-semibold text-[#0F172A] mb-2">
+                  Especialidades aprobadas ({directSpecialties.length} seleccionadas) *
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {ALL_SPECIALTIES.map((spec) => {
+                    const selected = directSpecialties.includes(spec);
+                    return (
+                      <button
+                        key={spec}
+                        type="button"
+                        onClick={() => toggleDirectSpecialty(spec)}
+                        aria-pressed={selected}
+                        className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                          selected
+                            ? 'bg-[#EFF6FF] text-[#1D4ED8] border-[#2563EB]'
+                            : 'bg-white text-[#64748B] border-[#E5E9F2] hover:bg-[#F8FAFC]'
+                        }`}
+                      >
+                        {spec}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {directError && (
+                <div
+                  role="alert"
+                  className="rounded-xl bg-red-50 border border-red-200 px-3 py-2 text-xs font-medium text-red-800"
+                >
+                  {directError}
+                </div>
+              )}
+
+              {directInviteLink && (
+                <div
+                  data-testid="direct-specialist-invite-result"
+                  className="rounded-xl bg-emerald-50 border border-emerald-200 p-3.5 space-y-2 text-xs"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-emerald-900">
+                      Enlace directo listo (un solo uso · 72 h)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void handleCopyDirectLink()}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0B192C] hover:bg-slate-800 text-white text-[11px] font-semibold transition-colors"
+                    >
+                      <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>{directCopied ? '¡Enlace copiado!' : 'Copiar enlace'}</span>
+                    </button>
+                  </div>
+                  <p className="font-mono text-[11px] text-emerald-950 bg-white border border-emerald-200 rounded px-2.5 py-1.5 break-all">
+                    {directInviteLink}
+                  </p>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E5E9F2]">
+                <button
+                  type="button"
+                  onClick={() => setDirectModalOpen(false)}
+                  className="px-4 py-2 text-xs font-semibold text-[#64748B] bg-white border border-[#E5E9F2] hover:bg-[#F8FAFC] rounded-xl"
+                >
+                  Cerrar
+                </button>
+                <button
+                  type="submit"
+                  disabled={directBusy}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-60 rounded-xl shadow-sm"
+                >
+                  <Link2 className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>
+                    {directBusy
+                      ? 'Generando enlace...'
+                      : 'Generar enlace de especialista'}
+                  </span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -18,10 +18,12 @@ import {
 } from '../../services/aiService';
 import type {
   AiAgentConfig,
+  ResolutionOutcome,
   SupportTicket,
   TicketMessage,
   TicketStatus,
 } from '../../types/support';
+import type { OrganizationRole } from '../../utils/rbac';
 import {
   buildRustDeskDeepLink,
   buildTechnicalResolutionSummary,
@@ -43,6 +45,7 @@ interface TicketsInboxViewProps {
   tickets: SupportTicket[];
   messages: TicketMessage[];
   aiAgents?: AiAgentConfig[];
+  operatorRole?: OrganizationRole;
   selectedTicketId: string | null;
   externalSearchQuery?: string;
   onSelectTicket: (ticketId: string) => void;
@@ -50,6 +53,11 @@ interface TicketsInboxViewProps {
   onMarkPaymentPaid: (ticketId: string) => Promise<boolean | void>;
   onMarkHumanReviewed?: (ticketId: string) => Promise<void>;
   onResolveTicket: (ticketId: string, resolutionNotes: string) => Promise<void>;
+  onAutoCaptureTicket?: (ticketId: string) => Promise<void>;
+  onVoidAuthorizationTicket?: (
+    ticketId: string,
+    outcome: Exclude<ResolutionOutcome, 'resolved'>
+  ) => Promise<void>;
   onReopenTicket: (ticketId: string) => Promise<void>;
   onSendTechnicianMessage: (ticketId: string, text: string) => Promise<void>;
   onInspectConnectionRoom: (ticket: SupportTicket) => void;
@@ -60,6 +68,7 @@ export function TicketsInboxView({
   tickets,
   messages,
   aiAgents = [],
+  operatorRole = 'technician',
   selectedTicketId,
   externalSearchQuery = '',
   onSelectTicket,
@@ -67,6 +76,8 @@ export function TicketsInboxView({
   onMarkPaymentPaid,
   onMarkHumanReviewed,
   onResolveTicket,
+  onAutoCaptureTicket,
+  onVoidAuthorizationTicket,
   onReopenTicket,
   onSendTechnicianMessage,
   onInspectConnectionRoom,
@@ -78,12 +89,16 @@ export function TicketsInboxView({
   const [closureError, setClosureError] = useState<string | null>(null);
   const [confirmingClosure, setConfirmingClosure] = useState(false);
   const [isMutatingTicket, setIsMutatingTicket] = useState(false);
+  const [voidOutcome, setVoidOutcome] =
+    useState<Exclude<ResolutionOutcome, 'resolved'>>('software_unresolved');
+  const [isProcessingPaymentAction, setIsProcessingPaymentAction] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [assistantData, setAssistantData] = useState<{
     checklist: string[];
     diagnosticSummary: string;
   } | null>(null);
+  const isAdminOrOwner = operatorRole === 'owner' || operatorRole === 'admin';
 
   useEffect(() => {
     setSearchQuery(externalSearchQuery);
@@ -275,8 +290,10 @@ export function TicketsInboxView({
               { id: 'all', label: 'Todos' },
               { id: 'ready_to_connect', label: 'Listos para conectar' },
               { id: 'in_progress', label: 'En curso' },
+              { id: 'pending_client_confirmation', label: 'Esperando confirmación' },
               { id: 'waiting_payment', label: 'Pendiente' },
               { id: 'resolved', label: 'Resueltos' },
+              { id: 'refunded', label: 'Anulados' },
             ] as const
           ).map((tab) => {
             const active = statusFilter === tab.id;
@@ -625,7 +642,9 @@ export function TicketsInboxView({
                     </button>
                   )}
                   {activeTicket.status !== 'in_progress' &&
-                    activeTicket.status !== 'resolved' && (
+                    activeTicket.status !== 'pending_client_confirmation' &&
+                    activeTicket.status !== 'resolved' &&
+                    activeTicket.status !== 'refunded' && (
                       <button
                         type="button"
                         onClick={() => void onStartSession(activeTicket.id)}
@@ -636,6 +655,87 @@ export function TicketsInboxView({
                       </button>
                     )}
                 </div>
+
+                {/* Controles administrativos de Pre-Autorización / Captura 48 h / Void (ADR-06) */}
+                {isAdminOrOwner &&
+                  (activeTicket.payment_status === 'authorized' ||
+                    activeTicket.status === 'pending_client_confirmation') &&
+                  activeTicket.status !== 'resolved' &&
+                  activeTicket.status !== 'refunded' && (
+                    <div
+                      data-testid="admin-payment-hold-controls"
+                      className="pt-3 border-t border-[#BFDBFE] space-y-2.5"
+                    >
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-[#1E40AF]">
+                        Gestión de retención pre-autorizada (Admin)
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {onAutoCaptureTicket && (
+                          <button
+                            type="button"
+                            disabled={isProcessingPaymentAction}
+                            data-testid="admin-auto-capture-btn"
+                            onClick={async () => {
+                              setIsProcessingPaymentAction(true);
+                              try {
+                                await onAutoCaptureTicket(activeTicket.id);
+                              } finally {
+                                setIsProcessingPaymentAction(false);
+                              }
+                            }}
+                            className="min-h-[38px] inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-400 rounded-lg transition-colors cursor-pointer"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
+                            <span>Capturar pago (Auto-captura 48 h)</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {onVoidAuthorizationTicket && (
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-1">
+                          <select
+                            aria-label="Motivo de anulación de retención"
+                            value={voidOutcome}
+                            onChange={(e) =>
+                              setVoidOutcome(
+                                e.target.value as Exclude<ResolutionOutcome, 'resolved'>
+                              )
+                            }
+                            className="rounded-lg border border-[#BFDBFE] bg-white px-2.5 py-1.5 text-xs text-[#0F172A]"
+                          >
+                            <option value="software_unresolved">
+                              Incidencia de software no resuelta
+                            </option>
+                            <option value="hardware_fault">
+                              Falla física de hardware
+                            </option>
+                            <option value="client_absent">
+                              Cliente ausente / sin respuesta
+                            </option>
+                          </select>
+                          <button
+                            type="button"
+                            disabled={isProcessingPaymentAction}
+                            data-testid="admin-void-auth-btn"
+                            onClick={async () => {
+                              setIsProcessingPaymentAction(true);
+                              try {
+                                await onVoidAuthorizationTicket(
+                                  activeTicket.id,
+                                  voidOutcome
+                                );
+                              } finally {
+                                setIsProcessingPaymentAction(false);
+                              }
+                            }}
+                            className="min-h-[38px] inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-red-700 bg-white hover:bg-red-50 border border-red-200 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+                          >
+                            <span>No resuelto — Anular retención ($0 comisión)</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
               </div>
             </div>
 
@@ -734,22 +834,63 @@ export function TicketsInboxView({
                   )}
                 </div>
 
-                {activeTicket.status === 'resolved' ? (
+                {activeTicket.status === 'resolved' || activeTicket.status === 'refunded' ? (
                   <div className="pt-2 border-t border-[#E5E9F2] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 text-xs font-semibold text-[#059669]">
-                      <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
-                      <span>Ticket Resuelto y archivado</span>
+                    <div className="space-y-1">
+                      <div
+                        className={`flex items-center gap-2 text-xs font-semibold ${
+                          activeTicket.status === 'refunded'
+                            ? 'text-slate-700'
+                            : 'text-[#059669]'
+                        }`}
+                      >
+                        <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
+                        <span>
+                          {activeTicket.status === 'refunded'
+                            ? 'Ticket anulado · Retención liberada ($0 comisión)'
+                            : 'Ticket Resuelto y confirmado'}
+                        </span>
+                      </div>
+                      {typeof activeTicket.client_rating === 'number' && (
+                        <p className="text-[11px] text-slate-600 tabular-nums">
+                          Evaluación del cliente: <strong>{activeTicket.client_rating}★</strong>
+                          {activeTicket.client_feedback
+                            ? ` · «${activeTicket.client_feedback}»`
+                            : ''}
+                        </p>
+                      )}
                     </div>
 
-                    <button
-                      type="button"
-                      disabled={isMutatingTicket}
-                      onClick={() => void onReopenTicket(activeTicket.id)}
-                      className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#0F172A] bg-[#F8FAFC] hover:bg-slate-100 border border-[#E5E9F2] rounded-lg transition-colors whitespace-nowrap"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-                      <span>Reabrir</span>
-                    </button>
+                    {activeTicket.status === 'resolved' && (
+                      <button
+                        type="button"
+                        disabled={isMutatingTicket}
+                        onClick={() => void onReopenTicket(activeTicket.id)}
+                        className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#0F172A] bg-[#F8FAFC] hover:bg-slate-100 border border-[#E5E9F2] rounded-lg transition-colors whitespace-nowrap"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Reabrir</span>
+                      </button>
+                    )}
+                  </div>
+                ) : activeTicket.status === 'pending_client_confirmation' ? (
+                  <div
+                    data-testid="pending-client-confirmation-notice"
+                    className="p-4 rounded-xl bg-indigo-50/80 border border-indigo-200 space-y-2"
+                  >
+                    <p className="text-xs font-bold text-indigo-950">
+                      Esperando confirmación y evaluación 1–5★ del cliente
+                    </p>
+                    <p className="text-[11px] text-indigo-900 leading-relaxed">
+                      El informe ya está visible en la Sala de Conexión del cliente. El cobro se capturará al confirmar o por auto-captura tras 48 h
+                      {activeTicket.auto_capture_at
+                        ? ` (${new Date(activeTicket.auto_capture_at).toLocaleString('es-EC', {
+                            dateStyle: 'short',
+                            timeStyle: 'short',
+                          })})`
+                        : ''}
+                      .
+                    </p>
                   </div>
                 ) : confirmingClosure ? (
                   <div
@@ -757,8 +898,8 @@ export function TicketsInboxView({
                     className="p-4 rounded-xl bg-[#FEF3C7]/60 border border-[#FDE68A] space-y-3"
                   >
                     <p className="text-xs font-semibold text-[#92400E]">
-                      ¿Cerrar el ticket {activeTicket.ticket_code} y emitir
-                      informe técnico final?
+                      ¿Enviar resolución del ticket {activeTicket.ticket_code} para
+                      doble confirmación del cliente (ventana de 48 h)?
                     </p>
                     <div className="flex items-center justify-end gap-2">
                       <button
@@ -778,8 +919,8 @@ export function TicketsInboxView({
                         <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />
                         <span>
                           {isMutatingTicket
-                            ? 'Cerrando...'
-                            : 'Confirmar cierre'}
+                            ? 'Enviando...'
+                            : 'Enviar para confirmación'}
                         </span>
                       </button>
                     </div>
@@ -787,10 +928,11 @@ export function TicketsInboxView({
                 ) : (
                   <button
                     type="submit"
-                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-xl transition-colors shadow-sm"
+                    data-testid="resolve-incident-btn"
+                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-xl transition-colors shadow-sm cursor-pointer"
                   >
                     <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
-                    <span>Cerrar ticket y generar informe</span>
+                    <span>Resolver incidencia</span>
                   </button>
                 )}
               </form>

@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Menu, ShieldCheck, Ticket, UserCircle2, X } from 'lucide-react';
 import { FEATURE_FLAGS } from '../config/features';
-import type { AppView, UserAccountProfile } from '../types/support';
+import type { AppView, UserAccountProfile, UserRole } from '../types/support';
+
+const OPERATOR_ROLES: ReadonlySet<UserRole> = new Set<UserRole>([
+  'owner',
+  'admin',
+  'supervisor',
+  'technician',
+]);
 
 interface HeaderProps {
   activeView: AppView;
@@ -51,6 +58,10 @@ export function Header({
     setMobileMenuOpen(false);
     onNavigateSection(sectionId);
   };
+
+  const isOperator = Boolean(
+    currentUser && OPERATOR_ROLES.has(currentUser.role)
+  );
 
   const userShortLabel = currentUser
     ? String(currentUser.full_name ?? '').trim().split(/\s+/)[0] || 'Mi Cuenta'
@@ -115,16 +126,19 @@ export function Header({
             </button>
           )}
 
-          <button
-            type="button"
-            onClick={() => {
-              setMobileMenuOpen(false);
-              onOpenTechPortal();
-            }}
-            className="hidden 2xl:inline-flex items-center justify-center px-2.5 py-2 text-xs font-medium text-slate-600 hover:text-[#0B1528] hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
-          >
-            Centro de Operaciones
-          </button>
+          {isOperator && (
+            <button
+              type="button"
+              data-testid="header-operations-center-button"
+              onClick={() => {
+                setMobileMenuOpen(false);
+                onOpenTechPortal();
+              }}
+              className="hidden lg:inline-flex items-center justify-center px-2.5 py-2 text-xs font-medium text-slate-600 hover:text-[#0B1528] hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+            >
+              Centro de Operaciones
+            </button>
+          )}
 
           <button
             type="button"
@@ -209,16 +223,18 @@ export function Header({
             >
               {currentUser ? `Cuenta (${userShortLabel})` : 'Acceder / Registrarse (+18)'}
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setMobileMenuOpen(false);
-                onOpenTechPortal();
-              }}
-              className="w-full min-h-[44px] px-4 py-2.5 text-sm font-medium text-slate-700 hover:text-[#0B1528] bg-slate-50 hover:bg-slate-100 rounded-lg transition-colors"
-            >
-              Centro de Operaciones (Especialistas)
-            </button>
+            {isOperator && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  onOpenTechPortal();
+                }}
+                className="w-full min-h-[44px] px-4 py-2.5 text-sm font-medium text-slate-700 hover:text-[#0B1528] bg-slate-50 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                Centro de Operaciones (Especialistas)
+              </button>
+            )}
           </div>
         </div>
       )}

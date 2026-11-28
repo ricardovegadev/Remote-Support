@@ -14,6 +14,7 @@ import { ScrollReveal } from './components/ScrollReveal';
 import { StickySectionNav } from './components/StickySectionNav';
 import { FEATURE_FLAGS } from './config/features';
 import { getSupabaseClient, isSupabaseConfigured } from './lib/supabaseClient';
+import { updateTeamMemberAccess } from './services/technicianApplicationService';
 
 const AuthModal = lazy(() =>
   import('./components/AuthModal').then((m) => ({ default: m.AuthModal }))
@@ -66,9 +67,11 @@ import type {
   Organization,
   OrganizationMember,
   RemoteSessionRecord,
+  ResolutionOutcome,
   ServiceTier,
   SupportTicket,
   TechnicianAvailability,
+  TechnicianPayoutRecord,
   TechnicianSpecialty,
   TicketMessage,
   UserAccountProfile,
@@ -77,6 +80,7 @@ import type {
 import { readCookieConsent } from './utils/cookieConsent';
 import {
   createTicketFromDraft,
+  getServiceTierPriceUsd,
   INITIAL_WIZARD_DRAFT,
   parseAppRoute,
 } from './utils/ticketLogic';
@@ -154,6 +158,9 @@ export default function App() {
   );
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(() =>
     supportAdapter.loadAuditLogs()
+  );
+  const [payouts, setPayouts] = useState<TechnicianPayoutRecord[]>(() =>
+    supportAdapter.loadTechnicianPayouts()
   );
 
   const [tickets, setTickets] = useState<SupportTicket[]>(() =>
@@ -512,6 +519,40 @@ export default function App() {
     });
 
     const supabase = supabaseEnabled ? getSupabaseClient() : null;
+    const hydrateSessionUser = async (
+      authUser: {
+        id: string;
+        email?: string | null;
+        created_at?: string;
+        user_metadata?: Record<string, unknown> | null;
+      } | null
+    ) => {
+      if (!supabase || !isMounted) return;
+      if (!authUser) {
+        supportAdapter.clearUserProfile();
+        setCurrentUser(null);
+        return;
+      }
+      try {
+        const hydrated = await supportAdapter.hydrateAuthenticatedUserProfile(
+          supabase,
+          authUser
+        );
+        if (!isMounted) return;
+        supportAdapter.saveUserProfile(hydrated);
+        setCurrentUser(hydrated);
+      } catch {
+        // Keep existing local state if transient network error occurs
+      }
+    };
+
+    if (supabase) {
+      void supabase.auth.getSession().then(({ data }) => {
+        if (!isMounted) return;
+        void hydrateSessionUser(data.session?.user ?? null);
+      });
+    }
+
     const authSubscription = supabase
       ? supabase.auth.onAuthStateChange((event, session) => {
           if (!isMounted) return;
@@ -522,8 +563,12 @@ export default function App() {
           }
           if (
             session?.user &&
-            (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED')
+            (event === 'INITIAL_SESSION' ||
+              event === 'SIGNED_IN' ||
+              event === 'TOKEN_REFRESHED' ||
+              event === 'USER_UPDATED')
           ) {
+            void hydrateSessionUser(session.user);
             syncFromRemote(false);
           }
         }).data.subscription
@@ -995,7 +1040,9 @@ export default function App() {
 
   const handleResolveTicket = async (ticketId: string, resolutionNotes: string) => {
     const target = tickets.find((t) => t.id === ticketId);
-    const nowIso = new Date().toISOString();
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    const autoCaptureAt = new Date(nowMs + 48 * 3600 * 1000).toISOString();
     const reviewer =
       target?.human_reviewed_by ??
       target?.assigned_technician_name ??
@@ -1003,16 +1050,17 @@ export default function App() {
     const result = await supportAdapter.updateTicket(
       ticketId,
       {
-        status: 'resolved',
+        status: 'pending_client_confirmation',
         resolution_notes: resolutionNotes,
-        resolved_at: nowIso,
+        auto_capture_at: autoCaptureAt,
+        resolved_at: null,
         human_reviewed_at: target?.human_reviewed_at ?? nowIso,
         human_reviewed_by: reviewer,
       },
       tickets
     );
     if (!result.ok) {
-      setPersistenceError(result.error ?? 'No se pudo cerrar el ticket.');
+      setPersistenceError(result.error ?? 'No se pudo enviar el informe de cierre.');
       return;
     }
     const updatedTicket = result.data.find((t) => t.id === ticketId);
@@ -1022,18 +1070,350 @@ export default function App() {
       );
     }
     if (target) {
+      const msgRes = await supportAdapter.appendMessage(
+        ticketId,
+        'technician',
+        'He finalizado la intervención y publicado el informe técnico de cierre. Por favor confirma en la parte superior de tu Sala si tu incidencia quedó resuelta y califica la atención de 1 a 5 estrellas (ventana de confirmación de 48 horas).',
+        messages
+      );
+      if (msgRes.ok) {
+        setMessages(msgRes.data);
+      }
       setAuditLogs(
         supportAdapter.appendAuditLog({
           organization_id: target.organization_id,
           actor_type: 'technician',
           actor_label: reviewer,
-          action: 'Revisó y cerró la sesión remota con informe final',
+          action:
+            'Marcó la incidencia como resuelta · En espera de confirmación del cliente (auto-captura 48 h)',
           target_ref: target.ticket_code,
         })
       );
     }
     setPersistenceError(null);
     setTickets(result.data);
+  };
+
+  const getOperatorAuthHeaders = async (): Promise<Record<string, string>> => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (isSupabaseConfigured()) {
+      const supabase = getSupabaseClient();
+      const sessionRes = supabase ? await supabase.auth.getSession() : null;
+      const accessToken = sessionRes?.data.session?.access_token;
+      if (accessToken) {
+        headers.Authorization = `Bearer ${accessToken}`;
+      }
+    }
+    return headers;
+  };
+
+  const handleClientConfirmResolution = async (
+    ticketId: string,
+    rating: number,
+    feedback: string
+  ): Promise<boolean> => {
+    const target = tickets.find((t) => t.id === ticketId);
+    if (!target) return false;
+    const scope = getTicketScope(ticketId);
+    const sessionToken =
+      scope?.sessionToken ||
+      supportAdapter.getRoomToken(target.ticket_code) ||
+      target.client_session_token;
+    const techId = target.assigned_technician_id ?? target.assigned_to;
+    const techMember = techId
+      ? members.find((m) => m.user_id === techId || m.id === techId)
+      : undefined;
+
+    try {
+      const captureRes = await fetch('/api/payments/capture', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(sessionToken ? { 'x-ticket-token': sessionToken } : {}),
+        },
+        body: JSON.stringify({
+          ticketCode: target.ticket_code,
+          sessionToken,
+          rating,
+          feedback,
+          gateway: target.payment_gateway ?? 'stripe',
+          authorizationId: target.payment_authorization_id ?? undefined,
+          amountUsd: getServiceTierPriceUsd(target.service_tier),
+          monthlyResolvedCount: techMember?.resolved_count ?? 0,
+        }),
+      });
+      if (!captureRes.ok && isSupabaseConfigured()) {
+        const errJson = (await captureRes.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        setPersistenceError(
+          errJson?.error ?? 'No se pudo capturar el pago confirmado.'
+        );
+        return false;
+      }
+    } catch {
+      if (isSupabaseConfigured()) {
+        setPersistenceError('Error de conexión al confirmar la captura de pago.');
+        return false;
+      }
+    }
+
+    const nowIso = new Date().toISOString();
+    const updatedTickets = sortTicketsDeterministically(
+      tickets.map((t) =>
+        t.id === ticketId
+          ? {
+              ...t,
+              status: 'resolved' as const,
+              payment_status: 'paid' as const,
+              paid_at: t.paid_at ?? nowIso,
+              resolved_at: nowIso,
+              client_confirmed_at: nowIso,
+              client_rating: rating,
+              client_feedback: feedback || null,
+              resolution_outcome: 'resolved' as const,
+              auto_capture_at: null,
+            }
+          : t
+      )
+    );
+    supportAdapter.saveTickets(updatedTickets);
+    setTickets(updatedTickets);
+
+    const finalized = updatedTickets.find((t) => t.id === ticketId);
+    let nextMembers = members;
+    if (techId) {
+      nextMembers = supportAdapter.updateMemberRating(techId, rating, members);
+      setMembers(nextMembers);
+    }
+    if (finalized) {
+      setSessions((prev) =>
+        supportAdapter.syncSessionForTicket(finalized, prev)
+      );
+      setPayouts((prev) =>
+        supportAdapter.recordTechnicianPayoutForTicket(
+          finalized,
+          nextMembers,
+          prev
+        )
+      );
+    }
+    setAuditLogs(
+      supportAdapter.appendAuditLog({
+        organization_id: target.organization_id,
+        actor_type: 'client',
+        actor_label: target.client_name,
+        action: `Confirmó resolución (${rating}★) y liberó captura de pago`,
+        target_ref: target.ticket_code,
+      })
+    );
+    setPersistenceError(null);
+    return true;
+  };
+
+  const handleClientReportUnresolved = async (
+    ticketId: string,
+    feedback: string
+  ): Promise<boolean> => {
+    const target = tickets.find((t) => t.id === ticketId);
+    if (!target) return false;
+    const updatedTickets = sortTicketsDeterministically(
+      tickets.map((t) =>
+        t.id === ticketId
+          ? {
+              ...t,
+              status: 'in_progress' as const,
+              auto_capture_at: null,
+              client_feedback: feedback || t.client_feedback || null,
+            }
+          : t
+      )
+    );
+    supportAdapter.saveTickets(updatedTickets);
+    setTickets(updatedTickets);
+
+    const detail = feedback
+      ? `El cliente reportó que el problema persiste y detuvo la auto-captura: "${feedback}"`
+      : 'El cliente reportó que el problema persiste y solicitó revisión administrativa (auto-captura detenida).';
+    const msgRes = await supportAdapter.appendMessage(
+      ticketId,
+      'client',
+      detail,
+      messages,
+      getTicketScope(ticketId)
+    );
+    if (msgRes.ok) {
+      setMessages(msgRes.data);
+    }
+    setAuditLogs(
+      supportAdapter.appendAuditLog({
+        organization_id: target.organization_id,
+        actor_type: 'client',
+        actor_label: target.client_name,
+        action:
+          'Reportó persistencia del problema · Auto-captura detenida y escalado a revisión',
+        target_ref: target.ticket_code,
+      })
+    );
+    setPersistenceError(null);
+    return true;
+  };
+
+  const handleAdminAutoCapture = async (ticketId: string): Promise<void> => {
+    const target = tickets.find((t) => t.id === ticketId);
+    if (!target) return;
+    const techId = target.assigned_technician_id ?? target.assigned_to;
+    const techMember = techId
+      ? members.find((m) => m.user_id === techId || m.id === techId)
+      : undefined;
+
+    try {
+      const headers = await getOperatorAuthHeaders();
+      const res = await fetch('/api/payments/capture', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          ticketCode: target.ticket_code,
+          gateway: target.payment_gateway ?? 'stripe',
+          authorizationId: target.payment_authorization_id ?? undefined,
+          amountUsd: getServiceTierPriceUsd(target.service_tier),
+          monthlyResolvedCount: techMember?.resolved_count ?? 0,
+        }),
+      });
+      if (!res.ok && isSupabaseConfigured()) {
+        const err = (await res.json().catch(() => null)) as { error?: string } | null;
+        setPersistenceError(err?.error ?? 'No se pudo ejecutar la auto-captura.');
+        return;
+      }
+    } catch {
+      if (isSupabaseConfigured()) {
+        setPersistenceError('Error de red al ejecutar la auto-captura.');
+        return;
+      }
+    }
+
+    const nowIso = new Date().toISOString();
+    const updatedTickets = sortTicketsDeterministically(
+      tickets.map((t) =>
+        t.id === ticketId
+          ? {
+              ...t,
+              status: 'resolved' as const,
+              payment_status: 'paid' as const,
+              paid_at: t.paid_at ?? nowIso,
+              resolved_at: nowIso,
+              client_confirmed_at: t.client_confirmed_at ?? nowIso,
+              resolution_outcome: 'resolved' as const,
+              auto_capture_at: null,
+            }
+          : t
+      )
+    );
+    supportAdapter.saveTickets(updatedTickets);
+    setTickets(updatedTickets);
+    const finalized = updatedTickets.find((t) => t.id === ticketId);
+    if (finalized) {
+      setPayouts((prev) =>
+        supportAdapter.recordTechnicianPayoutForTicket(finalized, members, prev)
+      );
+    }
+    setAuditLogs(
+      supportAdapter.appendAuditLog({
+        organization_id: target.organization_id,
+        actor_type: 'technician',
+        actor_label: currentUser?.full_name ?? 'Administrador',
+        action: 'Ejecutó auto-captura administrativa (ventana 48 h) y cerró el ticket',
+        target_ref: target.ticket_code,
+      })
+    );
+    setPersistenceError(null);
+  };
+
+  const handleAdminVoidAuthorization = async (
+    ticketId: string,
+    outcome: Exclude<ResolutionOutcome, 'resolved'>
+  ): Promise<void> => {
+    const target = tickets.find((t) => t.id === ticketId);
+    if (!target) return;
+
+    try {
+      const headers = await getOperatorAuthHeaders();
+      const res = await fetch('/api/payments/void', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          ticketCode: target.ticket_code,
+          resolutionOutcome: outcome,
+          gateway: target.payment_gateway ?? 'stripe',
+          authorizationId: target.payment_authorization_id ?? undefined,
+        }),
+      });
+      if (!res.ok && isSupabaseConfigured()) {
+        const err = (await res.json().catch(() => null)) as { error?: string } | null;
+        setPersistenceError(err?.error ?? 'No se pudo anular la retención.');
+        return;
+      }
+    } catch {
+      if (isSupabaseConfigured()) {
+        setPersistenceError('Error de red al anular la retención.');
+        return;
+      }
+    }
+
+    const nowIso = new Date().toISOString();
+    const updatedTickets = sortTicketsDeterministically(
+      tickets.map((t) =>
+        t.id === ticketId
+          ? {
+              ...t,
+              payment_status: 'voided' as const,
+              status: 'refunded' as const,
+              resolution_outcome: outcome,
+              auto_capture_at: null,
+              resolved_at: nowIso,
+            }
+          : t
+      )
+    );
+    supportAdapter.saveTickets(updatedTickets);
+    setTickets(updatedTickets);
+    setPayouts((prev) =>
+      supportAdapter.cancelTechnicianPayoutForTicket(ticketId, prev)
+    );
+    setAuditLogs(
+      supportAdapter.appendAuditLog({
+        organization_id: target.organization_id,
+        actor_type: 'technician',
+        actor_label: currentUser?.full_name ?? 'Administrador',
+        action: `Anuló retención pre-autorizada ($0 comisión · motivo: ${outcome})`,
+        target_ref: target.ticket_code,
+      })
+    );
+    setPersistenceError(null);
+  };
+
+  const handleSettleTechnicianPayouts = (
+    technicianId: string,
+    batchReference: string
+  ) => {
+    const next = supportAdapter.settleTechnicianPayoutsBatch(
+      technicianId,
+      batchReference,
+      payouts
+    );
+    setPayouts(next);
+    const member = members.find(
+      (m) => m.user_id === technicianId || m.id === technicianId
+    );
+    setAuditLogs(
+      supportAdapter.appendAuditLog({
+        organization_id: activeOrgId,
+        actor_type: 'technician',
+        actor_label: currentUser?.full_name ?? 'Tesorería Admin',
+        action: `Liquidó lote semanal (${batchReference}) a ${member?.full_name ?? technicianId}`,
+        target_ref: batchReference,
+      })
+    );
   };
 
   const handleReopenTicket = async (ticketId: string) => {
@@ -1110,6 +1490,86 @@ export default function App() {
     );
     setMembers(next);
     setAuditLogs(supportAdapter.loadAuditLogs());
+  };
+
+  const handleUpdateMemberRole = async (
+    memberId: string,
+    nextRole: OrganizationMember['role']
+  ): Promise<{ ok: boolean; error?: string }> => {
+    const target = members.find((m) => m.id === memberId);
+    if (!target || target.role === 'owner' || nextRole === 'owner') {
+      return {
+        ok: false,
+        error: 'Bloqueo de seguridad: no está permitido degradar o modificar al Owner.',
+      };
+    }
+    if (isSupabaseConfigured()) {
+      const serverRes = await updateTeamMemberAccess({
+        memberId,
+        organizationId: activeOrgId,
+        role: nextRole,
+      });
+      if (!serverRes.ok) {
+        return serverRes;
+      }
+    }
+    const next = supportAdapter.updateMemberAccess(
+      memberId,
+      { role: nextRole },
+      members,
+      currentUser?.full_name ?? 'Owner'
+    );
+    setMembers(next);
+    setAuditLogs(supportAdapter.loadAuditLogs());
+    return { ok: true };
+  };
+
+  const handleToggleMemberStatus = async (
+    memberId: string,
+    nextStatus: 'active' | 'suspended'
+  ): Promise<{ ok: boolean; error?: string }> => {
+    const target = members.find((m) => m.id === memberId);
+    if (!target || target.role === 'owner') {
+      return {
+        ok: false,
+        error: 'Bloqueo de seguridad: no está permitido suspender al Owner.',
+      };
+    }
+    if (isSupabaseConfigured()) {
+      const serverRes = await updateTeamMemberAccess({
+        memberId,
+        organizationId: activeOrgId,
+        status: nextStatus,
+      });
+      if (!serverRes.ok) {
+        return serverRes;
+      }
+    }
+    const next = supportAdapter.updateMemberAccess(
+      memberId,
+      { status: nextStatus },
+      members,
+      currentUser?.full_name ?? 'Owner'
+    );
+    setMembers(next);
+    setAuditLogs(supportAdapter.loadAuditLogs());
+    return { ok: true };
+  };
+
+  const handleRecordTeamInviteAudit = (summary: {
+    fullName: string;
+    email: string;
+    role: string;
+  }) => {
+    setAuditLogs(
+      supportAdapter.appendAuditLog({
+        organization_id: activeOrgId,
+        actor_type: 'system',
+        actor_label: currentUser?.full_name ?? 'Operador',
+        action: `Generó invitación directa (72 h) con rol ${summary.role} para ${summary.fullName}`,
+        target_ref: summary.email,
+      })
+    );
   };
 
   const handleToggleAiAgent = (agentId: string) => {
@@ -1381,12 +1841,16 @@ export default function App() {
             sessions={sessions}
             aiAgents={aiAgents}
             auditLogs={auditLogs}
+            payouts={payouts}
             persistenceError={persistenceError}
             onDismissPersistenceError={() => setPersistenceError(null)}
             onStartSession={handleStartSession}
             onMarkPaymentPaid={handleConfirmPayment}
             onMarkHumanReviewed={handleMarkHumanReviewed}
             onResolveTicket={handleResolveTicket}
+            onAutoCaptureTicket={handleAdminAutoCapture}
+            onVoidAuthorizationTicket={handleAdminVoidAuthorization}
+            onSettleTechnicianPayouts={handleSettleTechnicianPayouts}
             onReopenTicket={handleReopenTicket}
             onSendTechnicianMessage={(ticketId, text) =>
               handleSendMessage(ticketId, 'technician', text)
@@ -1403,6 +1867,9 @@ export default function App() {
             onUpdateMemberAvailability={handleUpdateMemberAvailability}
             onChangeDispatchMode={handleChangeDispatchMode}
             onInviteMember={handleInviteMember}
+            onUpdateMemberRole={handleUpdateMemberRole}
+            onToggleMemberStatus={handleToggleMemberStatus}
+            onRecordTeamInviteAudit={handleRecordTeamInviteAudit}
             onToggleAiAgent={handleToggleAiAgent}
             onToggleAiGovernanceRule={handleToggleAiGovernanceRule}
             onSaveOrgSettings={handleSaveOrgSettings}
@@ -1579,6 +2046,8 @@ export default function App() {
                 onMarkAgentDownloaded={handleMarkAgentDownloaded}
                 onSaveRustDeskId={handleSaveRustDeskId}
                 onConfirmPayment={handleConfirmPayment}
+                onConfirmClientResolution={handleClientConfirmResolution}
+                onReportProblemPersists={handleClientReportUnresolved}
                 onSendClientMessage={(ticketId, text) =>
                   handleSendMessage(ticketId, 'client', text)
                 }

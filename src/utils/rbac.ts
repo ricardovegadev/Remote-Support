@@ -162,6 +162,21 @@ export const DEFAULT_RBAC_MATRIX: Record<OrganizationRole, RbacPermission[]> = {
     'settings:view',
     'settings:manage',
   ],
+  supervisor: [
+    'dashboard:view',
+    'tickets:view',
+    'tickets:claim',
+    'tickets:resolve',
+    'devices:view',
+    'sessions:manage',
+    'workforce:view',
+    'workforce:manage',
+    'applications:review',
+    'ai_workforce:view',
+    'analytics:view',
+    'telemetry:view',
+    'settings:view',
+  ],
   technician: [
     'dashboard:view',
     'tickets:view',
@@ -222,13 +237,57 @@ export function canManageMemberRole(
   return true;
 }
 
+export function canInviteTeamRole(
+  actorRole: OrganizationRole,
+  targetRole: OrganizationRole
+): boolean {
+  if (targetRole === 'owner') return false;
+  if (targetRole === 'admin' || targetRole === 'supervisor') {
+    return actorRole === 'owner';
+  }
+  if (targetRole === 'technician') {
+    return (
+      actorRole === 'owner' ||
+      actorRole === 'admin' ||
+      actorRole === 'supervisor'
+    );
+  }
+  return false;
+}
+
+export function canChangeTeamMemberRole(
+  actorRole: OrganizationRole,
+  targetRole: OrganizationRole,
+  nextRole: OrganizationRole
+): boolean {
+  if (actorRole !== 'owner') return false;
+  if (targetRole === 'owner') return false;
+  if (nextRole === 'owner') return false;
+  return (
+    nextRole === 'admin' ||
+    nextRole === 'supervisor' ||
+    nextRole === 'technician'
+  );
+}
+
+export function canToggleTeamMemberStatus(
+  actorRole: OrganizationRole,
+  targetRole: OrganizationRole
+): boolean {
+  if (actorRole !== 'owner') return false;
+  if (targetRole === 'owner') return false;
+  return true;
+}
+
 export function getRoleLabel(role: OrganizationRole): string {
   switch (role) {
     case 'owner':
       return 'Owner · Propietario';
     case 'admin':
       return 'Admin · Operaciones';
+    case 'supervisor':
+      return 'Supervisor · Operaciones';
     case 'technician':
-      return 'Técnico Especialista';
+      return 'Especialista Técnico';
   }
 }

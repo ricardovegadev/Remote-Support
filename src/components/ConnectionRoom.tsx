@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft,
   Building2,
@@ -31,8 +32,10 @@ import type {
 import {
   formatCategoryForOs,
   formatElapsedSessionDuration,
+  formatPublicTechnicianShortName,
   formatRustDeskId,
   getAgentDownloadMeta,
+  getClientRatingLabel,
   getPaymentStatusLabel,
   getRustDeskInstallerUrl,
   getServiceTierPriceUsd,
@@ -42,6 +45,7 @@ import {
 } from '../utils/ticketLogic';
 import { TicketChatPanel } from './TicketChatPanel';
 import { ResolutionFeedbackCard } from './ResolutionFeedbackCard';
+import { ConnectionTimeline } from './ConnectionTimeline';
 import type { LegalDocTab } from './LegalDocsModal';
 import {
   CardNetworkBadges,
@@ -66,6 +70,15 @@ interface ConnectionRoomProps {
     consentAccepted: boolean
   ) => Promise<boolean | void>;
   onConfirmPayment: (ticketId: string) => Promise<boolean | void>;
+  onConfirmClientResolution?: (
+    ticketId: string,
+    rating: number,
+    feedback: string
+  ) => Promise<boolean | void>;
+  onReportProblemPersists?: (
+    ticketId: string,
+    feedback: string
+  ) => Promise<boolean | void>;
   onSendClientMessage: (ticketId: string, messageText: string) => Promise<void>;
   onResetToNewTicket: () => void;
   onOpenLegalDoc?: (tab: LegalDocTab) => void;
@@ -90,6 +103,8 @@ export function ConnectionRoom({
   onMarkAgentDownloaded,
   onSaveRustDeskId,
   onConfirmPayment,
+  onConfirmClientResolution,
+  onReportProblemPersists,
   onSendClientMessage,
   onResetToNewTicket,
   onOpenLegalDoc,
@@ -102,6 +117,17 @@ export function ConnectionRoom({
   const [consentChecked, setConsentChecked] = useState<boolean>(
     ticket.consent_accepted
   );
+  const [clientConfirmRating, setClientConfirmRating] = useState<number>(
+    ticket.client_rating ?? 0
+  );
+  const [clientConfirmHover, setClientConfirmHover] = useState<number>(0);
+  const [clientConfirmFeedback, setClientConfirmFeedback] = useState<string>(
+    ticket.client_feedback ?? ''
+  );
+  const [clientConfirmError, setClientConfirmError] = useState<string | null>(null);
+  const [isSubmittingClientConfirm, setIsSubmittingClientConfirm] = useState(false);
+  const [isExpandingSuccess, setIsExpandingSuccess] = useState(false);
+  const [clientEscalatedNotice, setClientEscalatedNotice] = useState<string | null>(null);
   const [idError, setIdError] = useState<string | null>(null);
   const [idSavedNotice, setIdSavedNotice] = useState(false);
   const [isSavingRustDeskId, setIsSavingRustDeskId] = useState(false);
@@ -170,9 +196,12 @@ export function ConnectionRoom({
   const [privacyOtpBusy, setPrivacyOtpBusy] = useState(false);
   const [privacyOtpError, setPrivacyOtpError] = useState<string | null>(null);
 
+  const isPaymentSecured =
+    ticket.payment_status === 'authorized' || ticket.payment_status === 'paid';
+
   type RoomStepKey = 'pay' | 'download' | 'link';
   const currentActiveStep: RoomStepKey =
-    ticket.payment_status !== 'paid'
+    !isPaymentSecured
       ? 'pay'
       : !ticket.agent_downloaded && !ticket.rustdesk_id
       ? 'download'
@@ -190,8 +219,10 @@ export function ConnectionRoom({
 
   const isSessionActiveBarVisible =
     ticket.status !== 'resolved' &&
+    ticket.status !== 'refunded' &&
+    ticket.status !== 'pending_client_confirmation' &&
     (ticket.status === 'in_progress' ||
-      (ticket.payment_status === 'paid' &&
+      (isPaymentSecured &&
         Boolean(ticket.rustdesk_id && ticket.consent_accepted)));
 
   const sessionStartedAtIso =
@@ -274,7 +305,7 @@ export function ConnectionRoom({
       window.history.replaceState({}, '', window.location.pathname);
     };
 
-    if (ticket.payment_status === 'paid') {
+    if (ticket.payment_status === 'paid' || ticket.payment_status === 'authorized') {
       cleanUrl();
       return;
     }
@@ -879,6 +910,10 @@ export function ConnectionRoom({
                 className={
                   ticket.payment_status === 'paid'
                     ? 'text-emerald-700'
+                    : ticket.payment_status === 'authorized'
+                    ? 'text-[#2563EB]'
+                    : ticket.payment_status === 'voided' || ticket.payment_status === 'refunded'
+                    ? 'text-slate-600'
                     : 'text-amber-700'
                 }
               >
@@ -887,6 +922,281 @@ export function ConnectionRoom({
             </span>
           </div>
         </div>
+
+        {/* Voided / Refunded Confirmation Banner */}
+        {(ticket.payment_status === 'voided' || ticket.status === 'refunded') && (
+          <div
+            data-testid="voided-authorization-banner"
+            className="rounded-xl bg-slate-100 border border-slate-300 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-800"
+          >
+            <div className="space-y-1">
+              <p className="font-bold text-[#0B192C]">
+                Retención anulada sin costo ($0 comisión · Garantía Remote Support 365)
+              </p>
+              <p className="text-slate-600">
+                Tu método de pago fue liberado íntegramente conforme a nuestra promesa «Si no te lo resolvemos, no pagas».
+              </p>
+            </div>
+            <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-white border border-slate-300 font-semibold text-slate-700 shrink-0">
+              {getPaymentStatusLabel(ticket.payment_status)}
+            </span>
+          </div>
+        )}
+
+        {clientEscalatedNotice && (
+          <div
+            role="status"
+            className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-xs text-amber-900 font-medium"
+          >
+            {clientEscalatedNotice}
+          </div>
+        )}
+
+        {/* Prominent Dual-Confirmation & 1-5 Star Rating Notification Card (ADR-06) */}
+        {ticket.status === 'pending_client_confirmation' && (
+          <section
+            aria-labelledby="client-closure-confirm-heading"
+            data-testid="client-closure-confirmation-card"
+            className="rounded-2xl bg-white border-2 border-[#2563EB] shadow-md p-5 sm:p-6 space-y-5"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[11px] font-bold">
+                    <Clock className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Acción requerida · Confirmar cierre</span>
+                  </span>
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-blue-50 text-[#1D4ED8] text-[11px] font-semibold">
+                    {ticket.payment_status === 'authorized'
+                      ? 'Pago pre-autorizado retenido'
+                      : 'Pendiente de confirmación final'}
+                  </span>
+                </div>
+                <h2
+                  id="client-closure-confirm-heading"
+                  className="text-base sm:text-lg font-bold text-[#0B192C]"
+                >
+                  Tu especialista marcó la incidencia como resuelta
+                </h2>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Revisa el informe técnico y confirma si tu equipo quedó funcionando correctamente. Si no recibimos un reclamo en las próximas{' '}
+                  <strong className="text-[#0B192C]">48 horas</strong>
+                  {ticket.auto_capture_at
+                    ? ` (hasta ${new Date(ticket.auto_capture_at).toLocaleString('es-EC', {
+                        dateStyle: 'medium',
+                        timeStyle: 'short',
+                      })})`
+                    : ''}
+                  , el cobro pre-autorizado se capturará automáticamente.
+                </p>
+              </div>
+              <div className="rounded-xl bg-[#F8FAFC] border border-slate-200 px-3.5 py-2.5 text-right shrink-0">
+                <p className="text-[11px] text-slate-500">Importe pre-autorizado</p>
+                <p className="text-base font-bold text-[#0B192C] tabular-nums">
+                  USD ${computedTotalUsd.toFixed(2)}
+                </p>
+              </div>
+            </div>
+
+            {ticket.resolution_notes && (
+              <div className="rounded-xl bg-[#F8FAFC] border border-slate-200 p-4 space-y-1.5">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                  Resumen del informe técnico de cierre
+                </p>
+                <p className="text-xs text-slate-700 whitespace-pre-line leading-relaxed">
+                  {ticket.resolution_notes}
+                </p>
+              </div>
+            )}
+
+            {/* Pregunta 2: Evaluación del especialista (1 a 5 estrellas) */}
+            <div className="space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-bold text-[#0B192C]">
+                  Califica la atención de{' '}
+                  <span className="text-[#2563EB]">
+                    {formatPublicTechnicianShortName(ticket.assigned_technician_name)}
+                  </span>{' '}
+                  <span className="text-red-600">*</span>
+                </p>
+                <span className="text-xs font-semibold text-[#0B192C] tabular-nums">
+                  {clientConfirmHover || clientConfirmRating > 0
+                    ? `${clientConfirmHover || clientConfirmRating} / 5 · ${getClientRatingLabel(
+                        clientConfirmHover || clientConfirmRating
+                      )}`
+                    : 'Selecciona de 1 a 5 estrellas'}
+                </span>
+              </div>
+              <div
+                role="radiogroup"
+                aria-label={`Calificar a ${formatPublicTechnicianShortName(
+                  ticket.assigned_technician_name
+                )} de 1 a 5 estrellas`}
+                className="flex flex-wrap items-center gap-2"
+              >
+                {[1, 2, 3, 4, 5].map((starValue) => {
+                  const active = (clientConfirmHover || clientConfirmRating) >= starValue;
+                  const checked = clientConfirmRating === starValue;
+                  return (
+                    <button
+                      key={starValue}
+                      type="button"
+                      role="radio"
+                      aria-checked={checked}
+                      aria-label={`${starValue} estrellas: ${getClientRatingLabel(starValue)}`}
+                      data-testid={`client-confirm-star-${starValue}`}
+                      onMouseEnter={() => setClientConfirmHover(starValue)}
+                      onMouseLeave={() => setClientConfirmHover(0)}
+                      onClick={() => {
+                        setClientConfirmRating(starValue);
+                        if (clientConfirmError) setClientConfirmError(null);
+                      }}
+                      className={`min-h-[44px] min-w-[44px] px-3 rounded-xl border inline-flex items-center justify-center gap-1.5 text-xs font-semibold transition-colors cursor-pointer ${
+                        checked
+                          ? 'bg-amber-50 border-amber-400 text-amber-900'
+                          : active
+                          ? 'bg-amber-50/60 border-amber-300 text-amber-800'
+                          : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                      }`}
+                    >
+                      <Star
+                        className={`w-4 h-4 ${
+                          active ? 'fill-amber-400 text-amber-500' : 'text-slate-400'
+                        }`}
+                        aria-hidden="true"
+                      />
+                      <span className="tabular-nums">{starValue}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Pregunta 3: Comentario opcional */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <label
+                  htmlFor="client-closure-feedback"
+                  className="text-xs font-semibold text-[#0B192C]"
+                >
+                  Comentario sobre la atención (opcional)
+                </label>
+                <span className="text-[11px] text-slate-500 tabular-nums">
+                  {clientConfirmFeedback.length}/300
+                </span>
+              </div>
+              <textarea
+                id="client-closure-feedback"
+                rows={2}
+                maxLength={300}
+                value={clientConfirmFeedback}
+                onChange={(e) => setClientConfirmFeedback(e.target.value.slice(0, 300))}
+                placeholder="Cuéntanos cómo fue tu experiencia o detalla si necesitas una revisión adicional..."
+                className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-xs text-[#0B192C] placeholder:text-slate-500 focus:border-[#2563EB] focus:outline-none"
+              />
+            </div>
+
+            {clientConfirmError && (
+              <p role="alert" className="text-xs font-semibold text-red-700">
+                {clientConfirmError}
+              </p>
+            )}
+
+            {/* Pregunta 1: Confirmación de resolución o solicitud de revisión */}
+            <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <div className="flex-1 relative">
+                <button
+                  type="button"
+                  data-testid="confirm-resolution-capture-btn"
+                  disabled={isSubmittingClientConfirm}
+                  onClick={async () => {
+                    if (clientConfirmRating < 1 || clientConfirmRating > 5) {
+                      setClientConfirmError(
+                        'Selecciona una calificación de 1 a 5 estrellas antes de confirmar la resolución.'
+                      );
+                      return;
+                    }
+                    setClientConfirmError(null);
+                    setIsSubmittingClientConfirm(true);
+                    setIsExpandingSuccess(true);
+                    try {
+                      await new Promise((r) => setTimeout(r, 800));
+                      const ok = await onConfirmClientResolution?.(
+                        ticket.id,
+                        clientConfirmRating,
+                        clientConfirmFeedback.trim()
+                      );
+                      if (ok === false) {
+                        setClientConfirmError(
+                          'No se pudo completar la confirmación. Inténtalo nuevamente.'
+                        );
+                      }
+                    } finally {
+                      setIsExpandingSuccess(false);
+                      setIsSubmittingClientConfirm(false);
+                    }
+                  }}
+                  className="w-full min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-400 text-white text-xs sm:text-sm font-bold shadow-sm transition-colors cursor-pointer"
+                >
+                  {isSubmittingClientConfirm ? (
+                    <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" />
+                  )}
+                  <span>Sí, mi incidencia quedó resuelta</span>
+                </button>
+
+                <AnimatePresence>
+                  {isExpandingSuccess && (
+                    <motion.div
+                      initial={{ scale: 0.1, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      exit={{ scale: 1.15, opacity: 0 }}
+                      transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+                      className="absolute inset-0 rounded-xl bg-emerald-600 flex items-center justify-center text-white shadow-md z-20"
+                    >
+                      <motion.div
+                        initial={{ scale: 0, rotate: -30 }}
+                        animate={{ scale: 1, rotate: 0 }}
+                        transition={{ delay: 0.08, type: 'spring', stiffness: 400, damping: 18 }}
+                        className="flex items-center gap-2 text-xs sm:text-sm font-bold"
+                      >
+                        <Check className="w-5 h-5 stroke-[3]" />
+                        <span>¡Resuelto con éxito!</span>
+                      </motion.div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              <button
+                type="button"
+                data-testid="report-problem-persists-btn"
+                disabled={isSubmittingClientConfirm}
+                onClick={async () => {
+                  setClientConfirmError(null);
+                  setIsSubmittingClientConfirm(true);
+                  try {
+                    const ok = await onReportProblemPersists?.(
+                      ticket.id,
+                      clientConfirmFeedback.trim()
+                    );
+                    if (ok !== false) {
+                      setClientEscalatedNotice(
+                        'Auto-captura detenida. Tu caso volvió a «En curso» y fue escalado al equipo de supervisión sin cobro hasta resolverlo.'
+                      );
+                    }
+                  } finally {
+                    setIsSubmittingClientConfirm(false);
+                  }
+                }}
+                className="min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 disabled:bg-slate-100 text-[#0B192C] border border-slate-300 text-xs font-semibold transition-colors cursor-pointer"
+              >
+                <span>No, el problema persiste (Solicitar revisión)</span>
+              </button>
+            </div>
+          </section>
+        )}
 
         {/* Sticky Active Session Bar (Technician + Elapsed Time + Red Cut Access Button) */}
         {isSessionActiveBarVisible && (
@@ -984,7 +1294,7 @@ export function ConnectionRoom({
                   key: 'pay' as const,
                   num: 1,
                   label: 'Pagar',
-                  done: ticket.payment_status === 'paid',
+                  done: isPaymentSecured,
                 },
                 {
                   key: 'download' as const,
@@ -1327,22 +1637,26 @@ export function ConnectionRoom({
                   <div className="flex items-center gap-3 min-w-0">
                     <span
                       className={`w-7 h-7 rounded-full text-xs font-bold flex items-center justify-center shrink-0 tabular-nums ${
-                        ticket.payment_status === 'paid'
+                        isPaymentSecured
                           ? 'bg-emerald-600 text-white'
                           : expandedStep === 'pay'
                           ? 'bg-[#2563EB] text-white'
                           : 'bg-slate-200 text-slate-700'
                       }`}
                     >
-                      {ticket.payment_status === 'paid' ? '✓' : '1'}
+                      {isPaymentSecured ? '✓' : '1'}
                     </span>
                     <div className="min-w-0">
                       <p className="text-sm font-bold text-[#0B192C] truncate">
-                        Paso 1 · Confirmar pago
+                        Paso 1 · {isMonthlyPlan ? 'Confirmar pago' : 'Pre-autorizar pago'}
                       </p>
                       <p className="text-xs text-slate-600 truncate tabular-nums">
                         {ticket.payment_status === 'paid'
-                          ? `Pagado y verificado · USD $${displayedPaidUsd.toFixed(2)}`
+                          ? `Pagado y capturado · USD $${displayedPaidUsd.toFixed(2)}`
+                          : ticket.payment_status === 'authorized'
+                          ? `Pre-autorizado · Retenido hasta confirmar cierre (USD $${displayedPaidUsd.toFixed(2)})`
+                          : ticket.payment_status === 'voided'
+                          ? 'Retención anulada ($0 cobrado)'
                           : `Pendiente · USD $${computedTotalUsd.toFixed(2)} (${ticket.service_tier})`}
                       </p>
                     </div>
@@ -1352,10 +1666,16 @@ export function ConnectionRoom({
                       className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${
                         ticket.payment_status === 'paid'
                           ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                          : ticket.payment_status === 'authorized'
+                          ? 'bg-blue-50 text-[#1D4ED8] border border-blue-200'
                           : 'bg-amber-50 text-amber-800 border border-amber-200'
                       }`}
                     >
-                      {ticket.payment_status === 'paid' ? 'Completado' : 'Activo'}
+                      {ticket.payment_status === 'paid'
+                        ? 'Completado'
+                        : ticket.payment_status === 'authorized'
+                        ? 'Pre-autorizado'
+                        : 'Activo'}
                     </span>
                     <ChevronDown
                       className={`w-4 h-4 text-slate-500 transition-transform ${
@@ -2256,8 +2576,32 @@ export function ConnectionRoom({
               </div>
             </details>
           </div>
+
+          {/* Timeline de Transparencia de Caja y Estados */}
+          <div className="mt-6">
+            <ConnectionTimeline ticket={ticket} />
+          </div>
         </div>
       </div>
+
+      {/* Expanding Green Checkmark Success Transition Overlay */}
+      {isExpandingSuccess && (
+        <div className="fixed inset-0 z-50 bg-emerald-950/40 backdrop-blur-md flex items-center justify-center transition-all duration-300">
+          <div className="flex flex-col items-center justify-center p-8 bg-white rounded-3xl shadow-2xl border border-emerald-200 animate-scale-up-check space-y-4 max-w-sm mx-4">
+            <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-emerald-600 shadow-xl shadow-emerald-600/40 flex items-center justify-center text-white">
+              <Check className="w-10 h-10 sm:w-12 sm:h-12 stroke-[3]" />
+            </div>
+            <div className="text-center space-y-1">
+              <h4 className="text-base sm:text-lg font-bold text-[#0B192C]">
+                ¡Incidencia resuelta con éxito!
+              </h4>
+              <p className="text-xs text-slate-600">
+                Procesando captura de pago segura...
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

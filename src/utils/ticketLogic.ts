@@ -6,8 +6,10 @@ import type {
   DispatchMode,
   IssueCategory,
   MemberTierType,
+  NetTechnicianPayoutBreakdown,
   OperatingSystem,
   OrganizationMember,
+  PaymentGateway,
   PaymentStatus,
   RemoteSessionRecord,
   ServiceTier,
@@ -450,15 +452,17 @@ const ACTIVE_STATUS_SLA_RANK: Record<TicketStatus, number> = {
   ready_to_connect: 0,
   in_progress: 1,
   waiting_payment: 2,
-  resolved: 3,
+  pending_client_confirmation: 3,
+  resolved: 4,
+  refunded: 5,
 };
 
 export function sortTicketsByUrgencyAndSla(
   tickets: SupportTicket[]
 ): SupportTicket[] {
   return [...tickets].sort((a, b) => {
-    const aResolved = a.status === 'resolved' ? 1 : 0;
-    const bResolved = b.status === 'resolved' ? 1 : 0;
+    const aResolved = a.status === 'resolved' || a.status === 'refunded' ? 1 : 0;
+    const bResolved = b.status === 'resolved' || b.status === 'refunded' ? 1 : 0;
     if (aResolved !== bResolved) {
       return aResolved - bResolved;
     }
@@ -516,8 +520,12 @@ export function getStatusBadgeClass(status: TicketStatus): string {
       return 'bg-[#D1FAE5] text-emerald-800';
     case 'waiting_payment':
       return 'bg-[#FEF3C7] text-amber-800';
+    case 'pending_client_confirmation':
+      return 'bg-indigo-100 text-indigo-800';
     case 'resolved':
       return 'bg-[#D1FAE5] text-emerald-800';
+    case 'refunded':
+      return 'bg-slate-200 text-slate-700';
   }
 }
 
@@ -854,7 +862,9 @@ export function canClaimTicket(ticket: SupportTicket): boolean {
   return (
     ticket.assigned_to === null &&
     ticket.assigned_technician_id === null &&
-    ticket.status !== 'resolved'
+    ticket.status !== 'resolved' &&
+    ticket.status !== 'refunded' &&
+    ticket.status !== 'pending_client_confirmation'
   );
 }
 
@@ -920,8 +930,12 @@ export function getTicketStatusLabel(status: TicketStatus): string {
       return 'Listo para conectar';
     case 'in_progress':
       return 'En curso';
+    case 'pending_client_confirmation':
+      return 'Esperando confirmación';
     case 'resolved':
       return 'Resuelto';
+    case 'refunded':
+      return 'Anulado / Reembolsado';
   }
 }
 
@@ -929,8 +943,12 @@ export function getPaymentStatusLabel(status: PaymentStatus): string {
   switch (status) {
     case 'pending':
       return 'Pendiente';
+    case 'authorized':
+      return 'Pre-autorizado';
     case 'paid':
       return 'Pagado';
+    case 'voided':
+      return 'Anulado ($0)';
     case 'refunded':
       return 'Reembolsado';
   }
@@ -1071,6 +1089,109 @@ export function getTechnicianCommissionTier(
   monthlyResolvedCount: number
 ): TechnicianCommissionTier {
   return getConfiguredCommissionTier(monthlyResolvedCount, getActiveBusinessConfig());
+}
+
+function roundUsdCents(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Estima la comisión de pasarela por transacción capturada:
+ * - Stripe / Google Pay: 2.9% + $0.30
+ * - PayPal: 5.4% + $0.30
+ * - Fallback conservador: 4.5% + $0.30
+ */
+export function estimateGatewayFeeUsd(
+  grossUsd: number,
+  gateway: PaymentGateway | string = 'stripe'
+): number {
+  if (!Number.isFinite(grossUsd) || grossUsd <= 0) return 0;
+  const normalized = String(gateway || 'stripe').toLowerCase();
+  if (normalized === 'stripe' || normalized === 'google_pay') {
+    return roundUsdCents(grossUsd * 0.029 + 0.3);
+  }
+  if (normalized === 'paypal') {
+    return roundUsdCents(grossUsd * 0.054 + 0.3);
+  }
+  return roundUsdCents(grossUsd * 0.045 + 0.3);
+}
+
+/**
+ * Calcula la liquidación del especialista estrictamente sobre el ingreso neto
+ * tras comisiones de pasarela (ADR-06), garantizando suma exacta al centavo:
+ * technicianNetUsd + platformNetUsd === netAmountUsd.
+ */
+export function calculateNetTechnicianPayout(
+  grossUsd: number,
+  monthlyResolvedCount: number,
+  gateway: PaymentGateway = 'stripe'
+): NetTechnicianPayoutBreakdown {
+  const safeGross = Number.isFinite(grossUsd) && grossUsd > 0 ? roundUsdCents(grossUsd) : 0;
+  const gatewayFeeUsd = estimateGatewayFeeUsd(safeGross, gateway);
+  const netAmountUsd = Math.max(0, roundUsdCents(safeGross - gatewayFeeUsd));
+  const tier = getTechnicianCommissionTier(monthlyResolvedCount);
+  const commissionPercent: 65 | 75 | 80 | 85 =
+    tier.commissionPercent === 85
+      ? 85
+      : tier.commissionPercent === 80
+        ? 80
+        : tier.commissionPercent === 75
+          ? 75
+          : 65;
+  const technicianNetUsd = roundUsdCents((netAmountUsd * commissionPercent) / 100);
+  const platformNetUsd = roundUsdCents(netAmountUsd - technicianNetUsd);
+
+  return {
+    grossUsd: safeGross,
+    gateway,
+    gatewayFeeUsd,
+    netAmountUsd,
+    commissionPercent,
+    technicianNetUsd,
+    platformNetUsd,
+  };
+}
+
+export function computeUpdatedTechnicianRating(
+  currentRating: number,
+  previousRatedCount: number,
+  newRating: number
+): number {
+  const clampedNew = Math.min(5, Math.max(1, Math.round(newRating)));
+  const safePrevCount = Math.max(0, Math.floor(previousRatedCount));
+  if (safePrevCount === 0 || !Number.isFinite(currentRating) || currentRating <= 0) {
+    return clampedNew;
+  }
+  const next = (currentRating * safePrevCount + clampedNew) / (safePrevCount + 1);
+  return Math.round((next + Number.EPSILON) * 100) / 100;
+}
+
+export function formatPublicTechnicianShortName(
+  fullName: string | null | undefined
+): string {
+  const cleaned = (fullName ?? '').trim().replace(/\s+/g, ' ');
+  if (!cleaned) return 'Especialista verificado';
+  const parts = cleaned.split(' ');
+  if (parts.length === 1) return parts[0];
+  const initial = parts[1].charAt(0).toUpperCase();
+  return `${parts[0]} ${initial}.`;
+}
+
+export function getClientRatingLabel(rating: number): string {
+  switch (Math.round(rating)) {
+    case 1:
+      return 'Deficiente';
+    case 2:
+      return 'Regular';
+    case 3:
+      return 'Aceptable';
+    case 4:
+      return 'Muy bueno';
+    case 5:
+      return 'Excelente';
+    default:
+      return 'Selecciona una calificación';
+  }
 }
 
 export function parseAppRoute(pathname: string): {

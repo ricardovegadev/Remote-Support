@@ -582,21 +582,21 @@ export function TechnicianApplyView({
               <TechnicianEarningsCalculator />
 
               <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-xl p-3.5 leading-relaxed">
-                <strong>Nota de transparencia:</strong> El porcentaje mensual se aplica sobre
-                el ingreso neto de cada incidencia resuelta tras descontar la comisión de la
-                pasarela de pago (
+                <strong>Nota de transparencia y condiciones de pago:</strong> La colaboración se
+                realiza bajo modalidad de <strong>contratista independiente</strong>. El porcentaje
+                de comisión (65 % / 75 % / 80 % / 85 %) se aplica estrictamente sobre el{' '}
+                <strong>ingreso neto de cada incidencia confirmada</strong> tras descontar la
+                comisión de la pasarela de pago (referencia:{' '}
                 <span className="tabular-nums font-medium">
-                  {businessConfig.feeConfig.paymentFeePercent}% + $
-                  {businessConfig.feeConfig.paymentFeeFixedUsd.toFixed(2)} USD
+                  Stripe/Google Pay 2.9% + $0.30 USD · PayPal 5.4% + $0.30 USD
                 </span>
-                ) y el costo operativo por ticket (
-                <span className="tabular-nums font-medium">
-                  ${businessConfig.feeConfig.operationalCostUsd.toFixed(2)} USD
-                </span>
-                ). Requisitos obligatorios: ser mayor de 18 años (+18), verificación de
-                identidad (KYC), período de prueba supervisado, firma del NDA interno (
-                <span className="font-mono">{NDA_TECH_VERSION}</span>) y evaluación
-                cronometrada de 15 minutos.
+                ; si la retención se anula por no resolución, no genera comisión). Tras la{' '}
+                <strong>confirmación del cliente</strong> (o auto-captura a las 48 h), cada ingreso
+                pasa por una <strong>custodia de garantía de 48 horas</strong> y se paga en{' '}
+                <strong>lotes semanales</strong>. Requisitos obligatorios: mayor de 18 años (+18),
+                verificación de identidad (KYC), período supervisado, firma del NDA interno (
+                <span className="font-mono">{NDA_TECH_VERSION}</span>) y evaluación cronometrada de
+                15 minutos.
               </p>
 
               <div className="flex flex-wrap items-center justify-between gap-4 pt-2 border-t border-slate-100">
@@ -923,7 +923,7 @@ export function TechnicianApplyView({
 
             <div className="rounded-2xl bg-emerald-50/70 border border-emerald-200 p-5 space-y-3">
               <p className="text-xs font-bold text-emerald-950">
-                Resumen vinculante de tus 4 obligaciones de confidencialidad:
+                Resumen vinculante de tus obligaciones de confidencialidad y condiciones de pago:
               </p>
               <ul className="space-y-2 text-xs text-slate-700 leading-relaxed list-disc pl-5">
                 <li>
@@ -950,6 +950,14 @@ export function TechnicianApplyView({
                   <strong>Cláusula de no elusión (Non-Circumvention):</strong> prohibido
                   contactar o cobrar por fuera de la plataforma a clientes conocidos vía
                   Remote Support 365.
+                </li>
+                <li>
+                  <strong>Contratista independiente, cálculo neto y liquidación semanal:</strong>{' '}
+                  el especialista actúa como prestador independiente; su comisión se calcula sobre
+                  el <strong>ingreso neto tras comisiones de pasarela</strong>, tras la{' '}
+                  <strong>confirmación del cliente</strong> y una{' '}
+                  <strong>custodia de garantía de 48 horas</strong>, con liquidación mediante{' '}
+                  <strong>lotes semanales</strong>.
                 </li>
               </ul>
 

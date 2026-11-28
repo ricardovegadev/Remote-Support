@@ -41,9 +41,11 @@ import type {
   Organization,
   OrganizationMember,
   RemoteSessionRecord,
+  ResolutionOutcome,
   ServiceTier,
   SupportTicket,
   TechnicianAvailability,
+  TechnicianPayoutRecord,
   TechnicianSpecialty,
   TicketMessage,
   WizardDraft,
@@ -68,25 +70,46 @@ import { recordTelemetryEvent } from '../services/telemetryService';
 async function resolveOperatorSessionProfile(
   supabase: NonNullable<ReturnType<typeof getSupabaseClient>>,
   userId: string
-): Promise<{ allowed: boolean; profileRole: string | null }> {
+): Promise<{
+  allowed: boolean;
+  profileRole: string | null;
+  memberRole: OrganizationRole | null;
+}> {
   const [memberResult, profileResult] = await Promise.all([
     supabase
       .from('organization_members')
-      .select('id')
+      .select('id, role, status')
       .eq('user_id', userId)
-      .eq('status', 'active')
-      .limit(1),
+      .limit(5),
     supabase.from('profiles').select('role').eq('id', userId).maybeSingle(),
   ]);
   const profileRole =
     !profileResult.error && typeof profileResult.data?.role === 'string'
       ? profileResult.data.role
       : null;
-  const allowed = Boolean(
-    (!memberResult.error && memberResult.data?.length) ||
-    profileRole === 'admin'
-  );
-  return { allowed, profileRole };
+
+  if (!memberResult.error && memberResult.data && memberResult.data.length > 0) {
+    const activeRow = memberResult.data.find((m) => m.status === 'active');
+    if (!activeRow) {
+      return { allowed: false, profileRole, memberRole: null };
+    }
+    const rawRole = activeRow.role;
+    const memberRole: OrganizationRole =
+      rawRole === 'owner' ||
+      rawRole === 'admin' ||
+      rawRole === 'supervisor' ||
+      rawRole === 'technician'
+        ? rawRole
+        : 'technician';
+    return { allowed: true, profileRole, memberRole };
+  }
+
+  const allowed = profileRole === 'admin';
+  return {
+    allowed,
+    profileRole,
+    memberRole: allowed ? 'owner' : null,
+  };
 }
 import type { LegalDocTab } from './LegalDocsModal';
 import { DashboardSidebar } from './DashboardSidebar';
@@ -104,6 +127,12 @@ import {
 import { TicketsInboxView } from './dashboard/TicketsInboxView';
 import { WorkforceDispatchView } from './dashboard/WorkforceDispatchView';
 import { TechnicianEarningsCard } from './dashboard/TechnicianEarningsCard';
+import { lazy, Suspense } from 'react';
+const TechnicianEarningsChart = lazy(() =>
+  import('./dashboard/TechnicianEarningsChart').then((m) => ({
+    default: m.TechnicianEarningsChart,
+  }))
+);
 
 interface TechPortalViewProps {
   organizations: Organization[];
@@ -116,12 +145,22 @@ interface TechPortalViewProps {
   sessions: RemoteSessionRecord[];
   aiAgents: AiAgentConfig[];
   auditLogs: AuditLogEntry[];
+  payouts?: TechnicianPayoutRecord[];
   persistenceError: string | null;
   onDismissPersistenceError: () => void;
   onStartSession: (ticketId: string) => Promise<void>;
   onMarkPaymentPaid: (ticketId: string) => Promise<boolean | void>;
   onMarkHumanReviewed?: (ticketId: string, reviewerName?: string) => Promise<void>;
   onResolveTicket: (ticketId: string, resolutionNotes: string) => Promise<void>;
+  onAutoCaptureTicket?: (ticketId: string) => Promise<void>;
+  onVoidAuthorizationTicket?: (
+    ticketId: string,
+    outcome: Exclude<ResolutionOutcome, 'resolved'>
+  ) => Promise<void>;
+  onSettleTechnicianPayouts?: (
+    technicianId: string,
+    batchReference: string
+  ) => void;
   onReopenTicket: (ticketId: string) => Promise<void>;
   onSendTechnicianMessage: (
     ticketId: string,
@@ -149,6 +188,19 @@ interface TechPortalViewProps {
     member_type: MemberTierType;
     agreed_ticket_rate_usd: number;
     specialties: TechnicianSpecialty[];
+  }) => void;
+  onUpdateMemberRole?: (
+    memberId: string,
+    nextRole: OrganizationRole
+  ) => Promise<{ ok: boolean; error?: string }> | void;
+  onToggleMemberStatus?: (
+    memberId: string,
+    nextStatus: 'active' | 'suspended'
+  ) => Promise<{ ok: boolean; error?: string }> | void;
+  onRecordTeamInviteAudit?: (summary: {
+    fullName: string;
+    email: string;
+    role: string;
   }) => void;
   onToggleAiAgent: (agentId: string) => void;
   onToggleAiGovernanceRule: (agentId: string, ruleId: string) => void;
@@ -200,12 +252,16 @@ export function TechPortalView({
   sessions,
   aiAgents,
   auditLogs,
+  payouts = [],
   persistenceError,
   onDismissPersistenceError,
   onStartSession,
   onMarkPaymentPaid,
   onMarkHumanReviewed,
   onResolveTicket,
+  onAutoCaptureTicket,
+  onVoidAuthorizationTicket,
+  onSettleTechnicianPayouts,
   onReopenTicket,
   onSendTechnicianMessage,
   onInspectConnectionRoom,
@@ -213,6 +269,9 @@ export function TechPortalView({
   onUpdateMemberAvailability,
   onChangeDispatchMode,
   onInviteMember,
+  onUpdateMemberRole,
+  onToggleMemberStatus,
+  onRecordTeamInviteAudit,
   onToggleAiAgent,
   onToggleAiGovernanceRule,
   onSaveOrgSettings,
@@ -231,6 +290,8 @@ export function TechPortalView({
   const [operatorEmail, setOperatorEmail] = useState<string>('');
   const [operatorUserId, setOperatorUserId] = useState<string | null>(null);
   const [operatorProfileRole, setOperatorProfileRole] = useState<string | null>(null);
+  const [operatorMemberRole, setOperatorMemberRole] =
+    useState<OrganizationRole | null>(null);
 
   const [authTab, setAuthTab] = useState<'login' | 'signup'>('login');
   const [signupFullName, setSignupFullName] = useState('');
@@ -310,12 +371,14 @@ export function TechPortalView({
       if (!access.allowed) {
         setOperatorUserId(null);
         setOperatorProfileRole(null);
-        setAuthError('Tu cuenta actual no tiene una membresía técnica activa. Inicia sesión con una cuenta de operador o solicita una invitación al administrador.');
+        setOperatorMemberRole(null);
+        setAuthError('Tu cuenta actual no tiene una membresía técnica activa o su acceso está suspendido. Inicia sesión con una cuenta de operador activa.');
         setAuthStatus('unauthenticated');
         return;
       }
       setOperatorUserId(user.id);
       setOperatorProfileRole(access.profileRole);
+      setOperatorMemberRole(access.memberRole);
       setOperatorEmail(user.email ?? 'tecnico@remotesupport365.com');
       setAuthError(null);
       setAuthStatus('authenticated');
@@ -326,6 +389,7 @@ export function TechPortalView({
       if (error || !data.session) {
         setOperatorUserId(null);
         setOperatorProfileRole(null);
+        setOperatorMemberRole(null);
         setAuthStatus('unauthenticated');
       } else {
         void acceptSession(data.session.user);
@@ -341,6 +405,7 @@ export function TechPortalView({
         } else {
           setOperatorUserId(null);
           setOperatorProfileRole(null);
+          setOperatorMemberRole(null);
           setAuthStatus('unauthenticated');
         }
       }
@@ -378,9 +443,9 @@ export function TechPortalView({
     );
   const operatorDisplayName = matchedMember?.full_name ?? 'Operador';
   const operatorRole: OrganizationRole =
-    operatorProfileRole === 'admin'
-      ? 'owner'
-      : (matchedMember?.role ?? 'technician');
+    matchedMember?.role ??
+    operatorMemberRole ??
+    (operatorProfileRole === 'admin' ? 'owner' : 'technician');
   const orgDevices = devices.filter((d) => d.organization_id === activeOrg.id);
   const orgSessions = sessions.filter(
     (s) => s.organization_id === activeOrg.id
@@ -1115,6 +1180,18 @@ export function TechPortalView({
                 tickets={orgTickets}
                 technicianName={operatorDisplayName}
               />
+              <Suspense
+                fallback={
+                  <div className="p-8 text-center text-xs text-slate-500 bg-white border border-[#E5E9F2] rounded-2xl">
+                    Cargando gráfico financiero...
+                  </div>
+                }
+              >
+                <TechnicianEarningsChart
+                  tickets={orgTickets}
+                  payouts={payouts}
+                />
+              </Suspense>
             </div>
           )}
 
@@ -1124,6 +1201,7 @@ export function TechPortalView({
               tickets={orgTickets}
               messages={messages}
               aiAgents={orgAiAgents}
+              operatorRole={operatorRole}
               selectedTicketId={selectedTicketId}
               externalSearchQuery={globalSearchQuery}
               onSelectTicket={setSelectedTicketId}
@@ -1135,6 +1213,8 @@ export function TechPortalView({
                   : undefined
               }
               onResolveTicket={onResolveTicket}
+              onAutoCaptureTicket={onAutoCaptureTicket}
+              onVoidAuthorizationTicket={onVoidAuthorizationTicket}
               onReopenTicket={onReopenTicket}
               onSendTechnicianMessage={onSendTechnicianMessage}
               onInspectConnectionRoom={onInspectConnectionRoom}
@@ -1157,6 +1237,7 @@ export function TechPortalView({
               organization={activeOrg}
               members={orgMembers}
               tickets={orgTickets}
+              payouts={payouts}
               currentTechId={activeTechId}
               operatorRole={operatorRole}
               onSelectActiveTech={setActiveTechId}
@@ -1164,6 +1245,8 @@ export function TechPortalView({
               onChangeDispatchMode={onChangeDispatchMode}
               onInviteMember={onInviteMember}
               onClaimTicketAtomically={onClaimTicketAtomically}
+              onSettleTechnicianPayouts={onSettleTechnicianPayouts}
+              onRecordTeamInviteAudit={onRecordTeamInviteAudit}
             />
           )}
 
@@ -1193,7 +1276,9 @@ export function TechPortalView({
               operatorRole={operatorRole}
               onUpdateMemberRole={(memberId, nextRole) => {
                 void (async () => {
-                  if (supabaseConfigured) {
+                  if (onUpdateMemberRole) {
+                    await onUpdateMemberRole(memberId, nextRole);
+                  } else if (supabaseConfigured) {
                     const supabase = getSupabaseClient();
                     if (supabase) {
                       await supabase
@@ -1219,7 +1304,13 @@ export function TechPortalView({
               organization={activeOrg}
               supabaseConfigured={supabaseConfigured}
               operatorEmail={operatorEmail}
+              operatorRole={operatorRole}
+              operatorUserId={operatorUserId}
+              members={orgMembers}
               onSaveSettings={onSaveOrgSettings}
+              onUpdateMemberRole={onUpdateMemberRole}
+              onToggleMemberStatus={onToggleMemberStatus}
+              onRecordTeamInviteAudit={onRecordTeamInviteAudit}
               onOpenSqlModal={() => setSqlModalOpen(true)}
               onSignOut={() => void handleSignOut()}
               onExportOrgData={onExportOrgData}

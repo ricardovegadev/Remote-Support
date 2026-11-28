@@ -13,7 +13,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist node_modules/.vite server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/utils/ticketLogic.test.ts src/server/server.test.ts"
+    "test": "tsx --test src/utils/ticketLogic.test.ts src/server/server.test.ts scripts/factory-risk-gate.test.mjs",
+    "factory:gate": "node scripts/factory-risk-gate.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -21,10 +22,12 @@
     "@supabase/supabase-js": "^2.119.0",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
+    "framer-motion": "^14.14.0",
     "lucide-react": "^0.546.0",
     "nodemailer": "^10.6.1",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
+    "recharts": "^3.11.2",
     "stripe": "^23.1.0"
   },
   "devDependencies": {

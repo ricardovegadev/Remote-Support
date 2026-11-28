@@ -383,3 +383,22 @@
     background: transparent;
   }
 }
+
+@keyframes scaleUpCheck {
+  0% {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+  65% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-scale-up-check {
+  animation: scaleUpCheck 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}

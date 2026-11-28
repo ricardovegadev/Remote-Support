@@ -2,17 +2,25 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   Activity,
   CheckCircle2,
+  Copy,
   Cpu,
   CreditCard,
   Database,
   Download,
+  Eye,
+  EyeOff,
   Globe,
+  KeyRound,
+  Link2,
   Lock,
   RefreshCw,
   ShieldAlert,
   ShieldCheck,
   Trash2,
+  UserCheck,
+  UserPlus,
   Users,
+  UserX,
 } from 'lucide-react';
 import { FEATURE_FLAGS } from '../../config/features';
 import {
@@ -31,7 +39,10 @@ import type {
   SupportTicket,
 } from '../../types/support';
 import {
+  canChangeTeamMemberRole,
+  canInviteTeamRole,
   canManageMemberRole,
+  canToggleTeamMemberStatus,
   getRoleLabel,
   hasPermission,
   RBAC_PERMISSION_CATALOG,
@@ -39,9 +50,13 @@ import {
 } from '../../utils/rbac';
 import { getConfiguredTierPriceUsd } from '../../config/businessConfig';
 import { useBusinessConfig } from '../../hooks/useBusinessConfig';
-import { getServiceTierPriceUsd } from '../../utils/ticketLogic';
+import {
+  getServiceTierPriceUsd,
+  isValidEmail,
+} from '../../utils/ticketLogic';
 import { getSupabaseClient, isSupabaseConfigured } from '../../lib/supabaseClient';
 import { supportAdapter } from '../../services/supportAdapter';
+import { createDirectTeamInvite } from '../../services/technicianApplicationService';
 
 export function AnalyticsView({
   tickets,
@@ -545,7 +560,8 @@ export function SecurityAuditView({
                         Owner
                       </option>
                       <option value="admin">Admin</option>
-                      <option value="technician">Técnico</option>
+                      <option value="supervisor">Supervisor</option>
+                      <option value="technician">Especialista</option>
                     </select>
                   </div>
                 </div>
@@ -621,11 +637,27 @@ interface OrganizationSettingsViewProps {
   organization: Organization;
   supabaseConfigured: boolean;
   operatorEmail: string;
+  operatorRole?: OrganizationRole;
+  operatorUserId?: string | null;
+  members?: OrganizationMember[];
   onSaveSettings: (
     patch: Partial<
       Pick<Organization, 'name' | 'rustdesk_relay_domain' | 'payment_gateway'>
     >
   ) => void;
+  onUpdateMemberRole?: (
+    memberId: string,
+    nextRole: OrganizationRole
+  ) => Promise<{ ok: boolean; error?: string }> | void;
+  onToggleMemberStatus?: (
+    memberId: string,
+    nextStatus: 'active' | 'suspended'
+  ) => Promise<{ ok: boolean; error?: string }> | void;
+  onRecordTeamInviteAudit?: (summary: {
+    fullName: string;
+    email: string;
+    role: string;
+  }) => void;
   onOpenSqlModal: () => void;
   onSignOut: () => void;
   onExportOrgData?: (verifiedExportPayload?: unknown) => void;
@@ -636,7 +668,13 @@ export function OrganizationSettingsView({
   organization,
   supabaseConfigured,
   operatorEmail,
+  operatorRole = 'technician',
+  operatorUserId = null,
+  members = [],
   onSaveSettings,
+  onUpdateMemberRole,
+  onToggleMemberStatus,
+  onRecordTeamInviteAudit,
   onOpenSqlModal,
   onSignOut,
   onExportOrgData,
@@ -660,11 +698,47 @@ export function OrganizationSettingsView({
   const [otpBusy, setOtpBusy] = useState(false);
   const [otpError, setOtpError] = useState<string | null>(null);
 
+  // Seguridad de mi cuenta (Cambio de contraseña)
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [passwordBusy, setPasswordBusy] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null);
+
+  // Equipo y Roles (Owner / Admin)
+  const [inviteFullName, setInviteFullName] = useState('');
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<'admin' | 'supervisor'>('supervisor');
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [generatedInvite, setGeneratedInvite] = useState<{
+    url: string;
+    fullName: string;
+    email: string;
+    role: 'admin' | 'supervisor';
+    expiresAt?: string;
+  } | null>(null);
+  const [copiedInviteUrl, setCopiedInviteUrl] = useState(false);
+  const [memberActionBusyId, setMemberActionBusyId] = useState<string | null>(null);
+  const [teamFeedback, setTeamFeedback] = useState<{
+    type: 'ok' | 'error';
+    message: string;
+  } | null>(null);
+
+  const canViewTeamSection =
+    operatorRole === 'owner' || operatorRole === 'admin';
+  const isOwner = operatorRole === 'owner';
+  const canInviteAdminOrSupervisor = canInviteTeamRole(operatorRole, 'admin');
+
   useEffect(() => {
     setOrgName(organization.name);
     setRelayDomain(organization.rustdesk_relay_domain);
     setGateway(organization.payment_gateway);
     setSavedNotice(false);
+    setGeneratedInvite(null);
+    setTeamFeedback(null);
   }, [
     organization.id,
     organization.name,
@@ -682,6 +756,222 @@ export function OrganizationSettingsView({
     });
     setSavedNotice(true);
     window.setTimeout(() => setSavedNotice(false), 2500);
+  };
+
+  const handlePasswordUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError(null);
+    setPasswordSuccess(null);
+
+    if (newPassword.length < 8) {
+      setPasswordError('La nueva contraseña debe tener al menos 8 caracteres.');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setPasswordError('Las contraseñas no coinciden. Verifica ambos campos.');
+      return;
+    }
+
+    if (!supabaseConfigured) {
+      setPasswordSuccess(
+        'Modo local activo: la validación pasó correctamente. Configura Supabase Auth para persistir el cambio de contraseña en la nube.'
+      );
+      setNewPassword('');
+      setConfirmNewPassword('');
+      return;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setPasswordError('No se pudo conectar con el servicio de autenticación.');
+      return;
+    }
+
+    setPasswordBusy(true);
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+      if (error) {
+        setPasswordError(
+          `No se pudo actualizar la contraseña: ${error.message}`
+        );
+        return;
+      }
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setPasswordSuccess(
+        'Contraseña actualizada correctamente. Tu sesión sigue protegida.'
+      );
+    } catch {
+      setPasswordError('Error de red al actualizar tu contraseña.');
+    } finally {
+      setPasswordBusy(false);
+    }
+  };
+
+  const handleTeamInviteSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setInviteError(null);
+    setCopiedInviteUrl(false);
+
+    if (!canInviteAdminOrSupervisor) {
+      setInviteError('Solo el propietario (Owner) puede invitar administradores o supervisores.');
+      return;
+    }
+    if (inviteFullName.trim().length < 2) {
+      setInviteError('Ingresa el nombre completo (mínimo 2 caracteres).');
+      return;
+    }
+    if (!isValidEmail(inviteEmail)) {
+      setInviteError('Ingresa un correo electrónico válido.');
+      return;
+    }
+
+    setInviteBusy(true);
+    try {
+      const res = await createDirectTeamInvite({
+        fullName: inviteFullName.trim(),
+        email: inviteEmail.trim().toLowerCase(),
+        role: inviteRole,
+        organizationId: organization.id,
+        actorRole: operatorRole,
+      });
+      if (!res.ok || !res.inviteUrl) {
+        setInviteError(
+          res.error ?? 'No se pudo generar el enlace de invitación.'
+        );
+        return;
+      }
+      setGeneratedInvite({
+        url: res.inviteUrl,
+        fullName: inviteFullName.trim(),
+        email: inviteEmail.trim().toLowerCase(),
+        role: inviteRole,
+        expiresAt: res.expiresAt,
+      });
+      onRecordTeamInviteAudit?.({
+        fullName: inviteFullName.trim(),
+        email: inviteEmail.trim().toLowerCase(),
+        role: inviteRole,
+      });
+      setInviteFullName('');
+      setInviteEmail('');
+    } finally {
+      setInviteBusy(false);
+    }
+  };
+
+  const handleCopyInviteLink = async () => {
+    if (!generatedInvite?.url) return;
+    try {
+      await navigator.clipboard.writeText(generatedInvite.url);
+      setCopiedInviteUrl(true);
+      window.setTimeout(() => setCopiedInviteUrl(false), 2500);
+    } catch {
+      setInviteError('No se pudo copiar automáticamente. Copia el enlace manualmente.');
+    }
+  };
+
+  const handleRoleChange = async (
+    member: OrganizationMember,
+    nextRole: OrganizationRole
+  ) => {
+    setTeamFeedback(null);
+    const isSelfOwner =
+      member.role === 'owner' ||
+      (Boolean(operatorUserId) && member.user_id === operatorUserId);
+    if (
+      isSelfOwner ||
+      !canChangeTeamMemberRole(operatorRole, member.role, nextRole)
+    ) {
+      setTeamFeedback({
+        type: 'error',
+        message: 'Bloqueo de seguridad: no está permitido degradar o modificar el rol del propietario (Owner).',
+      });
+      return;
+    }
+    if (!onUpdateMemberRole) return;
+    setMemberActionBusyId(member.id);
+    try {
+      const result = await onUpdateMemberRole(member.id, nextRole);
+      if (result && !result.ok) {
+        setTeamFeedback({
+          type: 'error',
+          message: result.error ?? 'No se pudo actualizar el rol.',
+        });
+      } else {
+        setTeamFeedback({
+          type: 'ok',
+          message: `Rol de ${member.full_name} actualizado a ${getRoleLabel(nextRole)}.`,
+        });
+      }
+    } finally {
+      setMemberActionBusyId(null);
+    }
+  };
+
+  const handleStatusToggle = async (member: OrganizationMember) => {
+    setTeamFeedback(null);
+    const isSelfOwner =
+      member.role === 'owner' ||
+      (Boolean(operatorUserId) && member.user_id === operatorUserId);
+    if (isSelfOwner || !canToggleTeamMemberStatus(operatorRole, member.role)) {
+      setTeamFeedback({
+        type: 'error',
+        message: 'Bloqueo de seguridad: no está permitido suspender al propietario (Owner).',
+      });
+      return;
+    }
+    if (!onToggleMemberStatus) return;
+    const nextStatus: 'active' | 'suspended' =
+      member.status === 'suspended' ? 'active' : 'suspended';
+    setMemberActionBusyId(member.id);
+    try {
+      const result = await onToggleMemberStatus(member.id, nextStatus);
+      if (result && !result.ok) {
+        setTeamFeedback({
+          type: 'error',
+          message: result.error ?? 'No se pudo cambiar el estado de acceso.',
+        });
+      } else {
+        setTeamFeedback({
+          type: 'ok',
+          message:
+            nextStatus === 'suspended'
+              ? `Acceso suspendido para ${member.full_name}.`
+              : `Acceso reactivado para ${member.full_name}.`,
+        });
+      }
+    } finally {
+      setMemberActionBusyId(null);
+    }
+  };
+
+  const roleBadgeLabel = (role: OrganizationRole) => {
+    switch (role) {
+      case 'owner':
+        return 'Owner';
+      case 'admin':
+        return 'Admin';
+      case 'supervisor':
+        return 'Supervisor';
+      case 'technician':
+        return 'Especialista';
+    }
+  };
+
+  const roleBadgeClass = (role: OrganizationRole) => {
+    switch (role) {
+      case 'owner':
+        return 'bg-[#0B192C] text-white';
+      case 'admin':
+        return 'bg-[#EFF6FF] text-[#1D4ED8] border border-[#BFDBFE]';
+      case 'supervisor':
+        return 'bg-amber-50 text-amber-900 border border-amber-200';
+      case 'technician':
+        return 'bg-slate-100 text-slate-700 border border-slate-200';
+    }
   };
 
   return (
@@ -818,6 +1108,426 @@ export function OrganizationSettingsView({
           )}
         </div>
       </form>
+
+      {/* Seguridad de mi cuenta — Cambio de contraseña */}
+      <form
+        data-testid="account-security-password-card"
+        onSubmit={(e) => void handlePasswordUpdate(e)}
+        noValidate
+        className="bg-white border border-[#E5E9F2] rounded-xl p-6 shadow-[0_1px_3px_rgba(15,23,42,0.03)] space-y-5"
+      >
+        <div className="flex items-start gap-3">
+          <span className="w-9 h-9 rounded-xl bg-[#EFF6FF] text-[#2563EB] flex items-center justify-center shrink-0">
+            <KeyRound className="w-4 h-4" aria-hidden="true" />
+          </span>
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#2563EB]">
+              CREDENCIALES DE ACCESO
+            </p>
+            <h3 className="text-base font-bold text-[#0F172A] mt-0.5">
+              Seguridad de mi cuenta
+            </h3>
+            <p className="text-xs text-[#64748B] mt-0.5">
+              Actualiza la contraseña de tu cuenta autenticada ({operatorEmail || 'operador'}).
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label
+              htmlFor="account-new-password"
+              className="block text-xs font-semibold text-[#0F172A] mb-1.5"
+            >
+              Nueva contraseña (mín. 8 caracteres)
+            </label>
+            <div className="relative">
+              <input
+                id="account-new-password"
+                type={showNewPassword ? 'text' : 'password'}
+                autoComplete="new-password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Mínimo 8 caracteres"
+                className="w-full rounded-xl border border-[#E5E9F2] bg-white pl-3.5 pr-10 py-2.5 text-sm text-[#0F172A] focus:border-[#2563EB] focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => setShowNewPassword((prev) => !prev)}
+                aria-label={
+                  showNewPassword
+                    ? 'Ocultar nueva contraseña'
+                    : 'Mostrar nueva contraseña'
+                }
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[#64748B] hover:text-[#0F172A]"
+              >
+                {showNewPassword ? (
+                  <EyeOff className="w-4 h-4" />
+                ) : (
+                  <Eye className="w-4 h-4" />
+                )}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label
+              htmlFor="account-confirm-password"
+              className="block text-xs font-semibold text-[#0F172A] mb-1.5"
+            >
+              Confirmar nueva contraseña
+            </label>
+            <div className="relative">
+              <input
+                id="account-confirm-password"
+                type={showConfirmPassword ? 'text' : 'password'}
+                autoComplete="new-password"
+                value={confirmNewPassword}
+                onChange={(e) => setConfirmNewPassword(e.target.value)}
+                placeholder="Repite tu nueva contraseña"
+                className="w-full rounded-xl border border-[#E5E9F2] bg-white pl-3.5 pr-10 py-2.5 text-sm text-[#0F172A] focus:border-[#2563EB] focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirmPassword((prev) => !prev)}
+                aria-label={
+                  showConfirmPassword
+                    ? 'Ocultar confirmación de contraseña'
+                    : 'Mostrar confirmación de contraseña'
+                }
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[#64748B] hover:text-[#0F172A]"
+              >
+                {showConfirmPassword ? (
+                  <EyeOff className="w-4 h-4" />
+                ) : (
+                  <Eye className="w-4 h-4" />
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {passwordError && (
+          <div
+            role="alert"
+            className="rounded-xl bg-red-50 border border-red-200 px-3.5 py-2.5 text-xs font-medium text-red-800"
+          >
+            {passwordError}
+          </div>
+        )}
+
+        {passwordSuccess && (
+          <div
+            role="status"
+            className="rounded-xl bg-emerald-50 border border-emerald-200 px-3.5 py-2.5 text-xs font-medium text-emerald-900 flex items-center gap-2"
+          >
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" aria-hidden="true" />
+            <span>{passwordSuccess}</span>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between gap-3 pt-2 border-t border-[#E5E9F2]">
+          <p className="text-[11px] text-[#64748B]">
+            Recomendamos combinar letras mayúsculas, minúsculas y números.
+          </p>
+          <button
+            type="submit"
+            disabled={passwordBusy}
+            className="px-4 py-2 text-xs font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-60 rounded-xl transition-colors shadow-sm whitespace-nowrap"
+          >
+            {passwordBusy ? 'Actualizando...' : 'Actualizar contraseña'}
+          </button>
+        </div>
+      </form>
+
+      {/* Equipo y Roles (Visible únicamente para Owner y Admin) */}
+      {canViewTeamSection && (
+        <div
+          data-testid="team-and-roles-section"
+          className="bg-white border border-[#E5E9F2] rounded-xl p-6 shadow-[0_1px_3px_rgba(15,23,42,0.03)] space-y-5"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <span className="w-9 h-9 rounded-xl bg-[#EFF6FF] text-[#2563EB] flex items-center justify-center shrink-0">
+                <Users className="w-4 h-4" aria-hidden="true" />
+              </span>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#2563EB]">
+                  GOBIERNO DE ACCESOS
+                </p>
+                <h3 className="text-base font-bold text-[#0F172A] mt-0.5">
+                  Equipo y Roles
+                </h3>
+                <p className="text-xs text-[#64748B] mt-0.5">
+                  Miembros vinculados a {organization.name}.{' '}
+                  {isOwner
+                    ? 'Como propietario puedes invitar administradores/supervisores, cambiar roles o suspender accesos.'
+                    : 'Vista de consulta operativa. Solo el Owner puede modificar roles o emitir invitaciones administrativas.'}
+                </p>
+              </div>
+            </div>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#F8FAFC] border border-[#E5E9F2] text-[11px] font-semibold text-[#0F172A] self-start sm:self-auto shrink-0">
+              <ShieldCheck className="w-3.5 h-3.5 text-[#2563EB]" aria-hidden="true" />
+              <span>{members.length} miembros</span>
+            </span>
+          </div>
+
+          {/* Invitar Administrador o Supervisor (Solo Owner) */}
+          {canInviteAdminOrSupervisor && (
+            <form
+              onSubmit={(e) => void handleTeamInviteSubmit(e)}
+              noValidate
+              className="rounded-xl bg-[#F8FAFC] border border-[#E5E9F2] p-4 space-y-3"
+            >
+              <div className="flex items-center gap-2 text-xs font-bold text-[#0F172A]">
+                <UserPlus className="w-4 h-4 text-[#2563EB]" aria-hidden="true" />
+                <span>Invitar Administrador o Supervisor (Enlace único · 72 h)</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+                <div className="sm:col-span-4">
+                  <label
+                    htmlFor="team-invite-name"
+                    className="block text-[11px] font-semibold text-[#0F172A] mb-1"
+                  >
+                    Nombre completo
+                  </label>
+                  <input
+                    id="team-invite-name"
+                    type="text"
+                    value={inviteFullName}
+                    onChange={(e) => setInviteFullName(e.target.value)}
+                    placeholder="Ej. Laura Mendoza"
+                    className="w-full rounded-lg border border-[#E5E9F2] bg-white px-3 py-2 text-xs text-[#0F172A] focus:border-[#2563EB] focus:outline-none"
+                  />
+                </div>
+                <div className="sm:col-span-4">
+                  <label
+                    htmlFor="team-invite-email"
+                    className="block text-[11px] font-semibold text-[#0F172A] mb-1"
+                  >
+                    Correo electrónico
+                  </label>
+                  <input
+                    id="team-invite-email"
+                    type="email"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    placeholder="laura@empresa.com"
+                    className="w-full rounded-lg border border-[#E5E9F2] bg-white px-3 py-2 text-xs text-[#0F172A] focus:border-[#2563EB] focus:outline-none"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label
+                    htmlFor="team-invite-role"
+                    className="block text-[11px] font-semibold text-[#0F172A] mb-1"
+                  >
+                    Rol
+                  </label>
+                  <select
+                    id="team-invite-role"
+                    value={inviteRole}
+                    onChange={(e) =>
+                      setInviteRole(e.target.value as 'admin' | 'supervisor')
+                    }
+                    className="w-full rounded-lg border border-[#E5E9F2] bg-white px-2.5 py-2 text-xs font-semibold text-[#0F172A] focus:border-[#2563EB] focus:outline-none"
+                  >
+                    <option value="supervisor">Supervisor</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </div>
+                <div className="sm:col-span-2">
+                  <button
+                    type="submit"
+                    disabled={inviteBusy}
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-60 text-white text-xs font-semibold transition-colors whitespace-nowrap"
+                  >
+                    <Link2 className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>{inviteBusy ? 'Generando...' : 'Generar enlace'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {inviteError && (
+                <p role="alert" className="text-xs font-medium text-[#DC2626]">
+                  {inviteError}
+                </p>
+              )}
+
+              {generatedInvite && (
+                <div
+                  data-testid="generated-team-invite-box"
+                  className="rounded-lg bg-emerald-50 border border-emerald-200 p-3 space-y-2 text-xs"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-semibold text-emerald-900">
+                      Enlace de invitación creado para {generatedInvite.fullName} (
+                      {generatedInvite.role === 'admin' ? 'Admin' : 'Supervisor'}) · Válido 72 h
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void handleCopyInviteLink()}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0B192C] hover:bg-slate-800 text-white text-[11px] font-semibold transition-colors"
+                    >
+                      <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>{copiedInviteUrl ? '¡Enlace copiado!' : 'Copiar enlace'}</span>
+                    </button>
+                  </div>
+                  <p className="font-mono text-[11px] text-emerald-950 bg-white/80 border border-emerald-200 rounded px-2.5 py-1.5 break-all">
+                    {generatedInvite.url}
+                  </p>
+                  <p className="text-[11px] text-emerald-800">
+                    Envía este enlace privado por correo o WhatsApp. Es de un solo uso y caduca automáticamente en 72 horas.
+                  </p>
+                </div>
+              )}
+            </form>
+          )}
+
+          {teamFeedback && (
+            <div
+              role={teamFeedback.type === 'error' ? 'alert' : 'status'}
+              className={`rounded-xl px-3.5 py-2.5 text-xs font-medium border ${
+                teamFeedback.type === 'error'
+                  ? 'bg-red-50 border-red-200 text-red-800'
+                  : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+              }`}
+            >
+              {teamFeedback.message}
+            </div>
+          )}
+
+          {/* Lista de miembros */}
+          <div className="overflow-x-auto border border-[#E5E9F2] rounded-xl">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="bg-[#F8FAFC] border-b border-[#E5E9F2] text-[#64748B]">
+                  <th className="py-2.5 px-3.5 font-semibold">Miembro</th>
+                  <th className="py-2.5 px-3.5 font-semibold">Rol</th>
+                  <th className="py-2.5 px-3.5 font-semibold">Estado</th>
+                  {isOwner && (
+                    <th className="py-2.5 px-3.5 font-semibold text-right">
+                      Gestión de acceso
+                    </th>
+                  )}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#E5E9F2]">
+                {members.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={isOwner ? 4 : 3}
+                      className="py-6 text-center text-[#64748B]"
+                    >
+                      No hay miembros registrados en esta organización todavía.
+                    </td>
+                  </tr>
+                ) : (
+                  members.map((member) => {
+                    const isProtectedOwner =
+                      member.role === 'owner' ||
+                      (Boolean(operatorUserId) && member.user_id === operatorUserId);
+                    const isSuspended = member.status === 'suspended';
+                    const isBusy = memberActionBusyId === member.id;
+                    return (
+                      <tr
+                        key={member.id}
+                        data-testid={`team-member-row-${member.id}`}
+                        className="hover:bg-[#F8FAFC]/70"
+                      >
+                        <td className="py-3 px-3.5">
+                          <p className="font-semibold text-[#0F172A]">
+                            {member.full_name}
+                          </p>
+                          <p className="text-[11px] text-[#64748B] font-mono">
+                            {member.email}
+                          </p>
+                        </td>
+                        <td className="py-3 px-3.5 whitespace-nowrap">
+                          <span
+                            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${roleBadgeClass(
+                              member.role
+                            )}`}
+                          >
+                            {roleBadgeLabel(member.role)}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3.5 whitespace-nowrap">
+                          <span
+                            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${
+                              isSuspended
+                                ? 'bg-red-100 text-red-800'
+                                : member.status === 'invited'
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-emerald-100 text-emerald-800'
+                            }`}
+                          >
+                            {isSuspended
+                              ? 'Suspendido'
+                              : member.status === 'invited'
+                              ? 'Invitado'
+                              : 'Activo'}
+                          </span>
+                        </td>
+                        {isOwner && (
+                          <td className="py-3 px-3.5 text-right whitespace-nowrap">
+                            {isProtectedOwner ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 text-[#475569] text-[11px] font-semibold">
+                                <Lock className="w-3 h-3" aria-hidden="true" />
+                                <span>Propietario protegido</span>
+                              </span>
+                            ) : (
+                              <div className="inline-flex items-center justify-end gap-2">
+                                <select
+                                  aria-label={`Cambiar rol de ${member.full_name}`}
+                                  disabled={isBusy}
+                                  value={member.role}
+                                  onChange={(e) =>
+                                    void handleRoleChange(
+                                      member,
+                                      e.target.value as OrganizationRole
+                                    )
+                                  }
+                                  className="px-2.5 py-1.5 rounded-lg border border-[#E5E9F2] bg-white text-xs font-semibold text-[#0F172A] focus:border-[#2563EB] focus:outline-none disabled:opacity-50"
+                                >
+                                  <option value="admin">Admin</option>
+                                  <option value="supervisor">Supervisor</option>
+                                  <option value="technician">Especialista</option>
+                                </select>
+                                <button
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={() => void handleStatusToggle(member)}
+                                  className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-50 ${
+                                    isSuspended
+                                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                                      : 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'
+                                  }`}
+                                >
+                                  {isSuspended ? (
+                                    <>
+                                      <UserCheck className="w-3.5 h-3.5" aria-hidden="true" />
+                                      <span>Reactivar</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <UserX className="w-3.5 h-3.5" aria-hidden="true" />
+                                      <span>Suspender</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* SaaS billing status & data portability */}
       <div

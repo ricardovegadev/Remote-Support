@@ -165,12 +165,19 @@ create table if not exists public.tickets (
   consent_accepted boolean not null default false,
   consent_accepted_at timestamptz,
   payment_status text not null default 'pending'
-    check (payment_status in ('pending', 'paid', 'refunded')),
+    check (payment_status in ('pending', 'authorized', 'paid', 'voided', 'refunded')),
+  payment_gateway text default 'stripe',
+  payment_authorization_id text,
   payment_reference text,
   paid_at timestamptz,
+  auto_capture_at timestamptz,
+  client_confirmed_at timestamptz,
+  client_rating integer check (client_rating between 1 and 5),
+  client_feedback text,
+  resolution_outcome text check (resolution_outcome in ('resolved', 'software_unresolved', 'hardware_fault', 'client_absent')),
   stripe_subscription_id text,
   status text not null default 'waiting_payment'
-    check (status in ('waiting_payment', 'ready_to_connect', 'in_progress', 'resolved')),
+    check (status in ('waiting_payment', 'ready_to_connect', 'in_progress', 'pending_client_confirmation', 'resolved', 'refunded')),
   assigned_to uuid references auth.users(id) on delete set null,
   assigned_technician_id uuid references auth.users(id) on delete set null,
   assigned_technician_name text,
@@ -255,6 +262,33 @@ begin
   alter table public.tickets add column if not exists assigned_technician_specialty text;
   alter table public.tickets add column if not exists claimed_at timestamptz;
   alter table public.tickets add column if not exists resolved_at timestamptz;
+  alter table public.tickets add column if not exists payment_gateway text default 'stripe';
+  alter table public.tickets add column if not exists payment_authorization_id text;
+  alter table public.tickets add column if not exists auto_capture_at timestamptz;
+  alter table public.tickets add column if not exists client_confirmed_at timestamptz;
+  alter table public.tickets add column if not exists client_rating integer;
+  alter table public.tickets add column if not exists client_feedback text;
+  alter table public.tickets add column if not exists resolution_outcome text;
+
+  alter table public.tickets drop constraint if exists tickets_payment_status_check;
+  alter table public.tickets
+    add constraint tickets_payment_status_check
+    check (payment_status in ('pending', 'authorized', 'paid', 'voided', 'refunded'));
+
+  alter table public.tickets drop constraint if exists tickets_status_check;
+  alter table public.tickets
+    add constraint tickets_status_check
+    check (status in ('waiting_payment', 'ready_to_connect', 'in_progress', 'pending_client_confirmation', 'resolved', 'refunded'));
+
+  alter table public.tickets drop constraint if exists tickets_client_rating_check;
+  alter table public.tickets
+    add constraint tickets_client_rating_check
+    check (client_rating is null or (client_rating between 1 and 5));
+
+  alter table public.tickets drop constraint if exists tickets_resolution_outcome_check;
+  alter table public.tickets
+    add constraint tickets_resolution_outcome_check
+    check (resolution_outcome is null or resolution_outcome in ('resolved', 'software_unresolved', 'hardware_fault', 'client_absent'));
 
   alter table public.tickets alter column service_tier set default 'Express $15';
   alter table public.tickets drop constraint if exists tickets_category_check;
@@ -539,7 +573,7 @@ begin
     claimed_at = now()
   where id = p_ticket_id
     and assigned_to is null
-    and payment_status = 'paid'
+    and payment_status in ('authorized', 'paid')
     and status in ('waiting_payment', 'ready_to_connect')
     and exists (
       select 1
@@ -685,7 +719,7 @@ declare
   v_current_status text;
   v_reviewer_name text;
 begin
-  if v_uid is null or p_status is null or p_status not in ('in_progress', 'resolved') then
+  if v_uid is null or p_status is null or p_status not in ('in_progress', 'pending_client_confirmation', 'resolved', 'refunded') then
     return false;
   end if;
 
@@ -695,7 +729,7 @@ begin
   where id = p_ticket_id
   for update;
 
-  if not found or v_org_id is null or v_payment_status <> 'paid' then
+  if not found or v_org_id is null or v_payment_status not in ('authorized', 'paid', 'voided', 'refunded') then
     return false;
   end if;
   if not public.is_org_member(v_org_id) then
@@ -705,11 +739,15 @@ begin
      and not public.is_org_admin(v_org_id) then
     return false;
   end if;
-  if p_status = 'resolved' and v_current_status <> 'in_progress' then
+  if p_status in ('pending_client_confirmation', 'resolved')
+     and v_current_status not in ('in_progress', 'pending_client_confirmation') then
     return false;
   end if;
   if p_status = 'in_progress'
-     and v_current_status not in ('ready_to_connect', 'in_progress', 'resolved') then
+     and v_current_status not in ('ready_to_connect', 'in_progress', 'pending_client_confirmation', 'resolved') then
+    return false;
+  end if;
+  if p_status = 'refunded' and not public.is_org_admin(v_org_id) then
     return false;
   end if;
   if p_status = 'resolved' and p_resolved_at is null then
@@ -729,16 +767,21 @@ begin
   update public.tickets
   set status = p_status,
       resolution_notes = coalesce(p_resolution_notes, resolution_notes),
+      auto_capture_at = case
+        when p_status = 'pending_client_confirmation' then coalesce(auto_capture_at, now() + interval '48 hours')
+        when p_status in ('in_progress', 'refunded') then null
+        else auto_capture_at
+      end,
       resolved_at = case
-        when p_status = 'in_progress' then null
+        when p_status in ('in_progress', 'pending_client_confirmation') then null
         else coalesce(p_resolved_at, now())
       end,
       human_reviewed_at = case
-        when p_status = 'resolved' then coalesce(human_reviewed_at, now())
+        when p_status in ('pending_client_confirmation', 'resolved') then coalesce(human_reviewed_at, now())
         else human_reviewed_at
       end,
       human_reviewed_by = case
-        when p_status = 'resolved' then coalesce(human_reviewed_by, nullif(trim(v_reviewer_name), ''), 'Especialista')
+        when p_status in ('pending_client_confirmation', 'resolved') then coalesce(human_reviewed_by, nullif(trim(v_reviewer_name), ''), 'Especialista')
         else human_reviewed_by
       end
   where id = p_ticket_id;
@@ -998,8 +1041,8 @@ create policy "tickets_update_client_room" on public.tickets
   using (public.is_client_room_authorized(ticket_code, client_session_token))
   with check (
     public.is_client_room_authorized(ticket_code, client_session_token)
-    and payment_status in ('pending', 'paid')
-    and status in ('waiting_payment', 'ready_to_connect', 'in_progress')
+    and payment_status in ('pending', 'authorized', 'paid')
+    and status in ('waiting_payment', 'ready_to_connect', 'in_progress', 'pending_client_confirmation')
   );
 
 drop policy if exists "tickets_client_room_privacy_update" on public.tickets;
@@ -1414,15 +1457,36 @@ create table if not exists public.technician_payouts (
   payment_id uuid references public.payments(id) on delete set null,
   ticket_id uuid references public.tickets(id) on delete set null,
   technician_id uuid not null references auth.users(id) on delete cascade,
+  payment_gateway text not null default 'stripe',
   gross_amount_usd numeric(10, 2) not null default 0 check (gross_amount_usd >= 0),
+  gateway_fee_usd numeric(10, 2) not null default 0 check (gateway_fee_usd >= 0),
+  net_amount_usd numeric(10, 2) not null default 0 check (net_amount_usd >= 0),
   commission_percent integer not null default 65
     check (commission_percent in (65, 75, 80, 85)),
   payout_amount_usd numeric(10, 2) not null default 0 check (payout_amount_usd >= 0),
+  platform_net_usd numeric(10, 2) not null default 0 check (platform_net_usd >= 0),
   status text not null default 'pending'
-    check (status in ('pending', 'scheduled', 'paid', 'reversed')),
+    check (status in ('pending', 'scheduled', 'paid', 'paid_out', 'reversed', 'cancelled')),
+  payout_batch_reference text,
   paid_at timestamptz,
+  paid_out_at timestamptz,
   created_at timestamptz not null default now()
 );
+
+do $$
+begin
+  alter table public.technician_payouts add column if not exists payment_gateway text not null default 'stripe';
+  alter table public.technician_payouts add column if not exists gateway_fee_usd numeric(10, 2) not null default 0;
+  alter table public.technician_payouts add column if not exists net_amount_usd numeric(10, 2) not null default 0;
+  alter table public.technician_payouts add column if not exists platform_net_usd numeric(10, 2) not null default 0;
+  alter table public.technician_payouts add column if not exists payout_batch_reference text;
+  alter table public.technician_payouts add column if not exists paid_out_at timestamptz;
+
+  alter table public.technician_payouts drop constraint if exists technician_payouts_status_check;
+  alter table public.technician_payouts
+    add constraint technician_payouts_status_check
+    check (status in ('pending', 'scheduled', 'paid', 'paid_out', 'reversed', 'cancelled'));
+end $$;
 
 create index if not exists idx_technician_payouts_org_created
   on public.technician_payouts (organization_id, created_at desc);
@@ -1444,6 +1508,25 @@ create policy "technician_payouts_select_scoped"
     public.is_org_admin(organization_id)
     or technician_id = (select auth.uid())
   );
+
+-- ----------------------------------------------------------------------------
+-- 17. Roles de Equipo (supervisor) e Invitaciones Directas (assigned_role)
+-- ----------------------------------------------------------------------------
+do $$
+begin
+  alter table public.organization_members drop constraint if exists organization_members_role_check;
+  alter table public.organization_members
+    add constraint organization_members_role_check
+    check (role in ('owner', 'admin', 'supervisor', 'technician'));
+
+  alter table public.technician_applications
+    add column if not exists assigned_role text not null default 'technician';
+  alter table public.technician_applications
+    drop constraint if exists technician_applications_assigned_role_check;
+  alter table public.technician_applications
+    add constraint technician_applications_assigned_role_check
+    check (assigned_role in ('technician', 'admin', 'supervisor'));
+end $$;
 
 -- Refresca automáticamente la caché de esquema de PostgREST tras ejecutar la migración
 notify pgrst, 'reload schema';

@@ -14,19 +14,26 @@ import type {
   MessageSenderRole,
   Organization,
   OrganizationMember,
+  PaymentGateway,
   RemoteSessionRecord,
   SupportTicket,
   TechnicianApplication,
   TechnicianAvailability,
+  TechnicianPayoutRecord,
   TechnicianSpecialty,
   TicketMessage,
   TicketStatus,
   UserAccountProfile,
+  UserRole,
 } from '../types/support';
 import {
+  calculateNetTechnicianPayout,
   canClaimTicket,
+  computeUpdatedTechnicianRating,
   generateUuid,
+  getServiceTierPriceUsd,
   isValidUuid,
+  LEGAL_TERMS_VERSION,
   matchTechnicianForTicket,
 } from '../utils/ticketLogic';
 
@@ -38,6 +45,7 @@ const DEVICES_STORAGE_KEY = 'rs365_v1_devices_v5';
 const SESSIONS_STORAGE_KEY = 'rs365_v1_sessions_v5';
 const AI_AGENTS_STORAGE_KEY = 'rs365_v1_ai_agents_v5';
 const AUDIT_STORAGE_KEY = 'rs365_v1_audit_v5';
+const PAYOUTS_STORAGE_KEY = 'rs365_technician_payouts_v1';
 const ROOM_TOKENS_STORAGE_KEY = 'rs365_room_tokens_v1';
 const LOCAL_FALLBACK_TICKET_IDS_KEY = 'rs365_local_fallback_ticket_ids_v1';
 const ENTERPRISE_STORAGE_KEY = 'rs365_enterprise_leads_v1';
@@ -2236,6 +2244,15 @@ export const supportAdapter = {
         | 'consent_accepted'
         | 'consent_accepted_at'
         | 'payment_status'
+        | 'payment_gateway'
+        | 'payment_authorization_id'
+        | 'payment_reference'
+        | 'paid_at'
+        | 'auto_capture_at'
+        | 'client_confirmed_at'
+        | 'client_rating'
+        | 'client_feedback'
+        | 'resolution_outcome'
         | 'status'
         | 'assigned_to'
         | 'assigned_technician_id'
@@ -2340,6 +2357,13 @@ export const supportAdapter = {
         if ('subscription_status' in patch)
           dbPatch.subscription_status = patch.subscription_status;
         if ('anonymized_at' in patch) dbPatch.anonymized_at = patch.anonymized_at;
+        if ('auto_capture_at' in patch) dbPatch.auto_capture_at = patch.auto_capture_at;
+        if ('client_confirmed_at' in patch)
+          dbPatch.client_confirmed_at = patch.client_confirmed_at;
+        if ('client_rating' in patch) dbPatch.client_rating = patch.client_rating;
+        if ('client_feedback' in patch) dbPatch.client_feedback = patch.client_feedback;
+        if ('resolution_outcome' in patch)
+          dbPatch.resolution_outcome = patch.resolution_outcome;
 
         let updateError: unknown = null;
         if ('human_reviewed_at' in dbPatch && isStaffForTicket && staffClient) {
@@ -2872,6 +2896,42 @@ export const supportAdapter = {
     return next;
   },
 
+  updateMemberAccess(
+    memberId: string,
+    patch: Partial<{
+      role: OrganizationMember['role'];
+      status: OrganizationMember['status'];
+    }>,
+    members: OrganizationMember[],
+    actorLabel = 'Owner'
+  ): OrganizationMember[] {
+    const target = members.find((m) => m.id === memberId);
+    if (!target || target.role === 'owner' || patch.role === 'owner') {
+      return members;
+    }
+    const next = members.map((m) => (m.id === memberId ? { ...m, ...patch } : m));
+    this.saveMembers(next);
+    const changes: string[] = [];
+    if (patch.role && patch.role !== target.role) {
+      changes.push(`rol cambiado de ${target.role} a ${patch.role}`);
+    }
+    if (patch.status && patch.status !== target.status) {
+      changes.push(
+        patch.status === 'suspended' ? 'acceso suspendido' : 'acceso reactivado'
+      );
+    }
+    if (changes.length > 0) {
+      this.appendAuditLog({
+        organization_id: target.organization_id,
+        actor_type: 'system',
+        actor_label: actorLabel,
+        action: `Actualizó miembro ${target.full_name} (${target.email}): ${changes.join(' · ')}`,
+        target_ref: `MEM-${target.id.slice(0, 8).toUpperCase()}`,
+      });
+    }
+    return next;
+  },
+
   updateOrganizationSettings(
     orgId: string,
     patch: Partial<
@@ -3037,6 +3097,132 @@ export const supportAdapter = {
     }
   },
 
+  async hydrateAuthenticatedUserProfile(
+    supabase: NonNullable<ReturnType<typeof getSupabaseClient>>,
+    authUser: {
+      id: string;
+      email?: string | null;
+      created_at?: string;
+      user_metadata?: Record<string, unknown> | null;
+    }
+  ): Promise<UserAccountProfile> {
+    const cleanEmail = String(authUser.email ?? '').trim().toLowerCase();
+    const meta = authUser.user_metadata ?? {};
+
+    const [orgMembersRes, profileRes] = await Promise.all([
+      supabase
+        .from('organization_members')
+        .select('role, organization_id, full_name')
+        .eq('user_id', authUser.id),
+      supabase
+        .from('profiles')
+        .select(
+          'full_name,email,role,birth_date,is_adult_verified,terms_accepted_at,terms_version,marketing_opt_in,created_at'
+        )
+        .eq('id', authUser.id)
+        .maybeSingle(),
+    ]);
+
+    const OPERATOR_PRIORITY: Record<string, number> = {
+      owner: 4,
+      admin: 3,
+      supervisor: 2,
+      technician: 1,
+    };
+
+    const memberRows =
+      !orgMembersRes.error && Array.isArray(orgMembersRes.data)
+        ? (orgMembersRes.data as Array<{
+            role?: unknown;
+            organization_id?: unknown;
+            full_name?: unknown;
+          }>)
+        : [];
+
+    let bestMemberRow: {
+      role: Exclude<UserRole, 'client'>;
+      organization_id: string | null;
+      full_name: string | null;
+    } | null = null;
+    let bestPriority = 0;
+
+    for (const row of memberRows) {
+      const normalizedRole =
+        typeof row.role === 'string' ? row.role.trim().toLowerCase() : '';
+      const priority = OPERATOR_PRIORITY[normalizedRole] ?? 0;
+      if (priority > bestPriority) {
+        bestPriority = priority;
+        bestMemberRow = {
+          role: normalizedRole as Exclude<UserRole, 'client'>,
+          organization_id:
+            typeof row.organization_id === 'string' && row.organization_id.trim()
+              ? row.organization_id.trim()
+              : null,
+          full_name:
+            typeof row.full_name === 'string' && row.full_name.trim()
+              ? row.full_name.trim()
+              : null,
+        };
+      }
+    }
+
+    const dbProfile = !profileRes.error ? profileRes.data : null;
+    const rawProfileRole =
+      typeof dbProfile?.role === 'string' ? dbProfile.role.trim().toLowerCase() : '';
+    const validProfileRole: UserRole | null =
+      rawProfileRole === 'owner' ||
+      rawProfileRole === 'admin' ||
+      rawProfileRole === 'supervisor' ||
+      rawProfileRole === 'technician' ||
+      rawProfileRole === 'client'
+        ? rawProfileRole
+        : null;
+
+    const resolvedRole: UserRole =
+      bestMemberRow?.role ?? validProfileRole ?? 'client';
+
+    return {
+      id: authUser.id,
+      full_name:
+        (typeof dbProfile?.full_name === 'string' && dbProfile.full_name.trim()) ||
+        bestMemberRow?.full_name ||
+        (typeof meta.full_name === 'string' && meta.full_name.trim()) ||
+        cleanEmail.split('@')[0] ||
+        'Usuario',
+      email:
+        (typeof dbProfile?.email === 'string' && dbProfile.email.trim()) ||
+        cleanEmail,
+      role: resolvedRole,
+      organization_id: bestMemberRow?.organization_id ?? null,
+      birth_date:
+        (typeof dbProfile?.birth_date === 'string' && dbProfile.birth_date) ||
+        (typeof meta.birth_date === 'string' ? meta.birth_date : ''),
+      is_adult_verified:
+        typeof dbProfile?.is_adult_verified === 'boolean'
+          ? dbProfile.is_adult_verified
+          : Boolean(meta.is_adult_verified) || resolvedRole !== 'client',
+      terms_accepted_at:
+        (typeof dbProfile?.terms_accepted_at === 'string' &&
+          dbProfile.terms_accepted_at) ||
+        (typeof meta.terms_accepted_at === 'string' ? meta.terms_accepted_at : ''),
+      terms_version:
+        (typeof dbProfile?.terms_version === 'string' && dbProfile.terms_version) ||
+        (typeof meta.terms_version === 'string'
+          ? meta.terms_version
+          : LEGAL_TERMS_VERSION),
+      marketing_opt_in:
+        typeof dbProfile?.marketing_opt_in === 'boolean'
+          ? dbProfile.marketing_opt_in
+          : Boolean(meta.marketing_opt_in),
+      subscription_plan: null,
+      subscription_status: 'none',
+      created_at:
+        (typeof dbProfile?.created_at === 'string' && dbProfile.created_at) ||
+        authUser.created_at ||
+        new Date().toISOString(),
+    };
+  },
+
   buildClientDataExportPayload(input: {
     ticket?: SupportTicket | null;
     messages?: TicketMessage[];
@@ -3106,6 +3292,172 @@ export const supportAdapter = {
     application: TechnicianApplication
   ): TechnicianApplication[] {
     return saveTechnicianApplication(application);
+  },
+
+  loadTechnicianPayouts(): TechnicianPayoutRecord[] {
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = window.localStorage.getItem(PAYOUTS_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) return parsed as TechnicianPayoutRecord[];
+        }
+      } catch {
+        // Ignore corrupted local payout cache and re-derive deterministically
+      }
+    }
+    // Deriva liquidaciones semilla deterministas desde tickets ya resueltos en demo
+    const tickets = this.loadTickets();
+    const members = this.loadMembers();
+    const seeded: TechnicianPayoutRecord[] = [];
+    for (const t of tickets) {
+      if (t.status === 'resolved' && t.payment_status === 'paid') {
+        const techId = t.assigned_technician_id ?? t.assigned_to;
+        if (!techId) continue;
+        const member = members.find((m) => m.user_id === techId || m.id === techId);
+        const gateway: PaymentGateway = t.payment_gateway ?? 'stripe';
+        const gross = getServiceTierPriceUsd(t.service_tier);
+        const breakdown = calculateNetTechnicianPayout(
+          gross,
+          member?.resolved_count ?? 12,
+          gateway
+        );
+        const baseTime = Date.parse(t.resolved_at ?? t.created_at) || Date.now() - 72 * 3600 * 1000;
+        const releaseIso = new Date(baseTime + 48 * 3600 * 1000).toISOString();
+        seeded.push({
+          id: generateUuid(),
+          organization_id: t.organization_id,
+          ticket_id: t.id,
+          ticket_code: t.ticket_code,
+          service_tier: t.service_tier,
+          technician_id: techId,
+          technician_name: t.assigned_technician_name ?? member?.full_name ?? 'Especialista',
+          payment_gateway: gateway,
+          gross_amount_usd: breakdown.grossUsd,
+          gateway_fee_usd: breakdown.gatewayFeeUsd,
+          net_amount_usd: breakdown.netAmountUsd,
+          commission_percent: breakdown.commissionPercent,
+          payout_amount_usd: breakdown.technicianNetUsd,
+          platform_net_usd: breakdown.platformNetUsd,
+          status: 'scheduled',
+          warranty_releases_at: releaseIso,
+          payout_batch_reference: null,
+          paid_out_at: null,
+          created_at: new Date(baseTime).toISOString(),
+        });
+      }
+    }
+    writeLocal(PAYOUTS_STORAGE_KEY, seeded);
+    return seeded;
+  },
+
+  saveTechnicianPayouts(payouts: TechnicianPayoutRecord[]): TechnicianPayoutRecord[] {
+    writeLocal(PAYOUTS_STORAGE_KEY, payouts);
+    return payouts;
+  },
+
+  recordTechnicianPayoutForTicket(
+    ticket: SupportTicket,
+    members: OrganizationMember[],
+    existing: TechnicianPayoutRecord[]
+  ): TechnicianPayoutRecord[] {
+    const techId = ticket.assigned_technician_id ?? ticket.assigned_to;
+    if (!techId) return existing;
+    const alreadyExists = existing.some(
+      (p) => p.ticket_id === ticket.id && p.status !== 'cancelled'
+    );
+    if (alreadyExists) return existing;
+
+    const member = members.find((m) => m.user_id === techId || m.id === techId);
+    const gateway: PaymentGateway = ticket.payment_gateway ?? 'stripe';
+    const gross = getServiceTierPriceUsd(ticket.service_tier);
+    const breakdown = calculateNetTechnicianPayout(
+      gross,
+      member?.resolved_count ?? 0,
+      gateway
+    );
+    const nowMs = Date.now();
+    const record: TechnicianPayoutRecord = {
+      id: generateUuid(),
+      organization_id: ticket.organization_id,
+      ticket_id: ticket.id,
+      ticket_code: ticket.ticket_code,
+      service_tier: ticket.service_tier,
+      technician_id: techId,
+      technician_name: ticket.assigned_technician_name ?? member?.full_name ?? 'Especialista',
+      payment_gateway: gateway,
+      gross_amount_usd: breakdown.grossUsd,
+      gateway_fee_usd: breakdown.gatewayFeeUsd,
+      net_amount_usd: breakdown.netAmountUsd,
+      commission_percent: breakdown.commissionPercent,
+      payout_amount_usd: breakdown.technicianNetUsd,
+      platform_net_usd: breakdown.platformNetUsd,
+      status: 'pending',
+      warranty_releases_at: new Date(nowMs + 48 * 3600 * 1000).toISOString(),
+      payout_batch_reference: null,
+      paid_out_at: null,
+      created_at: new Date(nowMs).toISOString(),
+    };
+    const next = [record, ...existing];
+    return this.saveTechnicianPayouts(next);
+  },
+
+  cancelTechnicianPayoutForTicket(
+    ticketId: string,
+    existing: TechnicianPayoutRecord[]
+  ): TechnicianPayoutRecord[] {
+    const next = existing.map((p) =>
+      p.ticket_id === ticketId ? { ...p, status: 'cancelled' as const } : p
+    );
+    return this.saveTechnicianPayouts(next);
+  },
+
+  settleTechnicianPayoutsBatch(
+    technicianId: string,
+    batchReference: string,
+    existing: TechnicianPayoutRecord[],
+    nowMs: number = Date.now()
+  ): TechnicianPayoutRecord[] {
+    const cleanRef = batchReference.trim() || `LOTE-${new Date(nowMs).toISOString().slice(0, 10)}`;
+    const paidOutAt = new Date(nowMs).toISOString();
+    const next = existing.map((p) => {
+      if (p.technician_id !== technicianId) return p;
+      if (p.status === 'paid_out' || p.status === 'cancelled' || p.status === 'reversed') {
+        return p;
+      }
+      const releasesMs = Date.parse(p.warranty_releases_at) || 0;
+      const isAvailable = p.status === 'scheduled' || releasesMs <= nowMs;
+      if (!isAvailable) return p;
+      return {
+        ...p,
+        status: 'paid_out' as const,
+        payout_batch_reference: cleanRef,
+        paid_out_at: paidOutAt,
+      };
+    });
+    return this.saveTechnicianPayouts(next);
+  },
+
+  updateMemberRating(
+    technicianId: string,
+    newRating: number,
+    existing: OrganizationMember[]
+  ): OrganizationMember[] {
+    const next = existing.map((m) => {
+      if (m.user_id !== technicianId && m.id !== technicianId) return m;
+      const updatedRating = computeUpdatedTechnicianRating(
+        m.rating,
+        m.resolved_count,
+        newRating
+      );
+      return {
+        ...m,
+        rating: updatedRating,
+        resolved_count: m.resolved_count + 1,
+      };
+    });
+    this.saveMembers(next);
+    return next;
   },
 };
 

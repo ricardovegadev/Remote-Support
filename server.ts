@@ -116,7 +116,7 @@ function extractRoomToken(req: express.Request): string {
   return '';
 }
 
-type ServerOperatorRole = 'owner' | 'admin' | 'technician';
+type ServerOperatorRole = 'owner' | 'admin' | 'supervisor' | 'technician';
 
 interface ServerTelemetryEvent {
   id: string;
@@ -243,6 +243,48 @@ async function resolveOperatorFromRequest(
       };
     }
 
+    let memberQuery = supabase
+      .from('organization_members')
+      .select('id, role, status')
+      .eq('user_id', userId)
+      .in('role', ['owner', 'admin', 'supervisor', 'technician']);
+
+    if (isValidUuid(orgIdRaw)) {
+      memberQuery = memberQuery.eq('organization_id', orgIdRaw.trim());
+    }
+
+    const { data: memberships } = await memberQuery.limit(5);
+    if (memberships && memberships.length > 0) {
+      const activeMembership = memberships.find((m) => m.status === 'active');
+      if (!activeMembership) {
+        serverTelemetryMetrics.rbacDeniedCount += 1;
+        pushServerTelemetry({
+          category: 'rbac',
+          name: 'operator_suspended_denied',
+          status: 'warn',
+          metadata: { path: req.path },
+        });
+        return {
+          ok: false,
+          status: 403,
+          error: 'Tu acceso de operador está suspendido.',
+        };
+      }
+      const memberRole = activeMembership.role as ServerOperatorRole;
+      return {
+        ok: true,
+        operator: {
+          userId,
+          role:
+            memberRole === 'owner' ||
+            memberRole === 'admin' ||
+            memberRole === 'supervisor'
+              ? memberRole
+              : 'technician',
+        },
+      };
+    }
+
     const { data: profile } = await supabase
       .from('profiles')
       .select('role')
@@ -253,43 +295,17 @@ async function resolveOperatorFromRequest(
       return { ok: true, operator: { userId, role: 'owner' } };
     }
 
-    let memberQuery = supabase
-      .from('organization_members')
-      .select('id, role')
-      .eq('user_id', userId)
-      .eq('status', 'active')
-      .in('role', ['owner', 'admin', 'technician']);
-
-    if (isValidUuid(orgIdRaw)) {
-      memberQuery = memberQuery.eq('organization_id', orgIdRaw.trim());
-    }
-
-    const { data: memberships } = await memberQuery.limit(1);
-    if (!memberships || memberships.length === 0) {
-      serverTelemetryMetrics.rbacDeniedCount += 1;
-      pushServerTelemetry({
-        category: 'rbac',
-        name: 'operator_auth_denied',
-        status: 'warn',
-        metadata: { path: req.path },
-      });
-      return {
-        ok: false,
-        status: 403,
-        error: 'Permisos de operador requeridos para esta herramienta.',
-      };
-    }
-
-    const memberRole = memberships[0].role as ServerOperatorRole;
+    serverTelemetryMetrics.rbacDeniedCount += 1;
+    pushServerTelemetry({
+      category: 'rbac',
+      name: 'operator_auth_denied',
+      status: 'warn',
+      metadata: { path: req.path },
+    });
     return {
-      ok: true,
-      operator: {
-        userId,
-        role:
-          memberRole === 'owner' || memberRole === 'admin'
-            ? memberRole
-            : 'technician',
-      },
+      ok: false,
+      status: 403,
+      error: 'Permisos de operador requeridos para esta herramienta.',
     };
   } catch {
     return {
@@ -394,10 +410,19 @@ type PayableTicket = {
   ai_diagnosis_summary: string | null;
   human_reviewed_at?: string | null;
   human_reviewed_by?: string | null;
-  payment_status: 'pending' | 'paid' | 'refunded';
-  status: 'waiting_payment' | 'ready_to_connect' | 'in_progress' | 'resolved';
+  payment_status: 'pending' | 'authorized' | 'paid' | 'voided' | 'refunded';
+  payment_gateway?: 'stripe' | 'google_pay' | 'paypal' | 'sandbox' | null;
+  payment_authorization_id?: string | null;
+  status:
+    | 'waiting_payment'
+    | 'ready_to_connect'
+    | 'in_progress'
+    | 'pending_client_confirmation'
+    | 'resolved'
+    | 'refunded';
   payment_reference: string | null;
   paid_at: string | null;
+  auto_capture_at?: string | null;
   stripe_subscription_id: string | null;
   assigned_to: string | null;
   assigned_technician_id: string | null;
@@ -411,7 +436,10 @@ type PayableTicket = {
   anonymized_at: string | null;
   csat_rating?: number | null;
   csat_comment?: string | null;
+  client_rating?: number | null;
+  client_feedback?: string | null;
   client_confirmed_at?: string | null;
+  resolution_outcome?: 'resolved' | 'software_unresolved' | 'hardware_fault' | 'client_absent' | null;
   dispute_reason?: string | null;
   disputed_at?: string | null;
   created_at: string;
@@ -465,15 +493,25 @@ async function loadPayableTicket(ticketCode: string): Promise<PayableTicket | nu
   }
   const baseCols =
     'id,organization_id,organization_name,ticket_code,category,os_type,client_name,client_email,client_birth_date,is_adult_verified,terms_accepted_at,terms_version,marketing_opt_in,client_session_token,service_tier,billing_mode,subscription_status,priority,problem_description,ai_diagnosis,ai_diagnosis_summary,payment_status,status,payment_reference,paid_at,stripe_subscription_id,assigned_to,assigned_technician_id,assigned_technician_name,assigned_technician_specialty,rustdesk_id,agent_type,agent_downloaded,consent_accepted,consent_accepted_at,anonymized_at,created_at';
+  const extendedCols =
+    `${baseCols},human_reviewed_at,human_reviewed_by,payment_gateway,payment_authorization_id,auto_capture_at,client_confirmed_at,client_rating,client_feedback,resolution_outcome`;
   const { data, error } = await supabase
     .from('tickets')
-    .select(`${baseCols},human_reviewed_at,human_reviewed_by`)
+    .select(extendedCols)
     .eq('ticket_code', cleanCode)
     .maybeSingle();
   if (error) {
     const code = (error as { code?: string }).code;
     const msg = String(error.message ?? '');
-    if (code === '42703' || code === 'PGRST204' || msg.includes('human_reviewed_')) {
+    if (
+      code === '42703' ||
+      code === 'PGRST204' ||
+      msg.includes('human_reviewed_') ||
+      msg.includes('payment_gateway') ||
+      msg.includes('payment_authorization_id') ||
+      msg.includes('auto_capture_at') ||
+      msg.includes('client_rating')
+    ) {
       const fallback = await supabase
         .from('tickets')
         .select(baseCols)
@@ -485,6 +523,95 @@ async function loadPayableTicket(ticketCode: string): Promise<PayableTicket | nu
     throw new Error('No se pudo validar el ticket en el servidor.');
   }
   return (data as PayableTicket | null) ?? null;
+}
+
+function roundServerUsd(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function estimateServerGatewayFeeUsd(grossUsd: number, gateway: string): number {
+  if (!Number.isFinite(grossUsd) || grossUsd <= 0) return 0;
+  const norm = gateway.toLowerCase();
+  if (norm === 'stripe' || norm === 'google_pay') {
+    return roundServerUsd(grossUsd * 0.029 + 0.3);
+  }
+  if (norm === 'paypal') {
+    return roundServerUsd(grossUsd * 0.054 + 0.3);
+  }
+  return roundServerUsd(grossUsd * 0.045 + 0.3);
+}
+
+function calculateServerNetPayout(
+  grossUsd: number,
+  monthlyResolvedCount: number,
+  gateway: 'stripe' | 'google_pay' | 'paypal' | 'sandbox'
+) {
+  const safeGross = roundServerUsd(Math.max(0, grossUsd));
+  const gatewayFeeUsd = estimateServerGatewayFeeUsd(safeGross, gateway);
+  const netAmountUsd = Math.max(0, roundServerUsd(safeGross - gatewayFeeUsd));
+  const tier = getConfiguredCommissionTier(monthlyResolvedCount, buildServerBusinessConfig());
+  const technicianNetUsd = roundServerUsd((netAmountUsd * tier.commissionPercent) / 100);
+  const platformNetUsd = roundServerUsd(netAmountUsd - technicianNetUsd);
+  return {
+    grossUsd: safeGross,
+    gateway,
+    gatewayFeeUsd,
+    netAmountUsd,
+    commissionPercent: tier.commissionPercent,
+    technicianNetUsd,
+    platformNetUsd,
+  };
+}
+
+async function markTicketAuthorized(
+  ticket: PayableTicket,
+  authorizationId: string,
+  gateway: 'stripe' | 'google_pay' | 'paypal' | 'sandbox',
+  paymentReference: string
+): Promise<boolean> {
+  const supabase = getSupabaseAdmin();
+  if (!supabase) {
+    if (isProduction) return false;
+    const stored = sandboxTickets.get(ticket.ticket_code.toUpperCase());
+    if (!stored) return false;
+    if (stored.payment_status === 'paid' || stored.payment_status === 'authorized') {
+      return true;
+    }
+    stored.payment_status = 'authorized';
+    stored.payment_gateway = gateway;
+    stored.payment_authorization_id = authorizationId;
+    stored.payment_reference = paymentReference;
+    if (stored.status === 'waiting_payment') {
+      stored.status = 'ready_to_connect';
+    }
+    return true;
+  }
+
+  const nextStatus =
+    ticket.status === 'waiting_payment' ? 'ready_to_connect' : ticket.status;
+  const { error } = await supabase
+    .from('tickets')
+    .update({
+      payment_status: 'authorized',
+      payment_gateway: gateway,
+      payment_authorization_id: authorizationId,
+      payment_reference: paymentReference,
+      status: nextStatus,
+    })
+    .eq('id', ticket.id);
+
+  if (error) {
+    const fallback = await supabase
+      .from('tickets')
+      .update({
+        payment_status: 'authorized',
+        payment_reference: paymentReference,
+        status: nextStatus,
+      })
+      .eq('id', ticket.id);
+    return !fallback.error;
+  }
+  return true;
 }
 
 function getAuthoritativePrice(
@@ -3334,7 +3461,9 @@ export function createServerApp(deps: ServerAppDeps = {}) {
             },
           ],
           metadata,
-          ...(isMonthly ? { subscription_data: { metadata } } : {}),
+          ...(isMonthly
+            ? { subscription_data: { metadata } }
+            : { payment_intent_data: { capture_method: 'manual' as const, metadata } }),
           success_url: `${baseUrl}/sesion/${encodedCode}?payment=success&gateway=stripe&session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${baseUrl}/sesion/${encodedCode}?payment=canceled&gateway=stripe`,
         },
@@ -3345,6 +3474,7 @@ export function createServerApp(deps: ServerAppDeps = {}) {
         success: true,
         mode: 'live',
         verified: false,
+        captureMethod: isMonthly ? 'automatic' : 'manual',
         sessionId: session.id,
         url: session.url,
         amountUsd,
@@ -3411,12 +3541,29 @@ export function createServerApp(deps: ServerAppDeps = {}) {
         return;
       }
       const stripe = await createStripeClient(stripeKey);
-      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      const session = await stripe.checkout.sessions.retrieve(sessionId, {
+        expand: ['payment_intent'],
+      });
       const metadata = session.metadata ?? {};
       const expectedAmount = getAuthoritativePrice(ticket);
       const subscriptionId = typeof session.subscription === 'string'
         ? session.subscription
         : session.subscription?.id ?? null;
+      const expandedIntent =
+        typeof session.payment_intent === 'object' && session.payment_intent !== null
+          ? session.payment_intent
+          : null;
+      const paymentIntentId =
+        typeof session.payment_intent === 'string'
+          ? session.payment_intent
+          : expandedIntent?.id ?? null;
+      const paymentIntentStatus = expandedIntent?.status ?? null;
+      const isManualAuthorized = Boolean(
+        ticket.billing_mode === 'one_time' &&
+        paymentIntentId &&
+        (paymentIntentStatus === 'requires_capture' ||
+          (session.status === 'complete' && session.payment_status === 'unpaid' && paymentIntentStatus !== 'canceled'))
+      );
       const amountMatches = expectedAmount !== null &&
         session.currency === 'usd' &&
         session.amount_total === Math.round(expectedAmount * 100) &&
@@ -3425,16 +3572,35 @@ export function createServerApp(deps: ServerAppDeps = {}) {
         metadata.serviceTier === ticket.service_tier &&
         metadata.billingMode === ticket.billing_mode &&
         (ticket.billing_mode !== 'pyme_monthly' || Boolean(subscriptionId));
-      const stripePaid = Boolean(
+      const stripeVerified = Boolean(
         metadata.ticketCode === ticketCode &&
         amountMatches &&
-        session.payment_status === 'paid' &&
-        session.status === 'complete'
+        session.status === 'complete' &&
+        (session.payment_status === 'paid' || isManualAuthorized)
       );
-      if (!stripePaid) {
+      if (!stripeVerified) {
         res.status(402).json({ success: false, verified: false, error: 'El pago no coincide con el ticket o el importe esperado.' });
         return;
       }
+
+      if (isManualAuthorized && paymentIntentId) {
+        await markTicketAuthorized(ticket, paymentIntentId, 'stripe', session.id);
+        res.json({
+          success: true,
+          verified: true,
+          authorized: true,
+          webhookConfirmed: true,
+          stripeCheckoutPaid: false,
+          paymentStatus: 'authorized',
+          payment_status: 'authorized',
+          paymentAuthorizationId: paymentIntentId,
+          sessionId: session.id,
+          ticketCode,
+          amountUsd: expectedAmount,
+        });
+        return;
+      }
+
       // Estado "paid" cambia exclusivamente mediante webhook firmado.
       const isPaidInDb = ticket.payment_status === 'paid';
       res.json({
@@ -3442,7 +3608,9 @@ export function createServerApp(deps: ServerAppDeps = {}) {
         verified: isPaidInDb,
         webhookConfirmed: isPaidInDb,
         stripeCheckoutPaid: true,
+        paymentStatus: ticket.payment_status,
         payment_status: ticket.payment_status,
+        paymentAuthorizationId: paymentIntentId,
         sessionId: session.id,
         ticketCode,
         amountUsd: expectedAmount,
@@ -3549,7 +3717,7 @@ export function createServerApp(deps: ServerAppDeps = {}) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          intent: 'CAPTURE',
+          intent: 'AUTHORIZE',
           purchase_units: [
             {
               reference_id: cleanTicketCode,
@@ -3678,6 +3846,7 @@ export function createServerApp(deps: ServerAppDeps = {}) {
       });
       const orderData = (await orderRes.json()) as {
         id?: string;
+        intent?: string;
         status?: string;
         message?: string;
         purchase_units?: Array<{
@@ -3685,6 +3854,7 @@ export function createServerApp(deps: ServerAppDeps = {}) {
           custom_id?: string;
           amount?: { currency_code?: string; value?: string };
           payments?: {
+            authorizations?: Array<{ id?: string; status?: string; amount?: { currency_code?: string; value?: string } }>;
             captures?: Array<{ id?: string; status?: string; amount?: { currency_code?: string; value?: string } }>;
           };
         }>;
@@ -3702,26 +3872,48 @@ export function createServerApp(deps: ServerAppDeps = {}) {
         return;
       }
 
-      let captureData = orderData;
-      if (orderData.status !== 'COMPLETED') {
-        if (orderData.status !== 'APPROVED') {
-          res.status(402).json({ success: false, verified: false, error: 'La orden de PayPal todavía no está aprobada.' });
+      if (orderData.intent === 'AUTHORIZE' || !orderData.purchase_units?.[0]?.payments?.captures?.length) {
+        let authData = orderData;
+        if (orderData.status !== 'COMPLETED') {
+          if (orderData.status !== 'APPROVED') {
+            res.status(402).json({ success: false, verified: false, error: 'La orden de PayPal todavía no está aprobada.' });
+            return;
+          }
+          const authRes = await fetch(`${orderUrl}/authorize`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+          });
+          authData = (await authRes.json()) as typeof orderData;
+          if (!authRes.ok || authData.status !== 'COMPLETED') {
+            res.status(402).json({ success: false, verified: false, error: 'PayPal no completó la pre-autorización.' });
+            return;
+          }
+        }
+        const authorization = authData.purchase_units?.[0]?.payments?.authorizations?.[0];
+        if (!authorization?.id) {
+          res.status(402).json({ success: false, verified: false, error: 'PayPal no devolvió el identificador de autorización.' });
           return;
         }
-        const captureRes = await fetch(`${orderUrl}/capture`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
+        await markTicketAuthorized(ticket, authorization.id, 'paypal', authData.id ?? orderId);
+        res.json({
+          success: true,
+          mode: 'live',
+          authorized: true,
+          verified: true,
+          paymentStatus: 'authorized',
+          payment_status: 'authorized',
+          authorizationId: authorization.id,
+          orderId: authData.id ?? orderId,
+          ticketCode,
+          amountUsd: expectedAmount,
         });
-        captureData = (await captureRes.json()) as typeof orderData;
-        if (!captureRes.ok || captureData.status !== 'COMPLETED') {
-          res.status(402).json({ success: false, verified: false, error: 'PayPal no completó la captura.' });
-          return;
-        }
+        return;
       }
-      const capture = captureData.purchase_units?.[0]?.payments?.captures?.[0];
+
+      const capture = orderData.purchase_units?.[0]?.payments?.captures?.[0];
       if (
         !capture ||
         capture.status !== 'COMPLETED' ||
@@ -3742,10 +3934,11 @@ export function createServerApp(deps: ServerAppDeps = {}) {
         captured: true,
         verified: isPaidInDb,
         webhookConfirmed: isPaidInDb,
+        paymentStatus: (freshTicket ?? ticket).payment_status,
         payment_status: (freshTicket ?? ticket).payment_status,
         status: 'COMPLETED',
         captureId: capture.id ?? null,
-        orderId: captureData.id ?? orderId,
+        orderId: orderData.id ?? orderId,
         ticketCode,
         amountUsd: expectedAmount,
       });
@@ -3753,10 +3946,371 @@ export function createServerApp(deps: ServerAppDeps = {}) {
       res.status(500).json({
         success: false,
         verified: false,
-        error: 'No se pudo verificar o capturar la orden de PayPal.',
+        error: 'No se pudo verificar o autorizar la orden de PayPal.',
       });
     }
   });
+
+  // --------------------------------------------------------------------------
+  // ADR-06: Captura real de retención pre-autorizada (Cliente 1–5★ o Auto-captura 48 h Admin)
+  // --------------------------------------------------------------------------
+  app.post('/api/payments/capture', async (req, res) => {
+    const rawTicketCode = req.body?.ticketCode;
+    const ticketCode = isValidTicketCode(rawTicketCode)
+      ? rawTicketCode.trim().toUpperCase()
+      : '';
+    if (!ticketCode) {
+      res.status(400).json({ success: false, error: 'Código de ticket inválido.' });
+      return;
+    }
+
+    const rawRating = req.body?.rating;
+    const parsedRating =
+      rawRating !== undefined && rawRating !== null && rawRating !== ''
+        ? Math.round(Number(rawRating))
+        : null;
+    if (
+      parsedRating !== null &&
+      (!Number.isInteger(parsedRating) || parsedRating < 1 || parsedRating > 5)
+    ) {
+      res.status(400).json({
+        success: false,
+        error: 'La calificación debe ser un número entero entre 1 y 5 estrellas.',
+      });
+      return;
+    }
+
+    const clientFeedback =
+      typeof req.body?.feedback === 'string'
+        ? req.body.feedback.trim().slice(0, 300) || null
+        : null;
+
+    const ticket = await loadPayableTicket(ticketCode);
+    const providedRoomToken =
+      (typeof req.body?.sessionToken === 'string' && req.body.sessionToken.trim()) ||
+      extractRoomToken(req);
+
+    let authorizedActor: 'client' | 'admin' | null = null;
+    if (ticket && providedRoomToken && safeTokenEquals(providedRoomToken, ticket.client_session_token)) {
+      authorizedActor = 'client';
+    } else {
+      const opAuth = await resolveOperatorFromRequest(req, deps);
+      if (opAuth.ok && (opAuth.operator.role === 'owner' || opAuth.operator.role === 'admin')) {
+        authorizedActor = 'admin';
+      } else if (!ticket && !hasConfiguredSupabaseServer() && !isProduction && providedRoomToken.length >= 32) {
+        // Local browser-only demo mode without server-persisted sandbox ticket
+        authorizedActor = 'client';
+      }
+    }
+
+    if (!authorizedActor) {
+      res.status(403).json({
+        success: false,
+        error: 'No autorizado para capturar el pago de este ticket.',
+      });
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    const rawGateway = String(
+      req.body?.gateway ?? ticket?.payment_gateway ?? 'stripe'
+    ).toLowerCase();
+    const gateway: 'stripe' | 'google_pay' | 'paypal' | 'sandbox' =
+      rawGateway === 'paypal'
+        ? 'paypal'
+        : rawGateway === 'google_pay'
+        ? 'google_pay'
+        : rawGateway === 'sandbox'
+        ? 'sandbox'
+        : 'stripe';
+    const authorizationId =
+      String(req.body?.authorizationId ?? ticket?.payment_authorization_id ?? '').trim() ||
+      null;
+    const requestedAmount = Number(req.body?.amountUsd);
+    const amountUsd =
+      (ticket ? getAuthoritativePrice(ticket) : null) ??
+      (Number.isFinite(requestedAmount) && requestedAmount > 0 ? requestedAmount : 15);
+    const monthlyResolvedCount = Math.max(0, Math.floor(Number(req.body?.monthlyResolvedCount ?? 0) || 0));
+    const breakdown = calculateServerNetPayout(amountUsd, monthlyResolvedCount, gateway);
+
+    let captureMode: 'live' | 'sandbox' = 'sandbox';
+    const stripeKey = normalizeSecret(process.env.STRIPE_SECRET_KEY);
+    const paypalClientId = normalizeSecret(process.env.PAYPAL_CLIENT_ID);
+    const paypalClientSecret = normalizeSecret(process.env.PAYPAL_CLIENT_SECRET);
+
+    try {
+      if (
+        (gateway === 'stripe' || gateway === 'google_pay') &&
+        stripeKey &&
+        !isSandboxPaymentsEnabled() &&
+        authorizationId &&
+        authorizationId.startsWith('pi_')
+      ) {
+        const stripe = await createStripeClient(stripeKey);
+        const intent = await stripe.paymentIntents.capture(authorizationId);
+        if (intent.status !== 'succeeded') {
+          res.status(402).json({
+            success: false,
+            error: 'Stripe no confirmó la captura del pago pre-autorizado.',
+          });
+          return;
+        }
+        captureMode = 'live';
+      } else if (
+        gateway === 'paypal' &&
+        paypalClientId &&
+        paypalClientSecret &&
+        !isSandboxPaymentsEnabled() &&
+        authorizationId &&
+        !authorizationId.startsWith('PAYPAL_SANDBOX_') &&
+        !authorizationId.startsWith('auth_demo_')
+      ) {
+        const accessToken = await fetchPayPalAccessToken(paypalClientId, paypalClientSecret);
+        const capRes = await fetch(
+          `${getPayPalBaseUrl()}/v2/payments/authorizations/${encodeURIComponent(authorizationId)}/capture`,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              final_capture: true,
+              amount: { currency_code: 'USD', value: amountUsd.toFixed(2) },
+            }),
+          }
+        );
+        const capData = (await capRes.json().catch(() => null)) as { status?: string } | null;
+        if (!capRes.ok || capData?.status !== 'COMPLETED') {
+          res.status(402).json({
+            success: false,
+            error: 'PayPal no completó la captura de la autorización.',
+          });
+          return;
+        }
+        captureMode = 'live';
+      }
+
+      const supabase = getSupabaseAdmin();
+      if (ticket && supabase) {
+        const updatePayload: Record<string, unknown> = {
+          status: 'resolved',
+          payment_status: 'paid',
+          payment_gateway: gateway,
+          paid_at: nowIso,
+          resolved_at: nowIso,
+          auto_capture_at: null,
+          client_confirmed_at: nowIso,
+          resolution_outcome: 'resolved',
+        };
+        if (parsedRating !== null) updatePayload.client_rating = parsedRating;
+        if (clientFeedback !== null) updatePayload.client_feedback = clientFeedback;
+
+        const { error: updateErr } = await supabase
+          .from('tickets')
+          .update(updatePayload)
+          .eq('id', ticket.id);
+        if (updateErr) {
+          await supabase
+            .from('tickets')
+            .update({
+              status: 'resolved',
+              payment_status: 'paid',
+              paid_at: nowIso,
+              resolved_at: nowIso,
+            })
+            .eq('id', ticket.id);
+        }
+
+        const techId = ticket.assigned_technician_id ?? ticket.assigned_to;
+        if (techId) {
+          await supabase.from('technician_payouts').insert({
+            organization_id: ticket.organization_id,
+            ticket_id: ticket.id,
+            technician_id: techId,
+            payment_gateway: gateway,
+            gross_amount_usd: breakdown.grossUsd,
+            gateway_fee_usd: breakdown.gatewayFeeUsd,
+            net_amount_usd: breakdown.netAmountUsd,
+            commission_percent: breakdown.commissionPercent,
+            payout_amount_usd: breakdown.technicianNetUsd,
+            platform_net_usd: breakdown.platformNetUsd,
+            status: 'pending',
+          });
+        }
+      } else if (ticket && !isProduction) {
+        const stored = sandboxTickets.get(ticket.ticket_code.toUpperCase());
+        if (stored) {
+          stored.status = 'resolved';
+          stored.payment_status = 'paid';
+          stored.payment_gateway = gateway;
+          stored.paid_at = nowIso;
+          stored.auto_capture_at = null;
+          stored.client_confirmed_at = nowIso;
+          stored.client_rating = parsedRating;
+          stored.client_feedback = clientFeedback;
+          stored.resolution_outcome = 'resolved';
+        }
+      }
+
+      res.json({
+        success: true,
+        mode: captureMode,
+        actor: authorizedActor,
+        ticketCode,
+        paymentStatus: 'paid',
+        status: 'resolved',
+        capturedAt: nowIso,
+        clientRating: parsedRating,
+        clientFeedback,
+        breakdown,
+      });
+    } catch {
+      res.status(500).json({
+        success: false,
+        error: 'No se pudo completar la captura del pago en la pasarela.',
+      });
+    }
+  });
+
+  // --------------------------------------------------------------------------
+  // ADR-06: Anulación (Void) sin comisión de pasarela si no se resolvió
+  // --------------------------------------------------------------------------
+  app.post(
+    '/api/payments/void',
+    requireOperatorAuth,
+    requireAdminOrOwnerRole,
+    async (req, res) => {
+      const rawTicketCode = req.body?.ticketCode;
+      const ticketCode = isValidTicketCode(rawTicketCode)
+        ? rawTicketCode.trim().toUpperCase()
+        : '';
+      if (!ticketCode) {
+        res.status(400).json({ success: false, error: 'Código de ticket inválido.' });
+        return;
+      }
+
+      const validOutcomes = ['software_unresolved', 'hardware_fault', 'client_absent'] as const;
+      const rawOutcome = String(req.body?.resolutionOutcome ?? 'software_unresolved').trim();
+      if (!validOutcomes.includes(rawOutcome as (typeof validOutcomes)[number])) {
+        res.status(400).json({
+          success: false,
+          error: 'Motivo de anulación inválido (software_unresolved, hardware_fault o client_absent).',
+        });
+        return;
+      }
+      const resolutionOutcome = rawOutcome as (typeof validOutcomes)[number];
+
+      const ticket = await loadPayableTicket(ticketCode);
+      const rawGateway = String(
+        req.body?.gateway ?? ticket?.payment_gateway ?? 'stripe'
+      ).toLowerCase();
+      const authorizationId =
+        String(req.body?.authorizationId ?? ticket?.payment_authorization_id ?? '').trim() ||
+        null;
+      const nowIso = new Date().toISOString();
+
+      let voidMode: 'live' | 'sandbox' = 'sandbox';
+      const stripeKey = normalizeSecret(process.env.STRIPE_SECRET_KEY);
+      const paypalClientId = normalizeSecret(process.env.PAYPAL_CLIENT_ID);
+      const paypalClientSecret = normalizeSecret(process.env.PAYPAL_CLIENT_SECRET);
+
+      try {
+        if (
+          (rawGateway === 'stripe' || rawGateway === 'google_pay') &&
+          stripeKey &&
+          !isSandboxPaymentsEnabled() &&
+          authorizationId &&
+          authorizationId.startsWith('pi_')
+        ) {
+          const stripe = await createStripeClient(stripeKey);
+          await stripe.paymentIntents.cancel(authorizationId);
+          voidMode = 'live';
+        } else if (
+          rawGateway === 'paypal' &&
+          paypalClientId &&
+          paypalClientSecret &&
+          !isSandboxPaymentsEnabled() &&
+          authorizationId &&
+          !authorizationId.startsWith('PAYPAL_SANDBOX_') &&
+          !authorizationId.startsWith('auth_demo_')
+        ) {
+          const accessToken = await fetchPayPalAccessToken(paypalClientId, paypalClientSecret);
+          const voidRes = await fetch(
+            `${getPayPalBaseUrl()}/v2/payments/authorizations/${encodeURIComponent(authorizationId)}/void`,
+            {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+              },
+            }
+          );
+          if (!voidRes.ok && voidRes.status !== 204) {
+            res.status(402).json({
+              success: false,
+              error: 'PayPal no confirmó la anulación de la autorización.',
+            });
+            return;
+          }
+          voidMode = 'live';
+        }
+
+        const supabase = getSupabaseAdmin();
+        if (ticket && supabase) {
+          const { error: voidErr } = await supabase
+            .from('tickets')
+            .update({
+              payment_status: 'voided',
+              status: 'refunded',
+              resolution_outcome: resolutionOutcome,
+              auto_capture_at: null,
+              resolved_at: nowIso,
+            })
+            .eq('id', ticket.id);
+          if (voidErr) {
+            await supabase
+              .from('tickets')
+              .update({
+                payment_status: 'refunded',
+                status: 'resolved',
+                resolved_at: nowIso,
+              })
+              .eq('id', ticket.id);
+          }
+
+          await supabase
+            .from('technician_payouts')
+            .update({ status: 'cancelled' })
+            .eq('ticket_id', ticket.id);
+        } else if (ticket && !isProduction) {
+          const stored = sandboxTickets.get(ticket.ticket_code.toUpperCase());
+          if (stored) {
+            stored.payment_status = 'voided';
+            stored.status = 'refunded';
+            stored.resolution_outcome = resolutionOutcome;
+            stored.auto_capture_at = null;
+          }
+        }
+
+        res.json({
+          success: true,
+          mode: voidMode,
+          ticketCode,
+          paymentStatus: 'voided',
+          status: 'refunded',
+          resolutionOutcome,
+          gatewayFeeUsd: 0,
+          voidedAt: nowIso,
+        });
+      } catch {
+        res.status(500).json({
+          success: false,
+          error: 'No se pudo anular la retención en la pasarela.',
+        });
+      }
+    }
+  );
 
   function signSandboxPayPalWebhook(params: {
     transmissionId: string;
@@ -4079,9 +4633,28 @@ export function createServerApp(deps: ServerAppDeps = {}) {
     invite_used_at: string | null;
     email_delivery_status: 'not_sent' | 'sent' | 'simulated' | 'failed';
     email_sent_at: string | null;
+    assigned_role?: 'technician' | 'admin' | 'supervisor';
     created_at: string;
     updated_at: string;
   }
+
+  const resolveInviteAssignedRole = (
+    row: StoredTechnicianApplication
+  ): 'technician' | 'admin' | 'supervisor' => {
+    if (
+      row.assigned_role === 'admin' ||
+      row.assigned_role === 'supervisor' ||
+      row.assigned_role === 'technician'
+    ) {
+      return row.assigned_role;
+    }
+    const notes = row.reviewer_notes ?? '';
+    const match = notes.match(/\[ROLE:(admin|supervisor|technician)\]/);
+    if (match?.[1] === 'admin' || match?.[1] === 'supervisor') {
+      return match[1];
+    }
+    return 'technician';
+  };
 
   const DEFAULT_ORG_ID = '00000000-0000-4000-8000-000000000001';
   const INVITE_TTL_HOURS = 72;
@@ -4465,13 +5038,379 @@ export function createServerApp(deps: ServerAppDeps = {}) {
     }
   );
 
+  app.post(
+    '/api/team/invite',
+    createRateLimiter(20, 60_000),
+    async (req, res) => {
+      try {
+        const supabase = getSupabaseAdmin();
+        let operator: { userId: string; role: ServerOperatorRole };
+
+        if (supabase || deps?.verifyOperatorToken || isProduction) {
+          const authResult = await resolveOperatorFromRequest(req, deps);
+          if (!authResult.ok) {
+            res.status(authResult.status).json({
+              success: false,
+              error: authResult.error,
+            });
+            return;
+          }
+          operator = authResult.operator;
+        } else {
+          const requestedActorRole = req.body?.actorRole;
+          const devRole: ServerOperatorRole =
+            requestedActorRole === 'owner' ||
+            requestedActorRole === 'admin' ||
+            requestedActorRole === 'supervisor' ||
+            requestedActorRole === 'technician'
+              ? requestedActorRole
+              : 'owner';
+          operator = {
+            userId: '00000000-0000-4000-8000-000000000099',
+            role: devRole,
+          };
+        }
+
+        const body = req.body ?? {};
+        const fullName =
+          typeof body.fullName === 'string'
+            ? body.fullName.trim().slice(0, 120)
+            : typeof body.full_name === 'string'
+            ? body.full_name.trim().slice(0, 120)
+            : '';
+        const email =
+          typeof body.email === 'string'
+            ? body.email.trim().toLowerCase().slice(0, 180)
+            : '';
+        const targetRoleRaw = typeof body.role === 'string' ? body.role.trim() : '';
+        const orgId = isValidUuid(body.organizationId)
+          ? body.organizationId.trim()
+          : DEFAULT_ORG_ID;
+
+        if (fullName.length < 2) {
+          res.status(400).json({
+            success: false,
+            error: 'Ingresa el nombre completo (mínimo 2 caracteres).',
+          });
+          return;
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          res.status(400).json({
+            success: false,
+            error: 'Ingresa un correo electrónico válido.',
+          });
+          return;
+        }
+        if (
+          targetRoleRaw !== 'admin' &&
+          targetRoleRaw !== 'supervisor' &&
+          targetRoleRaw !== 'technician'
+        ) {
+          res.status(400).json({
+            success: false,
+            error: 'El rol de invitación debe ser admin, supervisor o technician.',
+          });
+          return;
+        }
+        const targetRole: 'admin' | 'supervisor' | 'technician' = targetRoleRaw;
+
+        if (targetRole === 'admin' || targetRole === 'supervisor') {
+          if (operator.role !== 'owner') {
+            serverTelemetryMetrics.rbacDeniedCount += 1;
+            res.status(403).json({
+              success: false,
+              error: 'Solo el propietario (Owner) puede invitar administradores o supervisores.',
+            });
+            return;
+          }
+        } else if (
+          operator.role !== 'owner' &&
+          operator.role !== 'admin' &&
+          operator.role !== 'supervisor'
+        ) {
+          serverTelemetryMetrics.rbacDeniedCount += 1;
+          res.status(403).json({
+            success: false,
+            error: 'No tienes permisos para emitir invitaciones directas de especialistas.',
+          });
+          return;
+        }
+
+        const rawSpecialties = Array.isArray(body.approved_specialties)
+          ? body.approved_specialties
+          : Array.isArray(body.specialties)
+          ? body.specialties
+          : [];
+        const approvedSpecialties = rawSpecialties
+          .filter((s: unknown): s is string => typeof s === 'string' && s.trim().length > 0)
+          .map((s: string) => s.trim().slice(0, 80))
+          .slice(0, 8);
+
+        if (targetRole === 'technician' && approvedSpecialties.length === 0) {
+          res.status(400).json({
+            success: false,
+            error: 'Selecciona al menos una especialidad aprobada para el especialista.',
+          });
+          return;
+        }
+
+        const publicBaseUrl =
+          getPublicBaseUrl() ||
+          (!isProduction && typeof req.headers.origin === 'string'
+            ? req.headers.origin.replace(/\/$/, '')
+            : !isProduction
+            ? 'http://localhost:3000'
+            : '');
+        if (!publicBaseUrl) {
+          res.status(503).json({
+            success: false,
+            error: 'APP_URL HTTPS es obligatoria en producción para generar enlaces de invitación seguros.',
+          });
+          return;
+        }
+
+        const nowIso = new Date().toISOString();
+        const rawToken = randomBytes(32).toString('hex');
+        const inviteTokenHash = hashInviteToken(rawToken);
+        const inviteExpiresAt = new Date(
+          Date.now() + INVITE_TTL_HOURS * 3600_000
+        ).toISOString();
+        const inviteUrl = `${publicBaseUrl}/registro-tecnico?token=${rawToken}`;
+        const reviewedBy = isValidUuid(operator.userId) ? operator.userId : null;
+        const specialtiesFinal = targetRole === 'technician' ? approvedSpecialties : [];
+
+        const record: StoredTechnicianApplication = {
+          id: randomUUID(),
+          organization_id: orgId,
+          full_name: fullName,
+          email,
+          country: 'Internacional',
+          birth_date: '1990-01-01',
+          is_adult_verified: true,
+          modality: 'full_time',
+          specialties: specialtiesFinal,
+          certifications:
+            targetRole === 'technician'
+              ? 'Invitación directa aprobada por coordinación'
+              : `Invitación directa de equipo (${targetRole})`,
+          nda_accepted: true,
+          nda_version: 'NDA-TECH-v1.0-2026',
+          nda_signature_name: fullName,
+          nda_accepted_at: nowIso,
+          technical_score: 100,
+          attitude_score: 100,
+          total_score: 100,
+          recommendation: 'recommended_approve',
+          timed_out: false,
+          status: 'approved',
+          reviewer_notes: `[DIRECT_INVITE][ROLE:${targetRole}] Invitación directa emitida por ${operator.role}`,
+          reviewed_by: reviewedBy,
+          reviewed_at: nowIso,
+          invite_token_hash: inviteTokenHash,
+          invite_expires_at: inviteExpiresAt,
+          invite_used_at: null,
+          email_delivery_status: 'not_sent',
+          email_sent_at: null,
+          assigned_role: targetRole,
+          created_at: nowIso,
+          updated_at: nowIso,
+        };
+
+        if (supabase) {
+          const { error: insertErr } = await supabase
+            .from('technician_applications')
+            .insert(record);
+          if (insertErr) {
+            // Compatibilidad cero-downtime si la columna assigned_role aún no se migró
+            const { assigned_role: _omitRole, ...compatRecord } = record;
+            const { error: fallbackErr } = await supabase
+              .from('technician_applications')
+              .insert(compatRecord);
+            if (fallbackErr) {
+              console.error('[team-invite] insert error:', fallbackErr.message);
+              res.status(500).json({
+                success: false,
+                error: 'No se pudo registrar la invitación en la base de datos.',
+              });
+              return;
+            }
+          }
+
+          const { error: auditErr } = await supabase.from('audit_logs').insert({
+            organization_id: orgId,
+            actor_type: 'system',
+            actor_label: reviewedBy ? `Operador (${reviewedBy.slice(0, 8)})` : `Operador (${operator.role})`,
+            action: `Generó invitación directa de un solo uso (72 h) con rol ${targetRole} para ${fullName} (${email}).`,
+            target_ref: `INV-${record.id.slice(0, 8).toUpperCase()}`,
+          });
+          if (auditErr) {
+            console.error('[team-invite] audit_logs insert error:', auditErr.message);
+          }
+        } else {
+          sandboxTechApplications.set(record.id, record);
+        }
+
+        res.status(201).json({
+          success: true,
+          inviteUrl,
+          expiresAt: inviteExpiresAt,
+          assignedRole: targetRole,
+          fullName,
+          email,
+          specialties: specialtiesFinal,
+        });
+      } catch {
+        res.status(500).json({
+          success: false,
+          error: 'Error generando el enlace de invitación.',
+        });
+      }
+    }
+  );
+
+  app.patch(
+    '/api/team/members/:memberId',
+    createRateLimiter(30, 60_000),
+    requireOperatorAuth,
+    async (req, res) => {
+      try {
+        const operator = (req as OperatorAuthedRequest).operator;
+        if (!operator || operator.role !== 'owner') {
+          serverTelemetryMetrics.rbacDeniedCount += 1;
+          res.status(403).json({
+            success: false,
+            error: 'Solo el propietario (Owner) puede cambiar roles o suspender accesos.',
+          });
+          return;
+        }
+
+        const memberId = String(req.params.memberId ?? '').trim();
+        if (!isValidUuid(memberId)) {
+          res.status(400).json({ success: false, error: 'ID de miembro inválido.' });
+          return;
+        }
+
+        const nextRoleRaw = req.body?.role;
+        const nextStatusRaw = req.body?.status;
+        const orgId = isValidUuid(req.body?.organizationId)
+          ? String(req.body.organizationId).trim()
+          : null;
+
+        const patch: { role?: 'admin' | 'supervisor' | 'technician'; status?: 'active' | 'suspended' } = {};
+
+        if (nextRoleRaw !== undefined) {
+          if (
+            nextRoleRaw !== 'admin' &&
+            nextRoleRaw !== 'supervisor' &&
+            nextRoleRaw !== 'technician'
+          ) {
+            res.status(400).json({
+              success: false,
+              error: 'Rol inválido. Solo se permite asignar admin, supervisor o technician.',
+            });
+            return;
+          }
+          patch.role = nextRoleRaw;
+        }
+
+        if (nextStatusRaw !== undefined) {
+          if (nextStatusRaw !== 'active' && nextStatusRaw !== 'suspended') {
+            res.status(400).json({
+              success: false,
+              error: 'Estado inválido. Solo se permite active o suspended.',
+            });
+            return;
+          }
+          patch.status = nextStatusRaw;
+        }
+
+        if (!patch.role && !patch.status) {
+          res.status(400).json({
+            success: false,
+            error: 'Indica al menos un cambio de rol o estado.',
+          });
+          return;
+        }
+
+        const supabase = getSupabaseAdmin();
+        if (!supabase) {
+          res.json({ success: true, mode: 'local', memberId, patch });
+          return;
+        }
+
+        let selectQuery = supabase
+          .from('organization_members')
+          .select('id, organization_id, user_id, full_name, email, role, status')
+          .eq('id', memberId);
+        if (orgId) {
+          selectQuery = selectQuery.eq('organization_id', orgId);
+        }
+        const { data: target, error: fetchErr } = await selectQuery.maybeSingle();
+        if (fetchErr || !target) {
+          res.status(404).json({ success: false, error: 'Miembro no encontrado en la organización.' });
+          return;
+        }
+
+        if (target.role === 'owner' || (target.user_id && target.user_id === operator.userId)) {
+          res.status(403).json({
+            success: false,
+            error: 'Bloqueo de seguridad: no está permitido suspender ni degradar al propietario (Owner).',
+          });
+          return;
+        }
+
+        const { data: updated, error: updateErr } = await supabase
+          .from('organization_members')
+          .update(patch)
+          .eq('id', target.id)
+          .eq('organization_id', target.organization_id)
+          .select('id, organization_id, user_id, full_name, email, role, status')
+          .single();
+
+        if (updateErr || !updated) {
+          res.status(500).json({
+            success: false,
+            error: 'No se pudo actualizar el acceso del miembro.',
+          });
+          return;
+        }
+
+        const actionParts: string[] = [];
+        if (patch.role) actionParts.push(`rol cambiado a ${patch.role}`);
+        if (patch.status) {
+          actionParts.push(
+            patch.status === 'suspended' ? 'acceso suspendido' : 'acceso reactivado'
+          );
+        }
+
+        const { error: auditErr } = await supabase.from('audit_logs').insert({
+          organization_id: target.organization_id,
+          actor_type: 'system',
+          actor_label: `Owner (${operator.userId.slice(0, 8)})`,
+          action: `Actualizó miembro ${target.full_name} (${target.email}): ${actionParts.join(' · ')}.`,
+          target_ref: `MEM-${target.id.slice(0, 8).toUpperCase()}`,
+        });
+        if (auditErr) {
+          console.error('[team-member-update] audit_logs insert error:', auditErr.message);
+        }
+
+        res.json({ success: true, member: updated });
+      } catch {
+        res.status(500).json({
+          success: false,
+          error: 'Error actualizando permisos del equipo.',
+        });
+      }
+    }
+  );
+
   app.get(
     '/api/technicians/invite/:token',
     createRateLimiter(20, 15 * 60_000),
     async (req, res) => {
       try {
         const rawToken = String(req.params.token ?? '').trim();
-        if (!/^[a-f0-9]{64}$/i.test(rawToken)) {
+        if (!/^[a-f0-9]{48,64}$/i.test(rawToken)) {
           res.status(400).json({ success: false, code: 'invalid', error: 'Enlace de invitación inválido.' });
           return;
         }
@@ -4517,6 +5456,8 @@ export function createServerApp(deps: ServerAppDeps = {}) {
           return;
         }
 
+        const assignedRole = resolveInviteAssignedRole(record);
+
         res.json({
           success: true,
           invite: {
@@ -4527,6 +5468,7 @@ export function createServerApp(deps: ServerAppDeps = {}) {
             specialties: record.specialties,
             nda_version: record.nda_version,
             invite_expires_at: record.invite_expires_at,
+            assigned_role: assignedRole,
           },
         });
       } catch {
@@ -4544,12 +5486,15 @@ export function createServerApp(deps: ServerAppDeps = {}) {
         const password = typeof req.body?.password === 'string' ? req.body.password : '';
         const confirmNda = req.body?.confirmNda === true;
 
-        if (!/^[a-f0-9]{64}$/i.test(rawToken)) {
+        if (!/^[a-f0-9]{48,64}$/i.test(rawToken)) {
           res.status(400).json({ success: false, error: 'Token de invitación inválido.' });
           return;
         }
-        if (password.length < 8) {
-          res.status(400).json({ success: false, error: 'La contraseña debe tener al menos 8 caracteres.' });
+        if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+          res.status(400).json({
+            success: false,
+            error: 'La contraseña debe tener al menos 8 caracteres e incluir letras y números.',
+          });
           return;
         }
         if (!confirmNda) {
@@ -4592,6 +5537,7 @@ export function createServerApp(deps: ServerAppDeps = {}) {
           return;
         }
 
+        const assignedRole = resolveInviteAssignedRole(record);
         const nowIso = new Date().toISOString();
         let createdUserId: string = randomUUID();
 
@@ -4632,7 +5578,7 @@ export function createServerApp(deps: ServerAppDeps = {}) {
             email_confirm: true,
             user_metadata: {
               full_name: record.full_name,
-              role: 'technician',
+              role: assignedRole,
               birth_date: record.birth_date,
               is_adult_verified: true,
               nda_version: record.nda_version,
@@ -4651,7 +5597,7 @@ export function createServerApp(deps: ServerAppDeps = {}) {
               .eq('id', record.id);
             res.status(409).json({
               success: false,
-              error: authError?.message || 'No se pudo crear la cuenta de técnico (¿el correo ya existe?).',
+              error: authError?.message || 'No se pudo crear la cuenta (¿el correo ya existe?).',
             });
             return;
           }
@@ -4670,51 +5616,56 @@ export function createServerApp(deps: ServerAppDeps = {}) {
           });
           if (profileErr) {
             console.error('[complete-registration] profiles upsert error:', profileErr.message);
-            res.status(500).json({ success: false, error: 'Error al persistir perfil de técnico.' });
+            res.status(500).json({ success: false, error: 'Error al persistir el perfil de operador.' });
             return;
           }
 
-          const { error: memberErr } = await supabase.from('organization_members').insert({
-            organization_id: record.organization_id,
-            user_id: createdUserId,
-            full_name: record.full_name,
-            email: record.email,
-            member_type: 'network',
-            role: 'technician',
-            agreed_ticket_rate_usd: 15,
-            status: 'active',
-          });
+          const { error: memberErr } = await supabase.from('organization_members').upsert(
+            {
+              organization_id: record.organization_id,
+              user_id: createdUserId,
+              full_name: record.full_name,
+              email: record.email,
+              member_type: assignedRole === 'technician' ? 'network' : 'internal',
+              role: assignedRole,
+              agreed_ticket_rate_usd: assignedRole === 'technician' ? 15 : 0,
+              status: 'active',
+            },
+            { onConflict: 'organization_id,email' }
+          );
           if (memberErr) {
-            console.error('[complete-registration] organization_members insert error:', memberErr.message);
-            res.status(500).json({ success: false, error: 'Error al vincular el técnico a la organización.' });
+            console.error('[complete-registration] organization_members upsert error:', memberErr.message);
+            res.status(500).json({ success: false, error: 'Error al vincular la cuenta a la organización.' });
             return;
           }
 
-          const { error: techProfileErr } = await supabase.from('technician_profiles').upsert({
-            user_id: createdUserId,
-            organization_id: record.organization_id,
-            full_name: record.full_name,
-            email: record.email,
-            specialties: record.specialties,
-            availability_status: 'offline',
-            accepting_requests: false,
-            rating: 5.0,
-            is_verified: true,
-            active_sessions_count: 0,
-            updated_at: nowIso,
-          });
-          if (techProfileErr) {
-            console.error('[complete-registration] technician_profiles upsert error:', techProfileErr.message);
-            res.status(500).json({ success: false, error: 'Error al crear perfil operativo del técnico.' });
-            return;
+          if (assignedRole === 'technician') {
+            const { error: techProfileErr } = await supabase.from('technician_profiles').upsert({
+              user_id: createdUserId,
+              organization_id: record.organization_id,
+              full_name: record.full_name,
+              email: record.email,
+              specialties: record.specialties,
+              availability_status: 'offline',
+              accepting_requests: false,
+              rating: 5.0,
+              is_verified: true,
+              active_sessions_count: 0,
+              updated_at: nowIso,
+            });
+            if (techProfileErr) {
+              console.error('[complete-registration] technician_profiles upsert error:', techProfileErr.message);
+              res.status(500).json({ success: false, error: 'Error al crear perfil operativo del técnico.' });
+              return;
+            }
           }
 
           const { error: auditErr } = await supabase.from('audit_logs').insert({
             organization_id: record.organization_id,
             actor_type: 'technician',
             actor_label: record.full_name,
-            action: `Activó cuenta de técnico (${record.email}) mediante invitación de un solo uso.`,
-            target_ref: `TECH-${createdUserId.slice(0, 8).toUpperCase()}`,
+            action: `Activó cuenta de equipo (${assignedRole}) para ${record.email} mediante invitación de un solo uso.`,
+            target_ref: `${assignedRole.toUpperCase().slice(0, 4)}-${createdUserId.slice(0, 8).toUpperCase()}`,
           });
           if (auditErr) {
             console.error('[complete-registration] audit_logs insert error:', auditErr.message);
@@ -4730,11 +5681,12 @@ export function createServerApp(deps: ServerAppDeps = {}) {
 
         res.json({
           success: true,
+          assignedRole,
           profile: {
             id: createdUserId,
             full_name: record.full_name,
             email: record.email,
-            role: 'technician',
+            role: assignedRole,
             birth_date: record.birth_date,
             is_adult_verified: true,
             terms_accepted_at: record.nda_accepted_at,
@@ -4747,7 +5699,7 @@ export function createServerApp(deps: ServerAppDeps = {}) {
           modality: record.modality,
         });
       } catch {
-        res.status(500).json({ success: false, error: 'Error completando el registro técnico.' });
+        res.status(500).json({ success: false, error: 'Error completando el registro de cuenta.' });
       }
     }
   );
